@@ -325,8 +325,10 @@ against these rules:
 * **Every model named.** Every model the learner calls is named in the submission and
   reached through the tracking proxy of
   [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The
-  share learned is read against the demo-cache floor of the strongest of them, so a
-  learner taught by a stronger model is asked to learn beyond its teacher.
+  share learned is read against the demo-cache floor of the model the learner plays
+  with, the strongest if it plays with several. A model that only teaches it, such as a
+  stronger model labelling its games for training, is part of its training: those calls
+  count in its training compute, shown beside the score.
 * **Learning only from what it was shown.** A learner learns from its observations and
   feedback. The records, with their real ids and exposures, are the benchmark's.
 * **Anything else is allowed:** memory, programs, tools, a cache, training the
