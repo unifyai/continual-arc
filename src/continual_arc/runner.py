@@ -14,6 +14,15 @@ The runner is the only place that calls ``learner.reset()``; it does so exactly
 when the schedule slot says so. It also guards against runaway learners with a
 per-instance action limit, after which the instance is force-abandoned.
 
+What the learner is shown is the run's ``view``. ``instance``, which ``continual-arc
+run`` uses, shows it only the instance (:class:`continual_arc.env.LearnerObservation`):
+the task under the run's alias, salted in the run directory's ``alias-salt``, and
+nothing about the schedule. ``slot`` shows it the environment's whole
+:class:`continual_arc.env.Observation`, real task id, phase and exposure included; it
+is for the adapters of trusted harness runs, which translate the protocol for the
+system they drive and keep the stream from that system themselves. Plug-ins, events
+and records always see the slot.
+
 Instances are served in rounds, one instance per user of the schedule. The runner
 calls ``learner.begin_round`` before the round's first action and ``learner.end_round``
 after its last instance ends, and writes the round's records together, in slot order,
@@ -48,7 +57,8 @@ from pathlib import Path
 
 from continual_arc._version import __version__
 from continual_arc.addons import Addon, Plugin, PluginManager, PluginRuntime
-from continual_arc.arc3.env import Arc3Config, Arc3Env
+from continual_arc.aliases import TaskAliases
+from continual_arc.arc3.env import Arc3Config, Arc3Env, Arc3LearnerObservation, Arc3Observation
 from continual_arc.configs import protocol_of
 from continual_arc.data import DATASET_ARC3
 from continual_arc.env import (
@@ -56,6 +66,7 @@ from continual_arc.env import (
     EnvConfig,
     GiveUp,
     InstanceRecord,
+    LearnerObservation,
     Observation,
 )
 from continual_arc.learner import Learner
@@ -147,6 +158,16 @@ def build_env(
     return ContinualArcEnv(schedule, registry=registry, config=config)
 
 
+VIEWS = ("instance", "slot")
+
+
+def learner_view(obs, aliases: TaskAliases):
+    """The instance alone, as ``continual-arc run`` shows it to a learner: the task under the run's alias."""
+    if isinstance(obs, Arc3Observation):
+        return Arc3LearnerObservation.of(obs, aliases.alias(obs.task_id))
+    return LearnerObservation.of(obs, aliases.alias(obs.task_id))
+
+
 def _default_max_actions(config: AnyConfig) -> int:
     """Runaway guard: an arc3 instance ends at its own cap, so ``max_actions`` is
     enough; a grid instance can take at most the attempt and demo caps plus one."""
@@ -167,6 +188,8 @@ def run(
     plugins: list[Plugin] | tuple[Plugin, ...] | None = None,
     env: AnyEnv | None = None,
     resume: bool = False,
+    view: str = "slot",
+    alias_style: str = "hex",
 ) -> RunResult:
     """Run ``learner`` over ``schedule`` and return records plus summary.
 
@@ -178,8 +201,11 @@ def run(
     from an interrupted run of the same schedule, the finished instances are
     restored and the stream continues from the next one; records and events are
     appended and ``meta.json`` gains a ``resumed_at`` entry. The learner's own
-    persistent state is the learner's business.
+    persistent state is the learner's business. ``view`` is what the learner is shown
+    (the module docstring), and ``alias_style`` how the ``instance`` view names tasks.
     """
+    if view not in VIEWS:
+        raise ValueError(f"view must be one of {VIEWS}, not {view!r}")
     if env is None:
         env = build_env(schedule, config, registry)
     config = env.config
@@ -214,6 +240,8 @@ def run(
             "max_actions_per_instance": max_actions_per_instance,
             "addon": getattr(addon, "name", None) if addon is not None else None,
             "plugins": [plugin.name for plugin in plugin_list],
+            "view": view,
+            "alias_style": alias_style if view == "instance" else None,
         }
         if prior:
             try:
@@ -234,6 +262,8 @@ def run(
     if concurrent and not callable(getattr(learner, "user_resources", None)):
         raise TypeError("a learner that serves users concurrently reports its counters per user: "
                         "it needs user_resources(user)")
+    aliases = TaskAliases.for_run(out_path, alias_style) if view == "instance" else None
+    shown = (lambda obs: learner_view(obs, aliases)) if aliases is not None else (lambda obs: obs)
     runtime = PluginRuntime(out_path / "plugin-events.jsonl" if out_path and plugin_list else None)
     manager = PluginManager(plugin_list, schedule, config, run_id, runtime)
     manager.on_run_start()
@@ -251,7 +281,7 @@ def run(
                 round_open = True
             if concurrent:
                 committed = _serve_round_concurrently(learner, env, manager, indices, max_actions_per_instance,
-                                                      events_fp, progress)
+                                                      events_fp, progress, shown)
                 if records_fp is not None:
                     for finished in committed:
                         records_fp.write(json.dumps(finished.to_json()) + "\n")
@@ -277,13 +307,13 @@ def run(
                     action = GiveUp()
                     state.forced = True
                 else:
-                    action = learner.act(obs)
+                    action = learner.act(shown(obs))
                 learner_action = action
                 action = manager.on_action(obs, action)
                 state.actions += 1
                 result = env.step(action, index)
                 feedback = manager.on_feedback(obs, action, result.feedback)
-                learner.observe(obs, action, feedback)
+                learner.observe(shown(obs), action, feedback)
                 state.add_resources(_diff_resources(res_before, dict(learner.resources() or {})), time.perf_counter() - t0)
                 if events_fp is not None:
                     events_fp.write(_event_line(obs, learner_action, action, result, feedback))
@@ -350,7 +380,7 @@ def _event_line(obs, learner_action, action, result, feedback) -> str:
     ) + "\n"
 
 
-def _serve_round_concurrently(learner, env, manager, indices, max_actions, events_fp, progress) -> list[InstanceRecord]:
+def _serve_round_concurrently(learner, env, manager, indices, max_actions, events_fp, progress, shown) -> list[InstanceRecord]:
     """Serve one round of a collective schedule with every user at their own pace: one thread per
     instance, acting, stepping and observing until the instance ends, the environment (and the
     run's files) behind one lock. A wipe the round is marked for happens once, before any user
@@ -375,14 +405,14 @@ def _serve_round_concurrently(learner, env, manager, indices, max_actions, event
                     action = GiveUp()
                     state.forced = True
                 else:
-                    action = learner.act(obs)
+                    action = learner.act(shown(obs))
                 learner_action = action
                 with lock:
                     action = manager.on_action(obs, action)
                     state.actions += 1
                     result = env.step(action, index)
                     feedback = manager.on_feedback(obs, action, result.feedback)
-                learner.observe(obs, action, feedback)
+                learner.observe(shown(obs), action, feedback)
                 state.add_resources(_diff_resources(before, dict(learner.user_resources(obs.user) or {})),
                                     time.perf_counter() - t0)
                 with lock:

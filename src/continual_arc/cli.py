@@ -87,7 +87,9 @@ def cmd_schedule(args) -> int:
     from continual_arc.schedule import Schedule
 
     if args.schedule_cmd == "make":
-        from continual_arc.configs import build_schedule, epilogue_for_users
+        from continual_arc.configs import build_schedule, epilogue_for_users, with_users
+
+        config = with_users(args.config, args.users)
 
         if args.epilogue_users is not None:
             if args.mode is not None:
@@ -97,11 +99,11 @@ def cmd_schedule(args) -> int:
                                  "epilogue to some users, not both in one schedule")
             if args.no_epilogue:
                 raise SystemExit("--epilogue-users already means epilogue only; --no-epilogue does not apply to it")
-            sched = epilogue_for_users(args.config, args.seed, args.epilogue_users)
+            sched = epilogue_for_users(config, args.seed, args.epilogue_users)
         else:
             if args.mode is None:
                 raise SystemExit("--mode is required unless --epilogue-users is given")
-            sched = build_schedule(args.config, args.mode, args.seed, epilogue=not args.no_epilogue)
+            sched = build_schedule(config, args.mode, args.seed, epilogue=not args.no_epilogue)
             if args.rounds is not None:
                 sched = sched.first_rounds(args.rounds)
         out = Path(args.out) if args.out else Path(f"{sched.name}-seed{args.seed}.json")
@@ -150,6 +152,8 @@ def cmd_run(args) -> int:
         progress=progress,
         learner_name=args.name or args.learner,
         plugins=plugins,
+        view="instance",
+        alias_style=args.alias_style,
     )
     print(text_report(result.summary, title=f"{args.name or args.learner} on {sched.name}"))
     if args.out:
@@ -190,6 +194,20 @@ def cmd_compare(args) -> int:
     return 0
 
 
+def cmd_learned(args) -> int:
+    from continual_arc.metrics import share_learned
+    from continual_arc.report import learned_report
+    from continual_arc.runner import load_run
+
+    _, config, run_records = load_run(args.run_dir)
+    _, _, floor_records = load_run(args.floor_dir)
+    learned = share_learned(run_records, floor_records, config, reps=args.reps)
+    print(learned_report(learned))
+    if args.json:
+        print(json.dumps(learned, indent=1))
+    return 0
+
+
 # -- parser -------------------------------------------------------------------
 
 
@@ -213,10 +231,13 @@ def build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, arc2-{smoke,small}, arc3-{smoke,small}; no track is the default")
     sm.add_argument("--mode", help="workstreams | sequential | random | fresh (the transfer reference); required unless --epilogue-users is given")
     sm.add_argument("--seed", type=int, default=0)
+    sm.add_argument("--users", type=int, default=1,
+                    help="how many users the configuration is served to at once (with_users); 1, 2, 4, 8 and 16 are "
+                         "the canonical numbers")
     sm.add_argument("--no-epilogue", action="store_true", help="omit the held-out epilogue")
-    sm.add_argument("--rounds", type=int, help="cut the schedule to its first N rounds (stop a collective stream short)")
+    sm.add_argument("--rounds", type=int, help="cut the schedule to its first N rounds (stop a stream short)")
     sm.add_argument("--epilogue-users", type=int, dest="epilogue_users",
-                    help="build the held-out epilogue alone, for the first K users of a collective config "
+                    help="build the held-out epilogue alone, for the first K of the --users "
                          "(each in the order and instance seeds the full schedule's own epilogue gives them); "
                          "not combined with --mode, --rounds or --no-epilogue")
     sm.add_argument("--out", help="output path (default <name>-seed<seed>.json)")
@@ -237,6 +258,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--plugin-kwargs", action="append", default=[],
         help="JSON constructor object for the corresponding --plugin",
     )
+    r.add_argument("--alias-style", choices=("hex", "names"), default="hex", dest="alias_style",
+                   help="how the learner sees each task's name: task-3f2a9c1e (hex) or a codename such as amber-heron")
     r.add_argument("--quiet", action="store_true")
     for key, typ in (
         ("attempt_cap", int), ("demo_cap", int), ("demo_cost", float),
@@ -257,6 +280,14 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("reference_dir")
     c.add_argument("--json", action="store_true")
     c.set_defaults(func=cmd_compare)
+
+    lr = sub.add_parser("learned", help="share of the learnable budget a run saves beyond the demo-cache floor "
+                                        "on the same model and stream")
+    lr.add_argument("run_dir")
+    lr.add_argument("floor_dir", help="the demo-cache floor's run on the same model and schedule")
+    lr.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% interval")
+    lr.add_argument("--json", action="store_true")
+    lr.set_defaults(func=cmd_learned)
     return p
 
 

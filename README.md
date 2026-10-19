@@ -20,9 +20,11 @@ ARC-AGI measures how efficiently a system picks up a new skill from a few exampl
 Continual-ARC serves a lifelong stream of tasks from the three ARC-AGI editions instead, in which the same tasks return
 after dormant gaps with fresh instances while new tasks keep arriving. On each instance the learner may pay for one
 more demonstration or submit an answer, and it may try again after a wrong one. A wrong answer and a demonstration
-each cost one, against a cap of sixteen, and we score the stream by the share of that budget it used, so lower is
-better. A learner may keep anything at all between instances, which puts an agent harness keeping notes and a model
-updating its weights on the same scale.
+each cost one, against a cap of sixteen, and we charge the stream the share of that budget it used. A stronger model
+uses less of that budget without learning anything, so we read each learner against a floor that caches each task's
+demonstrations on its own model: its share learned is the share of the budget left to learn that it saves, from 0 for
+the cache to 1 for perfect memory. A learner may keep anything at all between instances, which puts an agent harness
+keeping notes and a model updating its weights on the same scale.
 
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
 Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the three tracks and the measures.
@@ -35,8 +37,9 @@ figure, run and trajectory of the paper can be explored and replayed at
 In the paper we ran Prime Agent, Hermes Agent and OpenClaw through the ARC-AGI-1 track with every learning mechanism
 they ship switched on, and again with everything they wrote deleted before every instance. Their persistence saved no
 measurable budget at any reasoning effort, and left to decide what to keep, they kept almost nothing that outlasted an
-instance. A deliberately naive program library, which keeps one tested program per task and runs it when the task
-returns, used 13 to 30 points less of the budget than every harness at every effort. Run your own learner through it
+instance: none saved a measurable share of the budget left to learn. A deliberately naive program library, which keeps
+one tested program per task and runs it when the task returns, saved about two thirds of it at every effort on
+ARC-AGI-1. Run your own learner through it
 and [submit the result](#submitting-a-result).
 
 * **Any learner.** The learner is a black box with four methods. Weight updates, external memory, program libraries
@@ -49,8 +52,8 @@ and [submit the result](#submitting-a-result).
   answer never fits the next grid, and caching a demonstration is a choice with a price.
 * **Composable interventions.** Optional plug-ins can insert tagged auxiliary episodes without changing the
   schedule's exposure or gap metadata.
-* **One number per track.** The share of the budget used over the track's stream, with the share solved beside it.
-  Compute, tokens and memory are logged, not scored.
+* **One number per track.** The share learned over the track's stream, against the demo-cache floor on the same
+  model, with the budget used and the share solved beside it. Compute, tokens and memory are logged, not scored.
 
 ## Install
 
@@ -78,6 +81,38 @@ demonstrations it bought. The budget used is `100 * mean_cost / max_cost`, with
 `max_cost = attempt_cap + demo_cost * demo_cap`, 8 + 8 = 16 on the grid tracks, and lower is better; the
 `score` in `summary.json` and the report is its complement, `100 - budget used`.
 
+## The share learned
+
+The budget used rewards whatever the learner brings to the stream, and most of that is its
+model: a stronger model with a cache of the pairs it has bought scores better without learning
+anything, since re-reading the kept pairs costs only compute, which is never charged. So a
+learner is read against the **demo-cache floor** on the same model and stream, the bare model
+shown every pair it has bought for a task again at no cost. The cache is the scale's zero.
+Its one is perfect memory on the same model: the floor's own charge on each task's first
+round, and nothing on any return. Between them lies the **learnable budget**, which shrinks
+as the model gets stronger, and the **share learned** is the part of it a learner saves:
+
+```
+share learned = (U(floor) - U(learner)) / (U(floor) - U(perfect memory))
+```
+
+with U the budget used over the stream. A learner that only caches scores 0, one that answers
+every returning task at no cost scores 1, and one worse than the cache scores below 0. The
+learnable budget says how much a track leaves a model to learn: when it is small, the model has
+outgrown the track and the next edition measures it. ARC-AGI-3 serves no demonstrations, so it
+has no cache floor and keeps the budget used as its number.
+
+```bash
+continual-arc learned runs/my-ws runs/demo-cache-ws     # same model, same schedule
+```
+
+prints the share with a 95 percent interval from a bootstrap over tasks
+(`continual_arc.metrics.share_learned`). The floor's run comes from
+`continual_arc_baselines.systems.bare.BareDemoCacheLearner` in
+[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), one cheap run per
+model.
+
+
 ## Modes
 
 All modes are schedules over the same seeded task set, so results are comparable. One
@@ -99,20 +134,25 @@ cost after a lifetime minus the cost with no lifetime behind it.
 
 ## Regimes
 
-A configuration is served in one of two regimes, and they differ in one number, the
-configuration's `users`: how many people the system serves at once, and so how much experience
-arrives between two updates. Any learner can run at any number of users, whether it keeps notes
-or trains its weights, and learners are compared only at the same number.
+A configuration is served in one of two regimes, and they differ in one number, `users`:
+how many people the system serves at once, and so how much experience arrives between two
+updates. It is a setting of the run, not of the configuration (`with_users(config, users)`,
+`schedule make --users`). Any learner can run at any number of users, whether it keeps notes
+or trains its weights, and learners are compared only at the same number. The canonical
+numbers are the powers of two from 1 to 16 (`CANONICAL_USERS`): a low-data regime by design,
+every update seeing at most 16 new instances, so that a learner that trains its weights between
+rounds finishes a whole stream on one machine in days, not weeks.
 
-| regime       | users    | picture                                                                 |
-|--------------|----------|-------------------------------------------------------------------------|
-| `individual` | 1        | one system walking one person's stream, one instance at a time (every config but one) |
-| `collective` | hundreds | one system serving a team at once and learning from all of them (`arc1-collective`: 100 users, 200 rounds) |
+| regime       | users          | picture                                                                 |
+|--------------|----------------|-------------------------------------------------------------------------|
+| `individual` | 1              | one system walking one person's stream, one instance at a time          |
+| `collective` | 2, 4, 8 or 16  | one system serving a team at once and learning from all of them (`arc1-small` at 16 users: 200 rounds of 16 instances) |
 
 In the collective regime every user walks a stream of their own over the same tasks (the
 same process as the individual regime, each user their own draw of it; user 0 at seed `s`
-walks exactly the individual stream at seed `s`) and then meets the held-out tasks in an
-order of their own. The users are deliberately concurrent: a **round** is one instance per
+walks exactly the individual stream at seed `s`, and user `u`'s stream does not depend on how
+many users there are, so a run at fewer users is a run at more cut to its first users) and
+then meets the held-out tasks in an order of their own. The users are deliberately concurrent: a **round** is one instance per
 user, all open at once, the round's records are committed together, and the learner's
 `begin_round` and `end_round` hooks bracket it. The contract is that whatever the learner
 carries between instances changes only in `end_round`, so every user of a round meets the
@@ -135,9 +175,8 @@ served one instance at a time and need one user.
 
 ## Cutting a stream short, and reading its epilogue early
 
-A collective configuration's own epilogue only comes after every user has finished the whole
-stream (`arc1-collective`: round 200), which is too much to pay just to read transfer at an
-earlier round. Two schedules serve that instead, both built from the same configuration and
+A collective run's own epilogue only comes after every user has finished the whole stream
+(round 200), which is too much to pay just to read transfer at an earlier round. Two schedules serve that instead, both built from the same configuration and
 seed so their task sets and instance seeds agree with the full schedule's:
 
 * **`Schedule.first_rounds(r)`** is a literal prefix of a schedule's own slots: rounds 0 to
@@ -148,7 +187,7 @@ seed so their task sets and instance seeds agree with the full schedule's:
   (`runner.run(resume=True)`), so a run stopped under `first_rounds(20)` resumes without
   replay under `first_rounds(60)`, or under the uncut schedule.
 * **`epilogue_for_users(config, seed, users)`** is the held-out tasks alone, for the first
-  `users` of the configuration's users, as a `users`-wide collective schedule: user `u` meets
+  `users` of the users a configuration is served to, as a `users`-wide collective schedule: user `u` meets
   them in the exact order and instance seeds the full schedule's own epilogue would give them.
   The learner is not reset between its tasks (nothing is frozen for the epilogue). It needs
   none of the stream built first, only the configuration and seed.
@@ -156,17 +195,17 @@ seed so their task sets and instance seeds agree with the full schedule's:
 The CLI exposes both from `schedule make`:
 
 ```bash
-# the first 20 rounds of the collective stream (a cut, not the epilogue)
-continual-arc schedule make --config arc1-collective --mode workstreams --seed 0 --rounds 20 --out stream-r20.json
+# the first 20 rounds of the stream served to 16 users (a cut, not the epilogue)
+continual-arc schedule make --config arc1-small --users 16 --mode workstreams --seed 0 --rounds 20 --out stream-r20.json
 
-# the held-out tasks alone, for users 0-9 of the 100 (no --mode: there is no stream here)
-continual-arc schedule make --config arc1-collective --seed 0 --epilogue-users 10 --out epilogue-10.json
+# the held-out tasks alone, for users 0-3 of the 16 (no --mode: there is no stream here)
+continual-arc schedule make --config arc1-small --users 16 --seed 0 --epilogue-users 4 --out epilogue-4.json
 ```
 
 Restoring the learner's state at round 20 for the epilogue run is the driver's job, not the
 benchmark's: run the cut stream, save whatever the learner carries, load it back before playing
 the epilogue schedule. `protocol_of` lists both as deviations from the canonical protocol
-("stream cut at round 20", "epilogue alone, users 0–9 of 100"); `meta.config` is kept on both,
+("stream cut at round 20", "epilogue alone, users 0–3 of 16"); `meta.config` is kept on both,
 so the label stays readable.
 
 ## Tracks and the canonical number
@@ -179,12 +218,14 @@ configuration name carries its track:
 
 | track | configs | stream | epilogue |
 |---|---|---|---|
-| `arc1` | `arc1-smoke`, `arc1-small`, `arc1-medium`, `arc1-full`, `arc1-collective` (100 users) | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
+| `arc1` | `arc1-smoke`, `arc1-small`, `arc1-medium`, `arc1-full` | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
 | `arc2` | `arc2-smoke`, `arc2-small` | a draw from the 100 of the 114 ARC-AGI-2 evaluation tasks new to the second edition whose labels allow eight distinct frames, each visit of a task in a frame of its own, drawn only from the augmentations the task's rule survives | the rest of the same 114, held out, unaugmented |
 | `arc3` | `arc3-smoke`, `arc3-small` | ARC-AGI-3 public games, one level per instance | held-out games |
 
-Each track has exactly one canonical number: the budget used on its `small` configuration in
-workstreams mode with the epilogue, at the default environment settings. Seeds 0, 1 and 2 are all
+Each track has exactly one canonical number: the share learned on its `small` configuration in
+workstreams mode with the epilogue, at the default environment settings, against the demo-cache
+floor on the same model (on ARC-AGI-3, which has no demonstrations to cache, the budget used), at
+each canonical number of users. Seeds 0, 1 and 2 are all
 canonical; the paper reports seed 0, and the leaderboard compares runs at seed 0. Every run's `summary.json` and `meta.json` carry a `protocol` block that
 names the track and says whether the run is canonical; any other configuration, mode,
 seed or environment setting is an ablation and the report labels it as such. A bare
@@ -231,28 +272,72 @@ uv run continual-arc schedule show ws.json --head 40
 uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule ws.json --out runs/my-ws
 uv run continual-arc report runs/my-ws --plots
 uv run continual-arc compare runs/my-ws runs/my-fresh        # forward transfer
+uv run continual-arc learned runs/my-ws runs/demo-cache-ws   # share learned
 ```
 
 ## Writing a learner
 
 ```python
-from continual_arc.env import Observation, Submit, RequestDemos, GiveUp
+from continual_arc.env import LearnerObservation, Submit, RequestDemos, GiveUp
 from continual_arc.learner import BaseLearner
 
 class MyLearner(BaseLearner):
-    def reset(self):                       # wipe persistent state (the fresh reference)
+    def reset(self):                          # wipe persistent state (the fresh reference)
         ...
-    def act(self, obs: Observation):       # obs.task_id, obs.input, obs.attempts_used, ...
-        return RequestDemos()              # or Submit(grid) or GiveUp()
+    def act(self, obs: LearnerObservation):   # obs.task_id (an alias), obs.input, obs.attempts_used, obs.demo_cap, ...
+        return RequestDemos()                 # or Submit(grid) or GiveUp()
     def observe(self, obs, action, feedback):
-        ...                                # SubmitFeedback / DemosFeedback / GiveUpFeedback
-    def resources(self):                   # cumulative counters, logged per instance
+        ...                                   # SubmitFeedback / DemosFeedback / GiveUpFeedback
+    def resources(self):                      # cumulative counters, logged per instance
         return {"tokens": ..., "state_bytes": ...}
 ```
 
+`continual-arc run` shows a learner only the instance (`LearnerObservation`, or
+`Arc3LearnerObservation` for a level): the task under a name drawn for the run, the
+input, its own attempts and demonstration requests against their caps, and its place
+in its own work (`step`, `round`, `user`), which it could count itself. It is told
+nothing about the schedule: not the phase, how often the task has come before,
+whether its state was wiped, or how long the stream is. The name is an alias of the
+task's id (`task-3f2a9c1e`, or a codename with `--alias-style names`), salted per run
+in the run directory's `alias-salt`, because the real id is a lookup key: a learner
+with no model that runs the Re-ARC verifier named by the id, and finds each held-out
+input among the public evaluation pairs, would use none of the `arc1-small` budget. The
+records keep the real ids. `runner.run` takes the same choice as `view`: `instance`,
+or `slot`, the environment's whole `Observation`, for the adapters of trusted harness
+runs, which translate the protocol for the system they drive and keep the stream
+from it themselves.
+
 The runner logs per-instance records (`records.jsonl`) and a summary
-(`summary.json`) with the headline score, acquisition cost, retention by gap,
+(`summary.json`) with the budget used, acquisition cost, retention by gap,
 cost by exposure index, the learning curve, and the epilogue.
+
+
+## What a learner may use
+
+The stream is public and deterministic, so a learner could be built to know it. A
+result is verified only once we have rerun it from its code and read the code
+against these rules:
+
+* **Nothing about ARC brought in.** No ARC, Re-ARC, ARC-GEN or other task data,
+  answers or solvers inside the learner, its prompts or its starting memory, and no
+  rebuilding of the schedule. What a model learned in pretraining is its prior, which
+  the demo-cache floor on the same model already carries.
+* **Every model named.** Every model the learner calls is named in the submission and
+  reached through the tracking proxy of
+  [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The
+  share learned is read against the demo-cache floor of the strongest of them, so a
+  learner taught by a stronger model is asked to learn beyond its teacher.
+* **Learning only from what it was shown.** A learner learns from its observations and
+  feedback. The records, with their real ids and exposures, are the benchmark's.
+* **Anything else is allowed:** memory, programs, tools, a cache, training the
+  weights. Compute is logged and shown beside the score, never in it, and a learner
+  that trains reports its training compute apart from what it costs to serve an
+  instance.
+
+The alias stops the free lookup and a model's recall of a famous task id; it makes a
+determined lookup cost a demonstration or two per task, since a learner can still
+match a bought pair against every solver. The rules and the rerun stop that, and only
+a held-out stream of new rules would make them unnecessary.
 
 ## Plug-ins
 
@@ -293,12 +378,13 @@ src/continual_arc/
   tasks.py       task sources (generative Re-ARC, fixed ARC JSON) and registry
   schedule.py    Slot/Schedule, the one stream generator and its mode presets, the epilogue
   configs.py     named configurations and build_schedule()
-  env.py         the environment: observations, actions, feedback, cost accounting
+  env.py         the environment: observations (the slot's, and the learner's view of the instance), actions, feedback, cost accounting
+  aliases.py     the per-run names a learner sees for tasks
   addons.py      plug-in protocols, composition, and intervention runtime
   arc3/          ARC-AGI-3: pinned game manifest, local game handle, and the level-per-instance environment
   learner.py     the learner protocol
   runner.py      run a learner over a schedule, write a run directory
-  metrics.py     score and diagnostics
+  metrics.py     the budget used, the share learned and the diagnostics
   report.py      text reports and plots
   cli.py         continual-arc command line
   testing.py     data-free task source and trivial learners for tests
@@ -309,14 +395,18 @@ docs/DESIGN.md   design rationale and decisions
 
 The [leaderboard](https://unify.ai/continual-arc/leaderboard) opens with the paper's runs and takes anyone's. There is
 no held-out set: the stream is public, every schedule is deterministic, and a result is taken as reported until we
-rerun it, when it is marked as verified.
+rerun it from its code and read the code against what a learner may use, when it is marked as verified.
 
 1. Run your learner on a track's canonical protocol, its `small` configuration in workstreams order at seed 0
-   (`arc1-small`, `arc2-small` or `arc3-small`), and on the same configuration's `fresh` reference if you want your
-   forward transfer read. To drive an agent harness, start from the adapters and the tracking proxy in
-   [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), which count every model call
-   whatever the harness does.
-2. Copy the run directory the runner wrote to `results/<track>/<name>/`, and add a `submission.json`:
+   (`arc1-small`, `arc2-small` or `arc3-small`), with `continual-arc run`, and on the same configuration's `fresh`
+   reference if you want your forward transfer read. To drive an agent harness, start from the adapters and the
+   tracking proxy in [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), which count every
+   model call whatever the harness does. Read [what a learner may use](#what-a-learner-may-use) first.
+2. Unless the leaderboard already has it, run the demo-cache floor on your model on the same stream, the zero of your
+   share learned: `continual_arc_baselines.systems.bare.BareDemoCacheLearner` in the baselines, one cheap run. The
+   floors of every model the paper ran are in the v0.1.0 run records.
+3. Copy the run directories the runner wrote to `results/<track>/<name>/`, and add a `submission.json` to your
+   learner's, naming the floor's directory:
 
    ```json
    {
@@ -325,14 +415,15 @@ rerun it, when it is marked as verified.
      "model": "GPT-6 Luna, medium effort",
      "code": "https://github.com/you/my-harness",
      "contact": "you@example.com",
+     "floor": "results/arc1/demo-cache-luna6-medium",
      "notes": "anything a reader needs to know to read the number"
    }
    ```
 
-3. Check it: `uv run python scripts/check_result.py results/<track>/<name>`. It rebuilds the schedule from the run's
+4. Check it: `uv run python scripts/check_result.py results/<track>/<name>`. It rebuilds the schedule from the run's
    configuration, order and seed, checks that the records cover every slot in order and that the summary is the one
-   the records give, and prints the numbers the leaderboard will show.
-4. Open a pull request. Questions go to this repository's issues.
+   the records give, and prints the numbers the leaderboard will show, the share learned against your floor first.
+5. Open a pull request. Questions go to this repository's issues.
 
 ## Run records and trajectories
 

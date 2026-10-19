@@ -108,6 +108,43 @@ class Observation:
 
 
 @dataclass(frozen=True)
+class LearnerObservation:
+    """What ``continual-arc run`` shows a learner of the instance it is working on: the task under the run's alias
+    (:class:`continual_arc.aliases.TaskAliases`), the input, its own attempts and demonstration requests against
+    their caps, and its place in its own work (``step``, ``round``, whose work it is), which it could count itself.
+    Nothing about the schedule: not the phase, how often the task has come before, whether its state was wiped,
+    or how long the stream is. :class:`Observation` is the environment's whole view of the slot, which the runner
+    keeps for itself, its plug-ins and the adapters of trusted harness runs."""
+
+    step: int
+    task_id: str
+    input: Grid
+    attempts_used: int
+    demo_requests_used: int
+    attempt_cap: int
+    demo_cap: int
+    episode_type: str = "benchmark"
+    plugin: str | None = None
+    metadata: dict = field(default_factory=dict)
+    round: int = 0
+    user: int = 0
+
+    @classmethod
+    def of(cls, obs: Observation, task_id: str) -> LearnerObservation:
+        return cls(step=obs.step, task_id=task_id, input=obs.input, attempts_used=obs.attempts_used,
+                   demo_requests_used=obs.demo_requests_used, attempt_cap=obs.attempt_cap, demo_cap=obs.demo_cap,
+                   episode_type=obs.episode_type, plugin=obs.plugin, metadata=dict(obs.metadata), round=obs.round,
+                   user=obs.user)
+
+    @property
+    def is_fresh(self) -> bool:
+        return self.attempts_used == 0 and self.demo_requests_used == 0
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Submit:
     grid: Grid
 

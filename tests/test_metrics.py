@@ -5,6 +5,7 @@ from continual_arc.metrics import (
     learning_curve,
     retention_by_gap,
     score,
+    share_learned,
     summarize,
 )
 
@@ -82,3 +83,57 @@ def test_checkpoint_scores_read_the_stream_prefix():
     assert rows[0]["mean_cost"] == 4.0 and rows[2]["mean_cost"] == 2.0 and rows[3]["n"] == 8  # the epilogue is not counted
     assert summarize(recs, CFG, checkpoints=(4,))["checkpoints"][0]["score"] == rows[1]["score"]
     assert summarize(recs, CFG)["checkpoints"] == []
+
+
+def _stream(costs_by_task):
+    """Records of a stream visiting each task in turn: task t's k-th visit costs costs_by_task[t][k]."""
+    out, step = [], 0
+    visits = max(len(c) for c in costs_by_task.values())
+    for k in range(visits):
+        for t, costs in costs_by_task.items():
+            if k < len(costs):
+                out.append(rec(step, t, exp=k, gap=None if k == 0 else 2, cost=float(costs[k]), seed=100 + step))
+                step += 1
+    return out
+
+
+FLOOR = {"a": [8, 4, 4, 4], "b": [6, 6, 2, 2], "c": [4, 4, 4, 4]}
+
+
+def test_share_learned_is_zero_for_the_cache_and_one_for_perfect_memory():
+    floor = _stream(FLOOR)
+    same = share_learned(floor, floor, CFG, reps=50)
+    assert same["share_learned"] == 0 and same["lift"] == 0
+    perfect = _stream({t: [c[0]] + [0] * (len(c) - 1) for t, c in FLOOR.items()})
+    full = share_learned(perfect, floor, CFG, reps=50)
+    assert abs(full["share_learned"] - 1) < 1e-12
+    # the learnable budget is the floor's charge on returns: (12 + 10 + 12) of the 12 instances, over the cap
+    assert abs(full["learnable_budget"] - 100 * 34 / 16 / 12) < 1e-12
+    assert full["ci95"][0] <= 1 <= full["ci95"][1] + 1e-12
+
+
+def test_share_learned_reads_halfway_and_worse_than_the_cache():
+    floor = _stream(FLOOR)
+    half = _stream({t: [c[0]] + [x / 2 for x in c[1:]] for t, c in FLOOR.items()})
+    assert abs(share_learned(half, floor, CFG, reps=0)["share_learned"] - 0.5) < 1e-12
+    worse = _stream({t: [c + 2 for c in cs] for t, cs in FLOOR.items()})
+    assert share_learned(worse, floor, CFG, reps=0)["share_learned"] < 0
+
+
+def test_share_learned_needs_room_to_learn_and_the_same_schedule():
+    saturated = _stream({"a": [5, 0, 0], "b": [3, 0, 0]})
+    assert share_learned(saturated, saturated, CFG, reps=50)["share_learned"] is None
+    floor = _stream(FLOOR)
+    other = [InstanceRecord(**{**r.to_json(), "instance_seed": r.instance_seed + 1}) for r in floor]
+    try:
+        share_learned(other, floor, CFG)
+    except ValueError as e:
+        assert "same schedule" in str(e)
+    else:
+        raise AssertionError("a run on another schedule must not be read against the floor")
+
+
+def test_share_learned_reads_a_run_in_progress_on_the_slots_it_reached():
+    floor = _stream(FLOOR)
+    partial = share_learned(floor[:6], floor, CFG, reps=0)
+    assert partial["n"] == 6 and partial["share_learned"] == 0

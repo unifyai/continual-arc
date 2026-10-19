@@ -133,6 +133,47 @@ class Arc3Observation:
 
 
 @dataclass(frozen=True)
+class Arc3LearnerObservation:
+    """What ``continual-arc run`` shows a learner of a level: the game under the run's alias, the level and the game's
+    number of levels, the frames, the game state and the actions it offers, the learner's actions and resets against
+    the cap and the human baseline, and its place in its own work. Nothing about the schedule (see
+    :class:`continual_arc.env.LearnerObservation`)."""
+
+    step: int
+    task_id: str
+    level: int
+    n_levels: int
+    frames: list[Frame]
+    state: str
+    available_actions: list[int]
+    actions_used: int
+    resets_used: int
+    action_cap: int
+    baseline_actions: int
+    episode_type: str = "benchmark"
+    round: int = 0
+    user: int = 0
+
+    @classmethod
+    def of(cls, obs: Arc3Observation, task_id: str) -> Arc3LearnerObservation:
+        return cls(step=obs.step, task_id=task_id, level=obs.level, n_levels=obs.n_levels, frames=obs.frames,
+                   state=obs.state, available_actions=list(obs.available_actions), actions_used=obs.actions_used,
+                   resets_used=obs.resets_used, action_cap=obs.action_cap, baseline_actions=obs.baseline_actions,
+                   episode_type=obs.episode_type, round=obs.round, user=obs.user)
+
+    @property
+    def is_fresh(self) -> bool:
+        return self.actions_used == 0 and self.resets_used == 0
+
+    @property
+    def actions_left(self) -> int:
+        return self.action_cap - self.actions_used - self.resets_used
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class Act:
     action: int
     x: int | None = None

@@ -1,8 +1,11 @@
 """Scoring and diagnostics.
 
-The headline number is the mean cost per instance over the stream, reported as a
-score out of 100 where 100 means every instance was solved first try with no demo
-requests and 0 means every instance was charged the maximum possible cost.
+Every measure starts from the charge of each instance: wrong attempts plus demonstrations,
+against a cap. The budget used is 100 times the mean charge over the cap (lower is better);
+``summary.json`` carries its complement as ``score``. On the grid tracks the headline is the
+share learned (:func:`share_learned`): the budget used read against the demo-cache floor on the
+same model and stream, as the share of the learnable budget a run saves beyond a cache of its
+demonstrations, so that a stronger model does not score higher for being stronger.
 
 Diagnostics, all derived from the same per-instance records:
 
@@ -14,6 +17,8 @@ Diagnostics, all derived from the same per-instance records:
   configuration names, so runs of different lengths compare where both reached;
 * epilogue    — cost on the held-out phase, and forward transfer against a
   reference run (the fresh run of the same learner: the epilogue tasks with no lifetime behind them);
+* share learned — the share of the learnable budget a run saves beyond a cache of its demonstrations,
+  against the demo-cache floor on the same model and stream (:func:`share_learned`);
 * users       — in the collective regime, each user's own view: the spread of per-user stream
   scores, and cost by how many times the user had met the task before (their own exposure,
   the curve an individual run of the same stream draws), beside the team's exposure above.
@@ -25,6 +30,7 @@ checkpoint score never changes when the horizon is extended.
 
 from __future__ import annotations
 
+import random
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
@@ -292,3 +298,86 @@ def forward_transfer(
         "transfer_score_points": (100.0 * _mean(diffs) / config.max_cost) if diffs else None,
         "per_task": {a.task_id: {"run": a.cost, "reference": b.cost, "transfer": b.cost - a.cost} for a, b in matched},
     }
+
+
+def share_learned(
+    run_records: Sequence[InstanceRecord],
+    floor_records: Sequence[InstanceRecord],
+    config: EnvConfig,
+    reps: int = 2000,
+    seed: int = 0,
+) -> dict:
+    """The share of the learnable budget ``run`` saves beyond a cache of its demonstrations.
+
+    ``floor`` is the demo-cache floor on the same model and the same stream: the bare model,
+    shown again at no cost every pair it has bought for a task. A cache needs no learning, and
+    with a strong enough model, re-reading the kept pairs costs only compute, which is never
+    charged, so the floor is the zero of the scale. Its one is perfect memory on the same model:
+    the floor's own charge on each task's first round, and nothing on any return. Between them
+    lies the learnable budget, which shrinks as the model gets stronger; a run's share learned
+    is the part of it the run saves::
+
+        lift = U(floor) - U(run)
+        learnable budget = U(floor) - U(perfect memory)
+        share learned = lift / learnable budget
+
+    where U is the budget used, 100 times the mean charge over the cap, over the stream slots
+    both runs played (a run in progress is read as far as it goes). Because both ends of the
+    scale are the same model's, a stronger model scores no higher for being stronger, and
+    knowledge a learner carries into the stream counts only where it beats the cache. The
+    95 percent interval is a bootstrap over tasks, since a task's instances rise and fall
+    together. ``share_learned`` is None when the floor leaves nothing to learn.
+
+    Both runs must serve the same schedule: slots are matched by step, and a slot whose task
+    or instance seed differs raises."""
+    floor = {r.step: r for r in _stream_records(floor_records)}
+    cells: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])  # run, floor, first visits, count
+    for r in _stream_records(run_records):
+        f = floor.get(r.step)
+        if f is None:
+            continue
+        if (f.task_id, f.instance_seed) != (r.task_id, r.instance_seed):
+            raise ValueError(f"slot {r.step} differs between the run ({r.task_id}) and the floor ({f.task_id}): "
+                             "the floor must have played the same schedule")
+        c = cells[r.task_id]
+        c[0] += r.cost
+        c[1] += f.cost
+        c[2] += f.cost if f.exposure_index == 0 else 0.0
+        c[3] += 1
+
+    def point(tasks: Sequence[str]) -> tuple[float, float, float, float]:
+        n = sum(cells[t][3] for t in tasks)
+        run, flo, first = (100.0 * sum(cells[t][i] for t in tasks) / config.max_cost / n for i in range(3))
+        return run, flo, first, n
+
+    tasks = sorted(cells)
+    if not tasks:
+        return {"n": 0, "share_learned": None}
+    run, flo, first, n = point(tasks)
+    learnable = flo - first
+    out = {
+        "n": int(n),
+        "run_budget": run,
+        "floor_budget": flo,
+        "perfect_memory_budget": first,
+        "learnable_budget": learnable,
+        "lift": flo - run,
+        "share_learned": (flo - run) / learnable if learnable > 0 else None,
+        "ci95": None,
+        "se": None,
+        "reps": reps,
+    }
+    if learnable <= 0 or reps < 10:
+        return out
+    rng = random.Random(seed)
+    draws = []
+    for _ in range(reps):
+        sample = [tasks[rng.randrange(len(tasks))] for _ in tasks]
+        b_run, b_flo, b_first, _ = point(sample)
+        if b_flo > b_first:
+            draws.append((b_flo - b_run) / (b_flo - b_first))
+    draws.sort()
+    mean = sum(draws) / len(draws)
+    out["ci95"] = [draws[int(0.025 * len(draws))], draws[min(len(draws) - 1, int(0.975 * len(draws)))]]
+    out["se"] = (sum((x - mean) ** 2 for x in draws) / (len(draws) - 1)) ** 0.5
+    return out

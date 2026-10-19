@@ -5,9 +5,12 @@
 A submitted run is the directory the benchmark's runner wrote (`records.jsonl`, `summary.json`, `schedule.json`,
 `config.json`, `meta.json`) with a `submission.json` beside them. The check passes when the schedule is the one the
 benchmark builds for the run's configuration, order and seed, the records cover every slot of it in order, the
-summary is the one the records give, and `submission.json` names what the leaderboard shows. It then prints the
-budget used on the stream and on the held-out epilogue (100 times the mean charge over the cap, lower is better) and
-the share solved within the cap, which are the leaderboard's numbers. Nothing here calls a model or the network.
+summary is the one the records give, and `submission.json` names what the leaderboard shows. On a grid track it also
+names the demo-cache floor's run on the same model and stream (`floor`, a directory relative to this repository),
+which the share learned is read against. It then prints the leaderboard's numbers: the share learned (the share of the
+learnable budget saved beyond that floor, higher is better), the budget used on the stream and on the held-out
+epilogue (100 times the mean charge over the cap, lower is better) and the share solved within the cap. Nothing here
+calls a model or the network.
 """
 
 from __future__ import annotations
@@ -17,8 +20,10 @@ import sys
 from pathlib import Path
 
 from continual_arc.configs import build_schedule, protocol_of
-from continual_arc.metrics import summarize
-from continual_arc.runner import load_run
+from continual_arc.metrics import share_learned, summarize
+from continual_arc.runner import is_arc3, load_run
+
+ROOT = Path(__file__).resolve().parent.parent
 
 RUN_FILES = ("records.jsonl", "summary.json", "schedule.json", "config.json", "meta.json")
 SUBMISSION_FIELDS = ("name", "learner", "model", "code", "contact")
@@ -46,7 +51,7 @@ def check(run_dir: Path) -> list[str]:
     benchmark = [r for r in records if r.episode_type == "benchmark"]
     if len(benchmark) != len(expected.slots):
         problems.append(f"{len(benchmark)} records for {len(expected.slots)} slots: the run is not complete")
-    for r, slot in zip(benchmark, expected.slots):
+    for r, slot in zip(benchmark, expected.slots, strict=False):   # a short run is reported above
         if (r.task_id, r.instance_seed, r.phase) != (slot.task_id, slot.instance_seed, slot.phase):
             problems.append(f"record {r.step} is not slot {r.step} of the schedule")
             break
@@ -59,6 +64,21 @@ def check(run_dir: Path) -> list[str]:
     for field in SUBMISSION_FIELDS:
         if not isinstance(submission.get(field), str) or not submission[field].strip():
             problems.append(f"submission.json needs a {field}")
+    learned = None
+    if not is_arc3(schedule):
+        floor_dir = ROOT / str(submission.get("floor", ""))
+        if not submission.get("floor") or not (floor_dir / "records.jsonl").exists():
+            problems.append("submission.json needs a floor: the directory of the demo-cache floor's run on the same model and stream")
+        else:
+            floor_meta = json.loads((floor_dir / "meta.json").read_text())
+            # the baselines wrap every learner in their tracking proxy, so the learner's own name is meta's "learner"
+            if "BareDemoCacheLearner" not in (floor_meta.get("learner", "") + floor_meta.get("learner_class", "")):
+                problems.append(f"{submission['floor']} is not a run of the demo-cache floor (BareDemoCacheLearner)")
+            _, _, floor_records = load_run(floor_dir)
+            try:
+                learned = share_learned(records, floor_records, config)
+            except ValueError as e:
+                problems.append(str(e))
 
     cap = config.max_cost
     stream = budget([r for r in benchmark if r.phase == "stream"], cap)
@@ -66,6 +86,10 @@ def check(run_dir: Path) -> list[str]:
     line = f"{run_dir}: {protocol['config']} {protocol['mode']} seed {protocol['seed']}, "
     line += "canonical" if protocol["canonical"] else "not canonical (" + "; ".join(protocol["deviations"]) + ")"
     print(line)
+    if learned and learned["share_learned"] is not None:
+        lo, hi = learned["ci95"] or (float("nan"), float("nan"))
+        print(f"  share learned {learned['share_learned']:+.2f} ±{learned['se']:.2f} (95% interval {lo:+.2f} to {hi:+.2f}), "
+              f"learnable budget {learned['learnable_budget']:.1f} points")
     if stream:
         print(f"  stream:   budget used {stream[0]:5.1f}   solved {stream[1]:5.1f}%")
     if epilogue:

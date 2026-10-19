@@ -5,12 +5,13 @@ Continual-ARC is three tracks, one per ARC-AGI edition, and no track is the
 default: every configuration name carries its track (``arc1-small``,
 ``arc2-small``, ``arc3-small``). The tracks are not commensurable, because each
 edition gives signal for a different class of model, so there is no pooled or
-averaged score across them. Each track has exactly one canonical number: the
-score on its ``small`` configuration in workstreams mode with the epilogue, at
-the default environment settings, averaged over seeds 0, 1 and 2
-(:func:`canonical_protocol`). Every other configuration, mode, seed or setting is
-an ablation and is labelled as such in run metadata and reports
-(:func:`protocol_of`).
+averaged score across them. Each track has one canonical number for each number of
+users served at once: the score on its ``small`` configuration in workstreams mode
+with the epilogue, at the default environment settings, averaged over seeds 0, 1
+and 2, at 1, 2, 4, 8 or 16 users (:data:`CANONICAL_USERS`,
+:func:`canonical_protocol`); learners are compared only at the same number of
+users. Every other configuration, mode, seed, number of users or setting is an
+ablation and is labelled as such in run metadata and reports (:func:`protocol_of`).
 
 A configuration fixes the number of tasks, the stream length, the workstream
 parameters, the size of the held-out epilogue and the environment settings. From
@@ -29,12 +30,16 @@ not a mode but the reference run for forward transfer: the epilogue tasks alone,
 met by a learner whose state is wiped before each, so that transfer is the
 epilogue cost after a lifetime minus the cost with no lifetime behind it.
 
-A configuration also fixes the regime through its ``users``: how many people the system
-serves at once. One user is the individual regime, one system walking one person's stream
-one instance at a time. ``arc1-collective`` has 100 users, the collective regime: one system
-serving a team, every user walking a stream of their own over the same tasks, and every
-round one instance per user, served concurrently and acted on with the state the system
-had when the round began, with updates between rounds.
+A configuration is served to a number of users (:func:`with_users`): how many people the
+system serves at once, and so how much experience arrives between two updates. One user is
+the individual regime, one system walking one person's stream one instance at a time. More
+is the collective regime: one system serving a team, every user walking a stream of their
+own over the same tasks, and every round one instance per user, served concurrently and
+acted on with the state the system had when the round began, with updates between rounds.
+The canonical numbers of users are the powers of two from 1 to 16 (Dan, 18 Oct 2026): a
+low-data regime by design, every update seeing at most 16 new instances, so that a learner
+that trains its weights between rounds finishes a whole stream on one machine in days, not
+weeks.
 
 A configuration's ``stream_length`` is an observation window, not a ceiling on
 what a learner may learn from: the generators produce fresh instances forever.
@@ -53,7 +58,7 @@ select (see :mod:`continual_arc.arc3.env`).
 from __future__ import annotations
 
 import random
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from functools import cache
 
 from continual_arc.arc3.env import SOURCE_ARC3, Arc3Config
@@ -97,7 +102,7 @@ class BenchmarkConfig:
     """The canonical mode's point on the stream axis. Sequential and random are fixed
     functions of ``n_tasks`` and ``stream_length`` (:meth:`stream_params`)."""
     users: int = 1
-    """People served at once: 1 is the individual regime; more is the collective, where every
+    """People served at once (:func:`with_users`): 1 is the individual regime; more is the collective, where every
     user walks a stream of their own over the configuration's tasks (``stream_length``
     instances each, every task ``instances_per_task`` times), then meets the held-out tasks
     once each in an order of their own, and a round is one instance per user
@@ -217,27 +222,6 @@ CONFIGS: dict[str, BenchmarkConfig] = {
             concurrency=6, burst_mean=6.0, dormancy_median=300.0, dormancy_sigma=1.0, arrival_interval=20.0
         ),
     ),
-    # The collective regime, the one configuration of it (24 Sep 2026, Dan: the users are deliberately
-    # concurrent, a team, not one long stream served in chunks): 100 users, each walking an arc1-small
-    # stream of their own over the small track's 25 tasks (the same seeded draw of tasks and of held-out
-    # tasks as arc1-small; user 0 at seed s walks exactly arc1-small's stream and epilogue at seed s, the
-    # others their own draws of the same process), every round one instance per user, served at once:
-    # 200 rounds, 20,000 stream instances, each task 8 times per user and 800 times over the team, with a
-    # task typically in the hands of about 16 users in any round (four active per user). Then every user
-    # meets the 25 held-out tasks once each, in an order of their own (25 rounds, 2,500 instances), so a
-    # held-out task reaches the team gradually. A round is up to 800 graded attempts, the batch one weight
-    # update sees; the benchmark is about the low-data regime, so a task is met 800 times, not thousands.
-    "arc1-collective": BenchmarkConfig(
-        name="arc1-collective",
-        n_tasks=25,
-        stream_length=200,
-        n_epilogue_tasks=25,
-        workstreams=StreamParams(
-            concurrency=4, burst_mean=3.0, dormancy_median=30.0, dormancy_sigma=1.0, arrival_interval=2.0
-        ),
-        users=100,
-        checkpoints=(2_000, 6_000, 20_000),
-    ),
     # ARC-AGI-2: the same shapes over the second edition, stream and epilogue both drawn
     # from the 114 evaluation tasks new to it (data.arc2_new_task_ids): the training set is
     # mostly ARC-AGI-1 (767 of 1000) and uncalibrated, while the evaluation set is what the
@@ -301,6 +285,9 @@ TRACKS = tuple(DATASETS)
 CANONICAL_MODE = MODE_WORKSTREAMS
 CANONICAL_SEEDS = (0, 1, 2)
 CANONICAL_SIZE = "small"
+# The numbers of users a canonical score is read at, each a number of its own: powers of two up to 16, a low-data
+# regime by design that one machine finishes in days (Dan, 18 Oct 2026)
+CANONICAL_USERS = (1, 2, 4, 8, 16)
 
 
 def canonical_config_name(track: str) -> str:
@@ -310,12 +297,12 @@ def canonical_config_name(track: str) -> str:
 
 
 def canonical_protocol(track: str) -> dict:
-    """The one protocol whose score is *the* number for a track: the individual regime."""
+    """The protocol whose score is *the* number for a track, one number for each canonical number of users."""
     return {
         "track": track,
         "config": canonical_config_name(track),
         "mode": CANONICAL_MODE,
-        "regime": REGIME_INDIVIDUAL,
+        "users": list(CANONICAL_USERS),
         "epilogue": True,
         "seeds": list(CANONICAL_SEEDS),
         "env": get_config(canonical_config_name(track)).env.to_json(),
@@ -342,14 +329,14 @@ def protocol_of(schedule, env_config=None) -> dict:
     epilogue = bool(meta.get("epilogue", False))
     epilogue_only = meta.get("epilogue_only")
     cut_to_round = meta.get("cut_to_round")
-    # an epilogue-alone schedule's own width (K), not the collective configuration's full user count
+    # an epilogue-alone schedule's own width (K), not the number of users the configuration is served to
     users = (int(epilogue_only["users"]) if epilogue_only
             else int(cfg_meta.get("users", cfg_meta.get("width", schedule.users))))  # "width" before 24 Sep 2026
     deviations: list[str] = []
     if name != canonical_config_name(track):
         deviations.append(f"configuration {name} is not {canonical_config_name(track)}")
-    if users != 1:
-        deviations.append(f"{users} users is the collective regime, not the individual")
+    if users not in CANONICAL_USERS:
+        deviations.append(f"{users} users is not one of the canonical numbers of users {CANONICAL_USERS}")
     if not epilogue_only and mode != CANONICAL_MODE:
         deviations.append(f"mode {mode} is not {CANONICAL_MODE}")
     if not epilogue:
@@ -388,6 +375,15 @@ def get_config(name_or_config: str | BenchmarkConfig) -> BenchmarkConfig:
     raise KeyError(f"unknown config {name_or_config!r}; choose from {sorted(CONFIGS)}")
 
 
+def with_users(config: str | BenchmarkConfig, users: int) -> BenchmarkConfig:
+    """``config`` served to ``users`` people at once: every user walks a stream of their own over the
+    configuration's tasks, and user ``u`` walks the same stream whatever the number of users (user 0 at
+    seed ``s`` exactly the stream one user alone walks at ``s``), so a run at fewer users is a run at more
+    cut to its first users. Its checkpoints, horizons in instances over all users, scale with them."""
+    cfg = get_config(config)
+    return replace(cfg, users=users, checkpoints=tuple(k // cfg.users * users for k in cfg.checkpoints))
+
+
 def select_tasks(pool: list[str], n: int, seed: int, label: str) -> list[str]:
     """Seeded sample of ``n`` task ids from ``pool`` (sorted first, for determinism)."""
     pool = sorted(set(pool))
@@ -399,12 +395,8 @@ def select_tasks(pool: list[str], n: int, seed: int, label: str) -> list[str]:
 
 def _size_chain(cfg: BenchmarkConfig, attr: str) -> list[int]:
     """The nested sizes of ``cfg``'s track, ascending: the ``attr`` of every configuration of
-    the same dataset that is neither a smoke nor a collective configuration. Smoke draws stand
-    alone (they are never in a paper) and the collective configuration covers the whole pool."""
-    sizes = {
-        getattr(c, attr) for c in CONFIGS.values()
-        if c.dataset == cfg.dataset and not c.name.endswith("-smoke") and c.users == 1
-    }
+    the same dataset but the smoke ones, whose draws stand alone (they are never in a paper)."""
+    sizes = {getattr(c, attr) for c in CONFIGS.values() if c.dataset == cfg.dataset and not c.name.endswith("-smoke")}
     return sorted(sizes)
 
 
@@ -495,7 +487,7 @@ def _held_out_tasks(cfg: BenchmarkConfig, seed: int, tasks: list[str], eval_task
 
 
 def _user_seeds(cfg: BenchmarkConfig, seed: int) -> list[int]:
-    """One seed per user of a collective configuration: user 0 keeps ``seed`` itself, so it walks
+    """One seed per user a configuration is served to: user 0 keeps ``seed`` itself, so it walks
     exactly the stream and epilogue one user alone would at that seed; every other user draws the
     same process under a seed of its own."""
     return [seed] + [derive_seed(seed, "user", u) for u in range(1, cfg.users)]
@@ -597,7 +589,7 @@ def epilogue_for_users(
     The learner is not reset between tasks (``reset_each=False``), as in the full schedule's own
     epilogue: nothing is frozen for it.
 
-    Lets transfer be read from a minority of a collective configuration's users without playing
+    Lets transfer be read from a minority of a collective run's users without playing
     out the whole stream to every one of them, which is when the full schedule's own epilogue is
     due (:meth:`continual_arc.schedule.Schedule.first_rounds` stops the stream itself short).
     """

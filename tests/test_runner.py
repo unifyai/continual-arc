@@ -326,3 +326,69 @@ def test_add_ons_need_the_individual_regime(fake_registry, fake_source):
     as_users(sched, 2)
     with pytest.raises(ValueError, match="one user"):
         run(ShiftMemoryLearner(), sched, registry=fake_registry, addon=Quiet())
+
+
+class _Recorder(ShiftMemoryLearner):
+    """A ShiftMemoryLearner that keeps every observation it is shown."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shown = []
+
+    def act(self, obs):
+        self.shown.append(obs)
+        return super().act(obs)
+
+
+def test_the_instance_view_shows_an_alias_and_nothing_about_the_stream(fake_registry, fake_source, tmp_path):
+    ids = fake_source.task_ids()
+    sched = stream_schedule(ids, 120, seed=1, source=fake_source.name)
+    shown, full = _Recorder(), ShiftMemoryLearner()
+    a = run(shown, sched, out_dir=tmp_path / "instance", registry=fake_registry, view="instance")
+    b = run(full, sched, registry=fake_registry)
+    names = {o.task_id for o in shown.shown}
+    assert all(n.startswith("task-") for n in names) and not names & set(ids)
+    assert len(names) == len({r.task_id for r in a.records})   # one name per task, the same on every return
+    for field in ("phase", "exposure_index", "user_exposure_index", "reset_before", "n_steps"):
+        assert not hasattr(shown.shown[0], field)
+    # the records keep the real ids, and a learner that only reads the instance scores as it would with the slot
+    assert [r.task_id for r in a.records] == [r.task_id for r in b.records]
+    assert [r.cost for r in a.records] == [r.cost for r in b.records]
+    meta = json.loads((tmp_path / "instance" / "meta.json").read_text())
+    assert meta["view"] == "instance" and meta["alias_style"] == "hex"
+
+
+def test_a_resumed_instance_view_keeps_its_names(fake_registry, fake_source, tmp_path):
+    ids = fake_source.task_ids()
+    sched = stream_schedule(ids, 60, seed=2, source=fake_source.name)
+    first = _Recorder()
+    run(first, sched, out_dir=tmp_path / "run", registry=fake_registry, view="instance")
+    lines = (tmp_path / "run" / "records.jsonl").read_text().splitlines()
+    (tmp_path / "run" / "records.jsonl").write_text("\n".join(lines[:30]) + "\n")
+    again = _Recorder()
+    run(again, sched, out_dir=tmp_path / "run", registry=fake_registry, view="instance", resume=True)
+    named = {(o.step, o.task_id) for o in first.shown}
+    assert {(o.step, o.task_id) for o in again.shown} <= named
+
+
+def test_the_cli_runs_a_learner_on_the_instance_view(tmp_path, monkeypatch):
+    from continual_arc import cli
+
+    seen = {}
+
+    def fake_run(learner, sched, **kw):
+        seen.update(kw)
+        raise SystemExit(0)
+
+    monkeypatch.setattr("continual_arc.runner.run", fake_run)
+    sched = tmp_path / "s.json"
+    stream_schedule(["fake000", "fake001"], 4, seed=0, source="fake").save(sched)
+    with pytest.raises(SystemExit):
+        cli.main(["run", "--learner", "continual_arc.testing:GiveUpLearner", "--schedule", str(sched), "--quiet"])
+    assert seen["view"] == "instance" and seen["alias_style"] == "hex"
+
+
+def test_an_unknown_view_is_refused(fake_registry, fake_source):
+    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name)
+    with pytest.raises(ValueError, match="view"):
+        run(ShiftMemoryLearner(), sched, registry=fake_registry, view="everything")

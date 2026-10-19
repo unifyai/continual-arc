@@ -37,7 +37,7 @@ def fake_registry(fake_source):
 
 def as_users(sched, n):
     """A single stream laid out as ``n`` users per round, the users named by position, for tests
-    of the round machinery (collective configurations build theirs with interleave_users)."""
+    of the round machinery (a configuration served to several users builds its own with interleave_users)."""
     import dataclasses
 
     sched.users = n

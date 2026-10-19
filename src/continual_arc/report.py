@@ -82,6 +82,29 @@ def transfer_report(transfer: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def learned_report(learned: dict) -> str:
+    lines = [
+        "Share learned on the stream, against the demo-cache floor",
+        "---------------------------------------------------------",
+        f"matched instances: {learned['n']}",
+    ]
+    if not learned["n"]:
+        return "\n".join(lines + ["no slot of the run is in the floor's records"]) + "\n"
+    lines += [
+        f"budget used:      run {_fmt(learned['run_budget'], 1)}   floor {_fmt(learned['floor_budget'], 1)}   "
+        f"perfect memory {_fmt(learned['perfect_memory_budget'], 1)}",
+        f"learnable budget: {_fmt(learned['learnable_budget'], 1)} points (the floor's budget less perfect memory's)",
+        f"saved beyond the cache: {_fmt(learned['lift'], 1)} points",
+    ]
+    if learned["share_learned"] is None:
+        lines.append("share learned: undefined, since the floor leaves nothing to learn on this model")
+    else:
+        ci = learned["ci95"]
+        span = f"  (95% interval {_fmt(ci[0])} to {_fmt(ci[1])}, {learned['reps']} task resamples)" if ci else ""
+        lines.append(f"share learned: {_fmt(learned['share_learned'])}{span}")
+    return "\n".join(lines) + "\n"
+
+
 def plot(summary: dict, out_dir: str | Path, prefix: str = "") -> list[Path]:
     """Write learning-curve, retention and exposure plots. Requires matplotlib."""
     try:
