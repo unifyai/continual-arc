@@ -29,10 +29,11 @@ keeping notes and a model updating its weights on the same scale.
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
 Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the three tracks and the measures.
 The learners the paper evaluates, adapters for three agent harnesses among them, are in
-[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The records of every run it reports are
-attached to the [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and every task,
-figure, run and trajectory of the paper can be explored and replayed at
-[unify.ai/continual-arc](https://unify.ai/continual-arc).
+[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The records of every run it reports,
+with the trajectories behind them, are plain JSON in git at
+[continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the
+[v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and every task, figure, run and
+trajectory of the paper can be explored and replayed at [unify.ai/continual-arc](https://unify.ai/continual-arc).
 
 In the paper we ran Prime Agent, Hermes Agent and OpenClaw through the ARC-AGI-1 track with every learning mechanism
 they ship switched on, and again with everything they wrote deleted before every instance. Their persistence saved no
@@ -292,7 +293,7 @@ class MyLearner(BaseLearner):
         return {"tokens": ..., "state_bytes": ...}
 ```
 
-`continual-arc run` shows a learner only the instance (`LearnerObservation`, or
+The runner shows a learner only the instance (`LearnerObservation`, or
 `Arc3LearnerObservation` for a level): the task under a name drawn for the run, the
 input, its own attempts and demonstration requests against their caps, and its place
 in its own work (`step`, `round`, `user`), which it could count itself. It is told
@@ -302,10 +303,8 @@ task's id (`task-3f2a9c1e`, or a codename with `--alias-style names`), salted pe
 in the run directory's `alias-salt`, because the real id is a lookup key: a learner
 with no model that runs the Re-ARC verifier named by the id, and finds each held-out
 input among the public evaluation pairs, would use none of the `arc1-small` budget. The
-records keep the real ids. `runner.run` takes the same choice as `view`: `instance`,
-or `slot`, the environment's whole `Observation`, for the adapters of trusted harness
-runs, which translate the protocol for the system they drive and keep the stream
-from it themselves.
+records keep the real ids. Every learner gets this view, the baselines' own adapters
+and trained rows included; `runner.run` takes the name style as `alias_style`.
 
 The runner logs per-instance records (`records.jsonl`) and a summary
 (`summary.json`) with the budget used, acquisition cost, retention by gap,

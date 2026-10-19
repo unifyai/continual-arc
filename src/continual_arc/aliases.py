@@ -4,14 +4,11 @@ The real task id (``673ef223``) is a lookup key: the public ARC files, the Re-AR
 generators and verifiers that ``continual-arc data fetch`` downloads, and this
 benchmark's own records are all indexed by it, so a learner shown the id can fetch
 the answer instead of inferring the rule, and a model may recall a famous id's rule
-from pretraining. A learner run by ``continual-arc run`` therefore sees each task
-under a name derived from its id with a salt drawn once per run: stable within the
-run, so memory keyed on it works, and meaningless outside it. The salt is kept in the
-run directory (``alias-salt``), so a resumed run keeps its names; the records keep
-the real ids.
-
-The alias is the same function the baselines' adapters give the systems they drive,
-so a run directory's ``alias-salt`` names a task alike wherever it is read.
+from pretraining. Every learner the runner drives therefore sees each task under a
+name derived from its id with a salt drawn once per run: stable within the run, so
+memory keyed on it works, and meaningless outside it. The salt is kept in the run
+directory (``alias-salt``), so a resumed run keeps its names; the records keep the
+real ids, and a reader with the salt can name a task as the learner saw it.
 """
 
 from __future__ import annotations

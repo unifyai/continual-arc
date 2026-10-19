@@ -109,12 +109,12 @@ class Observation:
 
 @dataclass(frozen=True)
 class LearnerObservation:
-    """What ``continual-arc run`` shows a learner of the instance it is working on: the task under the run's alias
+    """What the runner shows a learner of the instance it is working on: the task under the run's alias
     (:class:`continual_arc.aliases.TaskAliases`), the input, its own attempts and demonstration requests against
     their caps, and its place in its own work (``step``, ``round``, whose work it is), which it could count itself.
     Nothing about the schedule: not the phase, how often the task has come before, whether its state was wiped,
     or how long the stream is. :class:`Observation` is the environment's whole view of the slot, which the runner
-    keeps for itself, its plug-ins and the adapters of trusted harness runs."""
+    keeps for itself and its plug-ins."""
 
     step: int
     task_id: str

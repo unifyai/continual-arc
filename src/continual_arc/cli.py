@@ -152,7 +152,6 @@ def cmd_run(args) -> int:
         progress=progress,
         learner_name=args.name or args.learner,
         plugins=plugins,
-        view="instance",
         alias_style=args.alias_style,
     )
     print(text_report(result.summary, title=f"{args.name or args.learner} on {sched.name}"))

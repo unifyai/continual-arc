@@ -134,7 +134,7 @@ class Arc3Observation:
 
 @dataclass(frozen=True)
 class Arc3LearnerObservation:
-    """What ``continual-arc run`` shows a learner of a level: the game under the run's alias, the level and the game's
+    """What the runner shows a learner of a level: the game under the run's alias, the level and the game's
     number of levels, the frames, the game state and the actions it offers, the learner's actions and resets against
     the cap and the human baseline, and its place in its own work. Nothing about the schedule (see
     :class:`continual_arc.env.LearnerObservation`)."""

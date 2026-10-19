@@ -14,14 +14,11 @@ The runner is the only place that calls ``learner.reset()``; it does so exactly
 when the schedule slot says so. It also guards against runaway learners with a
 per-instance action limit, after which the instance is force-abandoned.
 
-What the learner is shown is the run's ``view``. ``instance``, which ``continual-arc
-run`` uses, shows it only the instance (:class:`continual_arc.env.LearnerObservation`):
-the task under the run's alias, salted in the run directory's ``alias-salt``, and
-nothing about the schedule. ``slot`` shows it the environment's whole
-:class:`continual_arc.env.Observation`, real task id, phase and exposure included; it
-is for the adapters of trusted harness runs, which translate the protocol for the
-system they drive and keep the stream from that system themselves. Plug-ins, events
-and records always see the slot.
+A learner is shown the instance alone (:class:`continual_arc.env.LearnerObservation`,
+:class:`continual_arc.arc3.env.Arc3LearnerObservation`): the task under the run's alias,
+salted in the run directory's ``alias-salt``, and nothing about the schedule. Plug-ins,
+events and records see the slot (:class:`continual_arc.env.Observation`), real task id,
+phase and exposure included.
 
 Instances are served in rounds, one instance per user of the schedule. The runner
 calls ``learner.begin_round`` before the round's first action and ``learner.end_round``
@@ -158,11 +155,8 @@ def build_env(
     return ContinualArcEnv(schedule, registry=registry, config=config)
 
 
-VIEWS = ("instance", "slot")
-
-
 def learner_view(obs, aliases: TaskAliases):
-    """The instance alone, as ``continual-arc run`` shows it to a learner: the task under the run's alias."""
+    """The instance alone, as a learner is shown it: the task under the run's alias."""
     if isinstance(obs, Arc3Observation):
         return Arc3LearnerObservation.of(obs, aliases.alias(obs.task_id))
     return LearnerObservation.of(obs, aliases.alias(obs.task_id))
@@ -188,7 +182,6 @@ def run(
     plugins: list[Plugin] | tuple[Plugin, ...] | None = None,
     env: AnyEnv | None = None,
     resume: bool = False,
-    view: str = "slot",
     alias_style: str = "hex",
 ) -> RunResult:
     """Run ``learner`` over ``schedule`` and return records plus summary.
@@ -201,11 +194,9 @@ def run(
     from an interrupted run of the same schedule, the finished instances are
     restored and the stream continues from the next one; records and events are
     appended and ``meta.json`` gains a ``resumed_at`` entry. The learner's own
-    persistent state is the learner's business. ``view`` is what the learner is shown
-    (the module docstring), and ``alias_style`` how the ``instance`` view names tasks.
+    persistent state is the learner's business. ``alias_style`` is how the learner's view
+    names tasks (:data:`continual_arc.aliases.ALIAS_STYLES`).
     """
-    if view not in VIEWS:
-        raise ValueError(f"view must be one of {VIEWS}, not {view!r}")
     if env is None:
         env = build_env(schedule, config, registry)
     config = env.config
@@ -240,8 +231,7 @@ def run(
             "max_actions_per_instance": max_actions_per_instance,
             "addon": getattr(addon, "name", None) if addon is not None else None,
             "plugins": [plugin.name for plugin in plugin_list],
-            "view": view,
-            "alias_style": alias_style if view == "instance" else None,
+            "alias_style": alias_style,
         }
         if prior:
             try:
@@ -262,8 +252,11 @@ def run(
     if concurrent and not callable(getattr(learner, "user_resources", None)):
         raise TypeError("a learner that serves users concurrently reports its counters per user: "
                         "it needs user_resources(user)")
-    aliases = TaskAliases.for_run(out_path, alias_style) if view == "instance" else None
-    shown = (lambda obs: learner_view(obs, aliases)) if aliases is not None else (lambda obs: obs)
+    aliases = TaskAliases.for_run(out_path, alias_style)
+
+    def shown(obs):
+        return learner_view(obs, aliases)
+
     runtime = PluginRuntime(out_path / "plugin-events.jsonl" if out_path and plugin_list else None)
     manager = PluginManager(plugin_list, schedule, config, run_id, runtime)
     manager.on_run_start()
