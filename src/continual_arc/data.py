@@ -13,11 +13,6 @@ Three upstream repositories are pinned by commit:
 All are cloned into ``$CONTINUAL_ARC_DATA`` (default ``~/.cache/continual-arc``)
 by :func:`fetch`. Nothing is vendored into this package, so the benchmark data is
 exactly what the upstream authors published.
-
-The ``arc3`` dataset is different: its 25 public ARC-AGI-3 games are pinned by
-version and downloaded from the ARC Prize server by :mod:`continual_arc.arc3.games`,
-into ``arc-agi-3/`` under the same root. :func:`fetch` and :func:`status` delegate
-to it.
 """
 
 from __future__ import annotations
@@ -43,11 +38,10 @@ ARC_SPLITS = ("training", "evaluation")
 
 DATASET_ARC1 = "arc1"
 DATASET_ARC2 = "arc2"
-DATASET_ARC3 = "arc3"
-DATASETS = (DATASET_ARC1, DATASET_ARC2, DATASET_ARC3)
+DATASETS = (DATASET_ARC1, DATASET_ARC2)
 
 # Upstream name -> (repo, commit, folder under the data root). ``arc1`` needs the
-# first two; ``arc2`` needs the third; ``arc3`` has no git upstream.
+# first two; ``arc2`` needs the third.
 _UPSTREAMS = {
     "re-arc": (REARC_REPO, REARC_COMMIT, "re-arc"),
     "ARC-AGI": (ARC_REPO, ARC_COMMIT, "ARC-AGI"),
@@ -55,8 +49,7 @@ _UPSTREAMS = {
 }
 # ``arc2`` also needs ARC-AGI-1: the ARC-AGI-2 track serves only the tasks that are new to the
 # second edition (:func:`arc2_new_task_ids`), so it must know which ids the first edition has.
-_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2", "ARC-AGI"), DATASET_ARC3: ()}
-ARC3_STATUS_PREFIX = "arc-agi-3/"
+_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2", "ARC-AGI")}
 
 
 class DataNotFound(RuntimeError):
@@ -87,10 +80,6 @@ def dataset_dir(dataset: str) -> Path:
         return arc_dir()
     if dataset == DATASET_ARC2:
         return arc2_dir()
-    if dataset == DATASET_ARC3:
-        from continual_arc.arc3.games import arc3_dir
-
-        return arc3_dir()
     raise ValueError(f"dataset must be one of {DATASETS}, got {dataset!r}")
 
 
@@ -136,20 +125,11 @@ def fetch(force: bool = False, datasets: tuple[str, ...] = DATASETS) -> dict[str
             dest = data_root() / folder
             _clone_pinned(repo, commit, dest, force)
             out[name] = str(dest)
-        if dataset == DATASET_ARC3:
-            from continual_arc.arc3 import games
-
-            games.fetch(force=force)
-            out[ARC3_STATUS_PREFIX.rstrip("/")] = str(games.environments_dir())
     return out
 
 
 def status(datasets: tuple[str, ...] = DATASETS) -> dict[str, dict[str, object]]:
-    """Report whether each upstream is present and at the pinned commit.
-
-    For ``arc3`` one entry per game, keyed ``arc-agi-3/<game id>``, with the
-    pinned version in place of a commit.
-    """
+    """Report whether each upstream is present and at the pinned commit."""
     out: dict[str, dict[str, object]] = {}
     for dataset in datasets:
         for name in _NEEDS[dataset]:
@@ -163,11 +143,6 @@ def status(datasets: tuple[str, ...] = DATASETS) -> dict[str, dict[str, object]]
                 "head": head,
                 "ok": head == commit,
             }
-        if dataset == DATASET_ARC3:
-            from continual_arc.arc3 import games
-
-            for gid, st in games.status().items():
-                out[ARC3_STATUS_PREFIX + gid] = st
     return out
 
 

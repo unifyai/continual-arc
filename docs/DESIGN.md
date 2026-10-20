@@ -22,18 +22,16 @@ caching outputs pointless.
 | task identity | task id always exposed | isolates memory from recognition; recognition can be a later track |
 | demos | on request, at a cost equal to one wrong attempt | makes remembering an economic decision |
 | score | mean cost per instance = wrong attempts + demo requests | one number per track; compute/tokens/memory are plotted, not scored |
-| tracks | three, one per ARC-AGI edition, named in every config (`arc1-small`, `arc2-small`, `arc3-small`); no default track; no pooled or averaged score across tracks | each edition gives signal for a different class of model, so an average would mix incommensurable measurements and a default would tie the benchmark to one class |
+| tracks | two, one per ARC-AGI edition, named in every config (`arc1-small`, `arc2-small`); no default track; no pooled or averaged score across tracks | each edition gives signal for a different class of model, so an average would mix incommensurable measurements and a default would tie the benchmark to one class |
 | canonical protocol | per track: the `small` config, workstreams mode, epilogue on, default environment settings, mean over seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote per track, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
 | epilogue | never-seen evaluation tasks after the stream | measures forward transfer, not just retention |
 | add-ons | optional run-time auxiliary episodes, tagged separately | permits adaptive interventions such as spaced review without making them part of the learner protocol |
 | ARC-AGI-2 | stream and epilogue from the 114 evaluation tasks new to the second edition, the stream's 25 served under seeded augmentations (the training set is 767/1000 ARC-AGI-1 tasks and uncalibrated: a stream drawn from it was solved at first sight by a model at 18% on the ARC-AGI-2 leaderboard, 23 Sep 2026; the evaluation set is what the board is calibrated against) (D8 symmetry, colour relabelling with 0 fixed, restricted per task to what its rule survives: arc2_invariances.json labels all 114, and a visit takes a frame of its own; the stream draws the 100 tasks with eight distinct frames, the epilogue any of the 114; own pairs only, 26 Sep 2026), same augmentation for the test pair and its demos within an instance, a fresh one per instance; epilogue over the rest of the pool, unaugmented | no generators exist; augmentation keeps recurrence from being a lookup while presenting one consistent rule per instance. The assumption that rules commute with symmetry and relabelling fails for some tasks, and the paper says so |
-| ARC-AGI-3 | a game is a task and one level is an instance; successive exposures climb the levels and wrap; cost = (actions + resets) / the published human baseline for that level, capped at `cap_multiplier` which is also the failed and given-up cost; no fresh inputs because levels are fixed; the 25 public games are pinned by version and run locally through the `arc-agi` toolkit; the epilogue holds out games the stream never selected | levels are the unit the ARC Prize baselines and scores, and since a later level needs the skill and not the action sequence of the earlier one, recurrence tests skill memory rather than output caching; the baseline normalises cost across levels of very different length |
 
 ## What a learner is shown
 
-The task id, the input (on ARC-AGI-3 the frames, the available actions and the game's level, which
-the game itself shows) and the instance's own counters, and nothing about the stream: no position, no
+The task id, the input and the instance's own counters, and nothing about the stream: no position, no
 length, no phase and no exposure count. The epilogue is not announced and nothing is frozen for it.
 Why (Dan, 20 Sep 2026): the stream simulates a new worker in an office, who is not told they are in a
 fixed-length evaluation; showing the position invited end-game behaviour, and an exposure count did
@@ -41,8 +39,8 @@ the learner's remembering for it. Whether a task was met before is for the learn
 
 `Observation` still carries `step`, `n_steps`, `phase` and `exposure_index`: the runner and the
 adapters key their bookkeeping on them, and the diagnostics use exposure from the schedule. The
-adapters in `continual-arc-baselines` render prompts without them (`systems/protocol.py`,
-`systems/arc3_protocol.py`), but nothing in this package stops a Python learner from reading them.
+adapters in `continual-arc-baselines` render prompts without them (`systems/protocol.py`), but nothing
+in this package stops a Python learner from reading them.
 
 ## Modes as schedules
 
@@ -61,9 +59,8 @@ of the process, from blocked to structureless:
 * `random`: every task active from the first step, spells that never end (the i.i.d. control; a
   system's workstreams score minus its random score is what burstiness and dormancy cost it).
 
-A configuration with `even_visits` (every grid configuration) gives each task the same supply of
-instances and every mode serves exactly that supply, so the modes are one multiset of instances in
-three orders. Every mode ends with the same epilogue, the held-out tasks once each, nothing reset.
+Every configuration gives each task the same supply of instances and every mode serves exactly that
+supply, so the modes are one multiset of instances in three orders. Every mode ends with the same epilogue, the held-out tasks once each, nothing reset.
 `fresh` is not a mode but the transfer reference: the epilogue alone, met by a learner whose state is
 wiped before each held-out task.
 

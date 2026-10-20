@@ -105,7 +105,6 @@ def test_bare_names_are_refused_because_no_track_is_the_default():
         get_config("small")
     assert get_config("arc1-small").track == "arc1"
     assert get_config("arc2-small").track == "arc2"
-    assert get_config("arc3-small").track == "arc3"
 
 
 def test_canonical_protocol_per_track():
@@ -117,7 +116,7 @@ def test_canonical_protocol_per_track():
     )
     from continual_arc.env import EnvConfig
 
-    for track in ("arc1", "arc2", "arc3"):
+    for track in ("arc1", "arc2"):
         proto = canonical_protocol(track)
         assert proto["config"] == f"{track}-small" and proto["mode"] == "workstreams" and proto["epilogue"]
         assert proto["seeds"] == list(CANONICAL_SEEDS)

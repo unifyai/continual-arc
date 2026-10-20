@@ -1,11 +1,11 @@
 """Named benchmark configurations, the tracks they belong to, and the modes built
 from them.
 
-Continual-ARC is three tracks, one per ARC-AGI edition, and no track is the
+Continual-ARC is two tracks, one per ARC-AGI edition, and no track is the
 default: every configuration name carries its track (``arc1-small``,
-``arc2-small``, ``arc3-small``). The tracks are not commensurable, because each
-edition gives signal for a different class of model, so there is no pooled or
-averaged score across them. Each track has one canonical number for each number of
+``arc2-small``). The tracks are not commensurable, because each edition gives
+signal for a different class of model, so there is no pooled or averaged score
+across them. Each track has one canonical number for each number of
 users served at once: the score on its ``small`` configuration in workstreams mode
 with the epilogue, at the default environment settings, averaged over seeds 0, 1
 and 2, at 1, 2, 4, 8 or 16 users (:data:`CANONICAL_USERS`,
@@ -44,15 +44,11 @@ weeks.
 A configuration's ``stream_length`` is an observation window, not a ceiling on
 what a learner may learn from: the generators produce fresh instances forever.
 Every task gets the same supply of instances, the stream length over the number
-of tasks, in every mode (``even_visits``), so the modes are one multiset of
+of tasks, in every mode (:meth:`BenchmarkConfig.instances_per_task`), so the modes are one multiset of
 instances in three orders and a configuration's stream depends on its length: a
 longer configuration is a different schedule, not a superset. ``checkpoints`` name
 the horizons within a run at which the score is also reported; a checkpoint read is
 a prefix of that run and never changes when the run is carried further.
-
-The ``arc3`` configs have the same shapes over the ARC-AGI-3 games: the stream
-draws on the 25 pinned games and the epilogue on the games the stream did not
-select (see :mod:`continual_arc.arc3.env`).
 """
 
 from __future__ import annotations
@@ -61,8 +57,7 @@ import random
 from dataclasses import asdict, dataclass, field, replace
 from functools import cache
 
-from continual_arc.arc3.env import SOURCE_ARC3, Arc3Config
-from continual_arc.data import DATASET_ARC1, DATASET_ARC2, DATASET_ARC3, DATASETS
+from continual_arc.data import DATASET_ARC1, DATASET_ARC2, DATASETS
 from continual_arc.env import EnvConfig
 from continual_arc.schedule import (
     RANDOM,
@@ -111,27 +106,16 @@ class BenchmarkConfig:
     checkpoints: tuple[int, ...] = ()
     """Stream horizons, in instances over all users, at which the score is also reported:
     prefix reads of the run, the same whatever horizon the run was carried to."""
-    even_visits: bool = True
-    """Every task is served exactly ``instances_per_task`` times in every mode (the stream
-    process is given each task's supply). Off, the process runs unconstrained and a longer
-    stream is a superset of a shorter one; kept for the ARC-AGI-3 configurations, whose
-    streams of 23 Sep 2026 run under it."""
-    env: EnvConfig | Arc3Config = field(default_factory=EnvConfig)
-    """:class:`EnvConfig` for ``arc1``/``arc2``, :class:`Arc3Config` for ``arc3``."""
+    env: EnvConfig = field(default_factory=EnvConfig)
     dataset: str = DATASET_ARC1
     """``arc1``: the stream draws on Re-ARC generators over the ARC-AGI-1 training
     tasks and the epilogue on the ARC-AGI-1 evaluation tasks. ``arc2``: the stream
     draws on the ARC-AGI-2 training tasks under seeded augmentations (there are
-    no generators) and the epilogue on the 120 ARC-AGI-2 evaluation tasks.
-    ``arc3``: the stream draws on the 25 pinned ARC-AGI-3 games, one level per
-    instance, and the epilogue on the games the stream did not select."""
+    no generators) and the epilogue on the 120 ARC-AGI-2 evaluation tasks."""
 
     def __post_init__(self) -> None:
         if self.dataset not in DATASETS:
             raise ValueError(f"dataset must be one of {DATASETS}, got {self.dataset!r}")
-        want = Arc3Config if self.dataset == DATASET_ARC3 else EnvConfig
-        if not isinstance(self.env, want):
-            raise ValueError(f"dataset {self.dataset!r} needs env of type {want.__name__}")
         if self.stream_length % self.n_tasks:
             raise ValueError("stream_length must be a multiple of n_tasks so sequential mode gives every task the same count")
         if self.users < 1:
@@ -147,7 +131,7 @@ class BenchmarkConfig:
     @property
     def instances_per_task(self) -> int:
         """Each task's supply in one user's stream: the stream length shared equally, served
-        in every mode (with ``even_visits``) and in one block per task in sequential mode.
+        in every mode and in one block per task in sequential mode.
         Over all users a task is met ``users`` times as often."""
         return self.stream_length // self.n_tasks
 
@@ -167,19 +151,11 @@ class BenchmarkConfig:
 
     @property
     def stream_source(self) -> str:
-        if self.dataset == DATASET_ARC1:
-            return SOURCE_REARC
-        if self.dataset == DATASET_ARC2:
-            return SOURCE_ARC2_EVAL_AUG
-        return SOURCE_ARC3
+        return SOURCE_REARC if self.dataset == DATASET_ARC1 else SOURCE_ARC2_EVAL_AUG
 
     @property
     def epilogue_source(self) -> str:
-        if self.dataset == DATASET_ARC1:
-            return SOURCE_ARC_EVAL
-        if self.dataset == DATASET_ARC2:
-            return SOURCE_ARC2_EVAL
-        return SOURCE_ARC3
+        return SOURCE_ARC_EVAL if self.dataset == DATASET_ARC1 else SOURCE_ARC2_EVAL
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -250,33 +226,6 @@ CONFIGS: dict[str, BenchmarkConfig] = {
             concurrency=4, burst_mean=3.0, dormancy_median=30.0, dormancy_sigma=1.0, arrival_interval=2.0
         ),
         dataset=DATASET_ARC2,
-    ),
-    # ARC-AGI-3: interactive games, one level per instance. Instances are short
-    # (a level is tens to hundreds of actions) and there are only 25 public games,
-    # so the streams are short and the epilogue is a few held-out games.
-    "arc3-smoke": BenchmarkConfig(
-        name="arc3-smoke",
-        n_tasks=2,
-        stream_length=8,
-        n_epilogue_tasks=1,
-        workstreams=StreamParams(
-            concurrency=1, burst_mean=2.0, dormancy_median=2.0, dormancy_sigma=0.5, arrival_interval=3.0
-        ),
-        env=Arc3Config(),
-        dataset=DATASET_ARC3,
-        even_visits=False,  # the ARC-AGI-3 streams of 23 Sep 2026 run under the unconstrained process
-    ),
-    "arc3-small": BenchmarkConfig(
-        name="arc3-small",
-        n_tasks=6,
-        stream_length=48,
-        n_epilogue_tasks=4,
-        workstreams=StreamParams(
-            concurrency=2, burst_mean=3.0, dormancy_median=8.0, dormancy_sigma=1.0, arrival_interval=6.0
-        ),
-        env=Arc3Config(),
-        dataset=DATASET_ARC3,
-        even_visits=False,  # the ARC-AGI-3 streams of 23 Sep 2026 run under the unconstrained process
     ),
 }
 
@@ -434,10 +383,6 @@ def stream_task_pool(cfg: BenchmarkConfig) -> list[str]:
         from continual_arc.rearc import ReArc
 
         return ReArc().task_ids
-    if cfg.dataset == DATASET_ARC3:
-        from continual_arc.arc3.games import game_ids
-
-        return game_ids()
     # ARC-AGI-2: the evaluation tasks new to the second edition (data.arc2_new_task_ids) whose labels allow
     # enough distinct frames for a visit never to show a grid an earlier visit showed
     return list(arc2_stream_pool())
@@ -457,8 +402,8 @@ def arc2_stream_pool() -> tuple[str, ...]:
 
 def shares_pool(cfg: BenchmarkConfig) -> bool:
     """Whether stream and epilogue draw from one pool, the stream's tasks removed for the
-    epilogue: ``arc2`` (the new evaluation tasks) and ``arc3`` (the public games)."""
-    return cfg.dataset in (DATASET_ARC2, DATASET_ARC3)
+    epilogue: ``arc2``, whose stream and epilogue are both the new evaluation tasks."""
+    return cfg.dataset == DATASET_ARC2
 
 
 def epilogue_task_pool(cfg: BenchmarkConfig) -> list[str]:
@@ -469,8 +414,6 @@ def epilogue_task_pool(cfg: BenchmarkConfig) -> list[str]:
         from continual_arc.data import arc2_new_task_ids
 
         return arc2_new_task_ids("evaluation")
-    if shares_pool(cfg):
-        return stream_task_pool(cfg)
     from continual_arc.data import arc_task_ids
 
     return arc_task_ids("evaluation", dataset=cfg.dataset)
@@ -505,9 +448,8 @@ def build_schedule(
 
     ``rearc_task_ids`` (the stream pool, whatever the dataset) and
     ``eval_task_ids`` default to the full pinned pools and are only overridable
-    for testing. For ``arc2`` and ``arc3`` the epilogue pool defaults to the stream
-    pool and the stream's selected tasks are always removed from it, so the
-    epilogue is held out. The same ``config``/``seed`` pair selects the same task set in
+    for testing. For ``arc2`` the epilogue pool defaults to the stream pool and the
+    stream's selected tasks are always removed from it, so the epilogue is held out. The same ``config``/``seed`` pair selects the same task set in
     every mode, so runs are comparable across modes.
     """
     cfg = get_config(config)
@@ -532,7 +474,7 @@ def build_schedule(
                                      reset_each=True, name=f"{cfg.name}-fresh")
         one = stream_schedule(
             tasks, cfg.stream_length, user_seed, source, cfg.stream_params(mode), mode, name=f"{cfg.name}-{mode}",
-            instances_per_task=cfg.instances_per_task if cfg.even_visits else None,
+            instances_per_task=cfg.instances_per_task,
         )
         if epilogue and cfg.n_epilogue_tasks > 0:
             epi = epilogue_schedule(_held_out_tasks(cfg, seed, tasks, eval_task_ids), user_seed, cfg.epilogue_source,

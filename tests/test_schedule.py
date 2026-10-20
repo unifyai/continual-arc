@@ -240,8 +240,8 @@ def test_interleave_users_lays_out_rounds_of_every_user():
 
 def test_unconstrained_streams_are_prefix_consistent():
     """Without a supply, a longer horizon is a superset of a shorter one. With a supply (every
-    configuration but ARC-AGI-3) the stream depends on its length, and a checkpoint is a prefix
-    read of one run rather than a shorter configuration."""
+    configuration) the stream depends on its length, and a checkpoint is a prefix read of one run
+    rather than a shorter configuration."""
     for mode, params in (("workstreams", None), ("random", RANDOM), ("sequential", sequential_params(30))):
         short = stream_schedule(TASKS, 200, seed=4, source="fake", params=params, mode=mode)
         long = stream_schedule(TASKS, 600, seed=4, source="fake", params=params, mode=mode)

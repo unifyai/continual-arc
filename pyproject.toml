@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "continual-arc"
 dynamic = ["version"]
-description = "Continual-ARC: a continual learning benchmark built on the three ARC-AGI editions"
+description = "Continual-ARC: a continual learning benchmark built on ARC-AGI-1 and ARC-AGI-2"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
@@ -22,8 +22,7 @@ dependencies = []
 
 [project.optional-dependencies]
 plots = ["matplotlib>=3.7"]
-arc3 = ["arc-agi>=0.9.9; python_version >= '3.12'"]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "matplotlib>=3.7", "arc-agi>=0.9.9; python_version >= '3.12'"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "matplotlib>=3.7"]
 
 [project.scripts]
 continual-arc = "continual_arc.cli:main"
@@ -38,7 +37,7 @@ packages = ["src/continual_arc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["data: tests that need the fetched Re-ARC / ARC-AGI data", "arc3: tests that need the arc-agi toolkit and the pinned games"]
+markers = ["data: tests that need the fetched Re-ARC / ARC-AGI data"]
 
 [tool.ruff]
 line-length = 100

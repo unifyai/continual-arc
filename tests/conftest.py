@@ -13,17 +13,6 @@ needs_data = pytest.mark.skipif(not data_available(), reason="pinned data not fe
 needs_arc2 = pytest.mark.skipif(not data_available("arc2"), reason="pinned ARC-AGI-2 data not fetched")
 
 
-def arc3_available() -> bool:
-    try:
-        import arc_agi  # noqa: F401
-    except ImportError:
-        return False
-    return data_available("arc3")
-
-
-needs_arc3 = pytest.mark.skipif(not arc3_available(), reason="arc-agi toolkit or pinned ARC-AGI-3 games missing")
-
-
 @pytest.fixture
 def fake_source():
     return FakeSource(n_tasks=12)

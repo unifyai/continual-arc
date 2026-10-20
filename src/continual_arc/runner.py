@@ -14,11 +14,10 @@ The runner is the only place that calls ``learner.reset()``; it does so exactly
 when the schedule slot says so. It also guards against runaway learners with a
 per-instance action limit, after which the instance is force-abandoned.
 
-A learner is shown the instance alone (:class:`continual_arc.env.LearnerObservation`,
-:class:`continual_arc.arc3.env.Arc3LearnerObservation`): the task under the run's alias,
-salted in the run directory's ``alias-salt``, and nothing about the schedule. Plug-ins,
-events and records see the slot (:class:`continual_arc.env.Observation`), real task id,
-phase and exposure included.
+A learner is shown the instance alone (:class:`continual_arc.env.LearnerObservation`):
+the task under the run's alias, salted in the run directory's ``alias-salt``, and nothing
+about the schedule. Plug-ins, events and records see the slot
+(:class:`continual_arc.env.Observation`), real task id, phase and exposure included.
 
 Instances are served in rounds, one instance per user of the schedule. The runner
 calls ``learner.begin_round`` before the round's first action and ``learner.end_round``
@@ -36,9 +35,8 @@ instance's resources are that user's counter deltas over its actions. Any other 
 is served one action at a time: one action on every open instance before a second on
 any, an instance's resources the learner's counter deltas over its own actions.
 
-The same loop drives :class:`continual_arc.env.ContinualArcEnv` and
-:class:`continual_arc.arc3.env.Arc3Env`; :func:`build_env` picks one from the
-schedule's ``meta["dataset"]``, or pass a ready ``env``.
+The loop drives a :class:`continual_arc.env.ContinualArcEnv`, built from the schedule by
+:func:`build_env` or passed ready as ``env``.
 """
 
 from __future__ import annotations
@@ -55,9 +53,7 @@ from pathlib import Path
 from continual_arc._version import __version__
 from continual_arc.addons import Addon, Plugin, PluginManager, PluginRuntime
 from continual_arc.aliases import TaskAliases
-from continual_arc.arc3.env import Arc3Config, Arc3Env, Arc3LearnerObservation, Arc3Observation
 from continual_arc.configs import protocol_of
-from continual_arc.data import DATASET_ARC3
 from continual_arc.env import (
     ContinualArcEnv,
     EnvConfig,
@@ -72,8 +68,6 @@ from continual_arc.schedule import Schedule
 from continual_arc.tasks import TaskRegistry
 
 ProgressFn = Callable[[InstanceRecord, int], None]
-AnyConfig = EnvConfig | Arc3Config
-AnyEnv = ContinualArcEnv | Arc3Env
 
 
 @dataclass
@@ -129,49 +123,29 @@ def _diff_resources(before: dict[str, float], after: dict[str, float]) -> dict[s
     return out
 
 
-def is_arc3(schedule: Schedule) -> bool:
-    return (schedule.meta or {}).get("dataset") == DATASET_ARC3
-
-
-def default_config(schedule: Schedule) -> AnyConfig:
-    return Arc3Config() if is_arc3(schedule) else EnvConfig()
-
-
 def build_env(
     schedule: Schedule,
-    config: AnyConfig | None = None,
+    config: EnvConfig | None = None,
     registry: TaskRegistry | None = None,
-) -> AnyEnv:
-    """The environment for ``schedule``: :class:`Arc3Env` when its dataset is
-    ``arc3``, :class:`ContinualArcEnv` otherwise."""
-    if is_arc3(schedule):
-        config = config or Arc3Config()
-        if not isinstance(config, Arc3Config):
-            raise TypeError("an arc3 schedule needs an Arc3Config")
-        return Arc3Env(schedule, config=config)
-    config = config or EnvConfig()
-    if not isinstance(config, EnvConfig):
-        raise TypeError("an arc1/arc2 schedule needs an EnvConfig")
-    return ContinualArcEnv(schedule, registry=registry, config=config)
+) -> ContinualArcEnv:
+    """The environment for ``schedule``, at ``config`` or the default settings."""
+    return ContinualArcEnv(schedule, registry=registry, config=config or EnvConfig())
 
 
-def learner_view(obs, aliases: TaskAliases):
+def learner_view(obs: Observation, aliases: TaskAliases) -> LearnerObservation:
     """The instance alone, as a learner is shown it: the task under the run's alias."""
-    if isinstance(obs, Arc3Observation):
-        return Arc3LearnerObservation.of(obs, aliases.alias(obs.task_id))
     return LearnerObservation.of(obs, aliases.alias(obs.task_id))
 
 
-def _default_max_actions(config: AnyConfig) -> int:
-    """Runaway guard: an arc3 instance ends at its own cap, so ``max_actions`` is
-    enough; a grid instance can take at most the attempt and demo caps plus one."""
-    return getattr(config, "max_actions", None) or config.attempt_cap + config.demo_cap + 2
+def _default_max_actions(config: EnvConfig) -> int:
+    """Runaway guard: an instance can take at most the attempt and demo caps plus one."""
+    return config.attempt_cap + config.demo_cap + 2
 
 
 def run(
     learner: Learner,
     schedule: Schedule,
-    config: AnyConfig | None = None,
+    config: EnvConfig | None = None,
     out_dir: str | Path | None = None,
     registry: TaskRegistry | None = None,
     max_actions_per_instance: int | None = None,
@@ -180,7 +154,7 @@ def run(
     learner_name: str | None = None,
     addon: Addon | None = None,
     plugins: list[Plugin] | tuple[Plugin, ...] | None = None,
-    env: AnyEnv | None = None,
+    env: ContinualArcEnv | None = None,
     resume: bool = False,
     alias_style: str = "hex",
 ) -> RunResult:
@@ -189,8 +163,7 @@ def run(
     An optional add-on observes completed records and may enqueue auxiliary
     episodes. Existing callers are unchanged when ``addon`` is omitted. ``env``
     is an already-built environment; when None one is built from the schedule
-    and ``config`` by :func:`build_env` (grids for ARC-AGI-1 and 2, games for
-    ARC-AGI-3). With ``resume`` and an ``out_dir`` holding a ``records.jsonl``
+    and ``config`` by :func:`build_env`. With ``resume`` and an ``out_dir`` holding a ``records.jsonl``
     from an interrupted run of the same schedule, the finished instances are
     restored and the stream continues from the next one; records and events are
     appended and ``meta.json`` gains a ``resumed_at`` entry. The learner's own
@@ -463,18 +436,11 @@ def whole_rounds(records: list[InstanceRecord], schedule: Schedule) -> list[Inst
     return records[:n]
 
 
-def load_config(d: dict) -> AnyConfig:
-    """An :class:`Arc3Config` when the dict has ``cap_multiplier``, else an :class:`EnvConfig`."""
-    if "cap_multiplier" in d:
-        return Arc3Config.from_json(d)
-    return EnvConfig.from_json(d)
-
-
-def load_run(out_dir: str | Path) -> tuple[Schedule, AnyConfig, list[InstanceRecord]]:
+def load_run(out_dir: str | Path) -> tuple[Schedule, EnvConfig, list[InstanceRecord]]:
     """Load the schedule, config and records of a finished run directory."""
     out_path = Path(out_dir)
     schedule = Schedule.load(out_path / "schedule.json")
-    config = load_config(json.loads((out_path / "config.json").read_text()))
+    config = EnvConfig.from_json(json.loads((out_path / "config.json").read_text()))
     records = [
         InstanceRecord.from_json(json.loads(line))
         for line in (out_path / "records.jsonl").read_text().splitlines()

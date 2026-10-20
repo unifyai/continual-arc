@@ -26,6 +26,6 @@ jobs:
           path: ~/.cache/continual-arc
           key: continual-arc-data-${{ hashFiles('src/continual_arc/data.py') }}
       - name: Fetch pinned data
-        run: uv run continual-arc data fetch --datasets arc1 arc2 ${{ matrix.python-version == '3.12' && 'arc3' || '' }}
+        run: uv run continual-arc data fetch
       - name: Test
         run: uv run pytest

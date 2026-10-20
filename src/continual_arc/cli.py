@@ -9,11 +9,9 @@ import sys
 from pathlib import Path
 
 from continual_arc._version import __version__
-from continual_arc.arc3.env import Arc3Config
 from continual_arc.env import EnvConfig
 
 ENV_KEYS = ("attempt_cap", "demo_cap", "demo_cost", "demos_per_request", "diff_lb", "diff_ub")
-ARC3_KEYS = ("cap_multiplier", "max_actions")
 
 
 def _load_learner(spec: str, kwargs: dict):
@@ -43,21 +41,17 @@ def _load_plugins(specs: list[str], kwargs_values: list[str]) -> list:
     return plugins
 
 
-def _env_config(args, schedule) -> EnvConfig | Arc3Config:
+def _env_config(args, schedule) -> EnvConfig:
     """The env config for a schedule: its config's ``env`` block, then CLI overrides."""
-    from continual_arc.runner import is_arc3
-
-    arc3 = is_arc3(schedule)
-    keys, cls = (ARC3_KEYS, Arc3Config) if arc3 else (ENV_KEYS, EnvConfig)
     base = {}
     cfg_meta = (schedule.meta or {}).get("config") or {}
     if cfg_meta.get("env"):
-        base = {k: v for k, v in cfg_meta["env"].items() if k in keys}
-    for key in keys:
+        base = {k: v for k, v in cfg_meta["env"].items() if k in ENV_KEYS}
+    for key in ENV_KEYS:
         val = getattr(args, key, None)
         if val is not None:
             base[key] = val
-    return cls(**base)
+    return EnvConfig(**base)
 
 
 # -- commands -----------------------------------------------------------------
@@ -217,17 +211,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("data", help="fetch or inspect the pinned upstream data")
     dsub = d.add_subparsers(dest="data_cmd", required=True)
-    df = dsub.add_parser("fetch", help="clone Re-ARC, ARC-AGI and ARC-AGI-2 at the pinned commits; download the pinned ARC-AGI-3 games")
+    df = dsub.add_parser("fetch", help="clone Re-ARC, ARC-AGI and ARC-AGI-2 at the pinned commits")
     df.add_argument("--force", action="store_true", help="re-clone even if present")
-    df.add_argument("--datasets", nargs="+", help="arc1 arc2 arc3 (default all)")
+    df.add_argument("--datasets", nargs="+", help="arc1 arc2 (default all)")
     ds = dsub.add_parser("status", help="show whether the data is present and pinned")
-    ds.add_argument("--datasets", nargs="+", help="arc1 arc2 arc3 (default all)")
+    ds.add_argument("--datasets", nargs="+", help="arc1 arc2 (default all)")
     d.set_defaults(func=cmd_data)
 
     s = sub.add_parser("schedule", help="build or inspect schedules")
     ssub = s.add_subparsers(dest="schedule_cmd", required=True)
     sm = ssub.add_parser("make", help="build a schedule from a named config")
-    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, arc2-{smoke,small}, arc3-{smoke,small}; no track is the default")
+    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, arc2-{smoke,small}; no track is the default")
     sm.add_argument("--mode", help="workstreams | sequential | random | fresh (the transfer reference); required unless --epilogue-users is given")
     sm.add_argument("--seed", type=int, default=0)
     sm.add_argument("--users", type=int, default=1,
@@ -263,7 +257,6 @@ def build_parser() -> argparse.ArgumentParser:
     for key, typ in (
         ("attempt_cap", int), ("demo_cap", int), ("demo_cost", float),
         ("demos_per_request", int), ("diff_lb", float), ("diff_ub", float),
-        ("cap_multiplier", float), ("max_actions", int),
     ):
         r.add_argument(f"--{key.replace('_', '-')}", type=typ, default=None, dest=key)
     r.set_defaults(func=cmd_run)

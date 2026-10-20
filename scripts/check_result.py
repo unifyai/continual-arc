@@ -5,9 +5,9 @@
 A submitted run is the directory the benchmark's runner wrote (`records.jsonl`, `summary.json`, `schedule.json`,
 `config.json`, `meta.json`) with a `submission.json` beside them. The check passes when the schedule is the one the
 benchmark builds for the run's configuration, order and seed, the records cover every slot of it in order, the
-summary is the one the records give, and `submission.json` names what the leaderboard shows. On a grid track it also
-names the demo-cache floor's run on the same model and stream (`floor`, a directory relative to this repository),
-which the share learned is read against. It then prints the leaderboard's numbers: the share learned (the share of the
+summary is the one the records give, and `submission.json` names what the leaderboard shows and the demo-cache
+floor's run on the same model and stream (`floor`, a directory relative to this repository), which the share learned
+is read against. It then prints the leaderboard's numbers: the share learned (the share of the
 learnable budget saved beyond that floor, higher is better), the budget used on the stream and on the held-out
 epilogue (100 times the mean charge over the cap, lower is better) and the share solved within the cap. Nothing here
 calls a model or the network.
@@ -21,7 +21,7 @@ from pathlib import Path
 
 from continual_arc.configs import build_schedule, protocol_of
 from continual_arc.metrics import share_learned, summarize
-from continual_arc.runner import is_arc3, load_run
+from continual_arc.runner import load_run
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -65,20 +65,19 @@ def check(run_dir: Path) -> list[str]:
         if not isinstance(submission.get(field), str) or not submission[field].strip():
             problems.append(f"submission.json needs a {field}")
     learned = None
-    if not is_arc3(schedule):
-        floor_dir = ROOT / str(submission.get("floor", ""))
-        if not submission.get("floor") or not (floor_dir / "records.jsonl").exists():
-            problems.append("submission.json needs a floor: the directory of the demo-cache floor's run on the same model and stream")
-        else:
-            floor_meta = json.loads((floor_dir / "meta.json").read_text())
-            # the baselines wrap every learner in their tracking proxy, so the learner's own name is meta's "learner"
-            if "BareDemoCacheLearner" not in (floor_meta.get("learner", "") + floor_meta.get("learner_class", "")):
-                problems.append(f"{submission['floor']} is not a run of the demo-cache floor (BareDemoCacheLearner)")
-            _, _, floor_records = load_run(floor_dir)
-            try:
-                learned = share_learned(records, floor_records, config)
-            except ValueError as e:
-                problems.append(str(e))
+    floor_dir = ROOT / str(submission.get("floor", ""))
+    if not submission.get("floor") or not (floor_dir / "records.jsonl").exists():
+        problems.append("submission.json needs a floor: the directory of the demo-cache floor's run on the same model and stream")
+    else:
+        floor_meta = json.loads((floor_dir / "meta.json").read_text())
+        # the baselines wrap every learner in their tracking proxy, so the learner's own name is meta's "learner"
+        if "BareDemoCacheLearner" not in (floor_meta.get("learner", "") + floor_meta.get("learner_class", "")):
+            problems.append(f"{submission['floor']} is not a run of the demo-cache floor (BareDemoCacheLearner)")
+        _, _, floor_records = load_run(floor_dir)
+        try:
+            learned = share_learned(records, floor_records, config)
+        except ValueError as e:
+            problems.append(str(e))
 
     cap = config.max_cost
     stream = budget([r for r in benchmark if r.phase == "stream"], cap)
