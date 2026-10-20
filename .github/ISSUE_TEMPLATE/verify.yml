@@ -1,0 +1,108 @@
+name: Verify my learner
+description: Have unify rerun your learner on Continual-ARC's held-out rules, on your own OpenRouter key, for a verified result on the leaderboard.
+title: "Verify: "
+labels: ["verify"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        We rerun your learner on the held-out season, 25 new rules nobody outside unify has seen streamed over 200 instances and then 25 more held out, at a seed of its own, beside the demo-cache floor of the model it plays with on the same instances. Your code runs in the same sandbox as the paper's runs and reaches nothing but our tracking proxy, which makes its model calls on your key. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
+
+        Your model calls are yours to pay, on your key; we pay for the machine. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner and its floor have cost tens of dollars), and encrypt it with our public key:
+
+        ```
+        curl -sO https://raw.githubusercontent.com/unifyai/continual-arc/main/verify/unify-verify.pem
+        printf %s "$OPENROUTER_KEY" | openssl pkeyutl -encrypt -pubin -inkey unify-verify.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64
+        ```
+  - type: input
+    id: name
+    attributes:
+      label: System name
+      description: As the leaderboard should show it, with its version.
+      placeholder: my-harness 1.4, memory on
+    validations:
+      required: true
+  - type: input
+    id: contact
+    attributes:
+      label: Contact
+      description: A GitHub handle or an email address. This issue is public.
+    validations:
+      required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Code repository
+      description: The public GitHub repository your learner installs from with pip.
+      placeholder: https://github.com/you/my-harness
+    validations:
+      required: true
+  - type: input
+    id: commit
+    attributes:
+      label: Commit
+      description: The full 40-character commit to run.
+    validations:
+      required: true
+  - type: input
+    id: learner
+    attributes:
+      label: Learner
+      description: The import path of the class that implements the benchmark's learner protocol (continual_arc.learner).
+      placeholder: my_harness.learners:MyLearner
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model it plays with
+      description: The OpenRouter model id. Your share learned is read against this model's demo-cache floor.
+      placeholder: openai/gpt-6-luna
+    validations:
+      required: true
+  - type: dropdown
+    id: effort
+    attributes:
+      label: Reasoning effort
+      description: The effort your learner plays at, which the floor plays at too. Set on any model call that leaves it unset.
+      options: [minimal, low, medium, high, xhigh, max]
+      default: 2
+    validations:
+      required: true
+  - type: input
+    id: other_models
+    attributes:
+      label: Other models it calls
+      description: Every other OpenRouter model your learner calls, if any.
+  - type: input
+    id: public_run
+    attributes:
+      label: Public-stream run
+      description: The pull request with your run on the public stream, if you have one, so the two can stand side by side.
+  - type: input
+    id: budget
+    attributes:
+      label: Key's credit limit (USD)
+    validations:
+      required: true
+  - type: textarea
+    id: key
+    attributes:
+      label: Encrypted OpenRouter key
+      description: The output of the two commands above. Only the private half of our key can read it.
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Before you submit
+      options:
+        - label: The key was made for this run and is capped at the limit above; I will delete it at OpenRouter once the run ends.
+          required: true
+        - label: "Private Input & Output Logging is off on the key's OpenRouter account: it would show you our held-out tasks, and a run with it on is void."
+          required: true
+        - label: The code is public under an open licence and keeps to the README's "What a learner may use".
+          required: true
+        - label: The learner does not train its weights, which we cannot verify yet.
+          required: true

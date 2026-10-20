@@ -337,8 +337,9 @@ against these rules:
 
 The alias stops the free lookup and a model's recall of a famous task id; it makes a
 determined lookup cost a demonstration or two per task, since a learner can still
-match a bought pair against every solver. The rules and the rerun stop that, and only
-a held-out stream of new rules would make them unnecessary.
+match a bought pair against every solver. The rules and the rerun stop that, and a
+verified result is rerun on a held-out stream of new rules, which no lookup reaches
+([verified results](#verified-results)).
 
 ## Plug-ins
 
@@ -394,9 +395,9 @@ docs/DESIGN.md   design rationale and decisions
 
 ## Submitting a result
 
-The [leaderboard](https://unify.ai/continual-arc/leaderboard) opens with the paper's runs and takes anyone's. There is
-no held-out set: the stream is public, every schedule is deterministic, and a result is taken as reported until we
-rerun it from its code and read the code against what a learner may use, when it is marked as verified.
+The [leaderboard](https://unify.ai/continual-arc/leaderboard) opens with the paper's runs and takes anyone's. A result
+on the public stream is taken as reported. It is marked verified once we have rerun its code on the held-out rules,
+which nobody outside unify has seen ([verified results](#verified-results)).
 
 1. Run your learner on a track's canonical protocol, its `small` configuration in workstreams order at seed 0
    (`arc1-small`, `arc2-small` or `arc3-small`), with `continual-arc run`, and on the same configuration's `fresh`
@@ -425,6 +426,40 @@ rerun it from its code and read the code against what a learner may use, when it
    configuration, order and seed, checks that the records cover every slot in order and that the summary is the one
    the records give, and prints the numbers the leaderboard will show, the share learned against your floor first.
 5. Open a pull request. Questions go to this repository's issues.
+
+### Verified results
+
+We keep a held-out season of new rules: 50 ARC-style rules nobody outside unify has seen, each a generator of fresh
+instances, checked against every public ARC task, 25 streamed over 200 instances and 25 held out, in the shape of
+`arc1-small`. To have a learner verified on it:
+
+1. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner's
+   run and its floor have cost tens of dollars), and keep OpenRouter's Private Input & Output Logging off on its
+   account, since it would show you the held-out tasks; a run with it on is void.
+2. Encrypt the key with our public key, so that only the private half, which never leaves Secret Manager, can read it:
+
+   ```bash
+   curl -sO https://raw.githubusercontent.com/unifyai/continual-arc/main/verify/unify-verify.pem
+   printf %s "$OPENROUTER_KEY" | openssl pkeyutl -encrypt -pubin -inkey unify-verify.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64
+   ```
+
+3. Open an issue with the [Verify my learner](https://github.com/unifyai/continual-arc/issues/new?template=verify.yml)
+   form: your public GitHub repository and the commit to run, the import path of your learner class (installable from
+   the repository with pip, implementing `continual_arc.learner`), the OpenRouter model it plays with and its
+   reasoning effort, any other models it calls, and the encrypted key.
+
+Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,
+whole, inside the sandbox the paper's runs used, which reaches nothing but the tracking proxy: the proxy makes every
+model call on your key, and your code never holds it. Three cells run on the held-out season at a seed of its own: your
+learner on the stream and the held-out rules, your learner reset before each held-out rule for its transfer, and the
+demo-cache floor of the model it plays with on your learner's own instances. The issue then gets the share learned on
+the held-out stream with its 95 percent interval, the learnable budget, the budget used, the share solved, the transfer
+and what each cell's model calls cost, and the result joins the leaderboard as verified, beside your public-stream
+result if you sent one. We delete the key on our side; delete it at OpenRouter too. Only the numbers come back: the
+records, and anything your learner kept, stay with us, since they show the held-out tasks.
+
+You pay for your model calls, on your key; we pay for the machine. A run takes hours, like one on the public stream.
+Learners that train their weights are not verified for now.
 
 ## Run records and trajectories
 
