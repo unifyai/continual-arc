@@ -73,6 +73,12 @@ retention-by-gap curve; `random` replaced it. The workstreams streams are frozen
 ## Metrics
 
 * headline: `score = 100 · (1 − mean_cost / max_cost)`, `max_cost = attempt_cap + demo_cost · demo_cap`
+* cost of an instance: its wrong attempts plus `demo_cost` per demo request when it is solved, and `max_cost` when it
+  is not. Until 20 Oct 2026 an unsolved instance was charged the attempt cap plus its demo requests, so failing
+  without asking cost 8 and asking for every demonstration before failing cost 16: a learner that never asked and
+  never solved scored 50, and one that asked and still failed scored 0. Charging every failure the whole budget makes
+  failing never cheaper than trying, and a demonstration paid for only by an instance it helped to solve.
+  `continual-arc rescore` charges a run written before then this way.
 * acquisition: mean cost on exposure index 0, stream phases only
 * retention: mean cost on re-exposure bucketed by gap (1-10, 11-30, 31-100, 101-300, 301+)
 * exposure curve: mean cost by exposure index (0, 1, 2, 3-5, 6-10, 11+)

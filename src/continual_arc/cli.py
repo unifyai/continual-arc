@@ -201,6 +201,14 @@ def cmd_learned(args) -> int:
     return 0
 
 
+def cmd_rescore(args) -> int:
+    from continual_arc.runner import rescore
+
+    for run_dir in args.run_dirs:
+        print(f"{run_dir}: {rescore(run_dir)} records recharged")
+    return 0
+
+
 # -- parser -------------------------------------------------------------------
 
 
@@ -282,6 +290,11 @@ def build_parser() -> argparse.ArgumentParser:
     lr.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% interval")
     lr.add_argument("--json", action="store_true")
     lr.set_defaults(func=cmd_learned)
+
+    rs = sub.add_parser("rescore", help="charge run directories written before 20 Oct 2026 as the benchmark charges now: "
+                                        "an unsolved instance costs max_cost")
+    rs.add_argument("run_dirs", nargs="+")
+    rs.set_defaults(func=cmd_rescore)
     return p
 
 

@@ -19,8 +19,9 @@
 ARC-AGI measures how efficiently a system picks up a new skill from a few examples, but it serves each task once.
 Continual-ARC serves a lifelong stream of ARC-AGI-1 tasks instead, in which the same tasks return
 after dormant gaps with fresh instances while new tasks keep arriving. On each instance the learner may pay for one
-more demonstration or submit an answer, and it may try again after a wrong one. A wrong answer and a demonstration
-each cost one, against a cap of sixteen, and we charge the stream the share of that budget it used. A stronger model
+more demonstration or submit an answer, and it may try again after a wrong one. On an instance it solves, a wrong
+answer and a demonstration each cost one; an instance it does not solve costs the whole budget of sixteen, however it
+failed, and we charge the stream the share of that budget it used. A stronger model
 uses less of that budget without learning anything, so we read each learner against a floor that caches each task's
 demonstrations on its own model: its share learned is the share of the budget left to learn that it saves, from 0 for
 the cache to 1 for perfect memory. A learner may keep anything at all between instances, which puts an agent harness
@@ -74,9 +75,10 @@ The environment serves one instance at a time and accepts three actions:
 |-----------------|--------------------------------------------------------------------------|------|
 | `Submit(grid)`  | correct → instance ends; wrong → one more attempt used                   | 1 if wrong |
 | `RequestDemos()`| returns one more demonstration pair, up to eight per instance (a ninth request is refused at no cost): a fresh Re-ARC pair on the stream; in the epilogue, whose tasks have no generators, one of the task's own pairs, and nothing after the last of them (the instance's demo cap is the pairs it has, and the observation shows it) | `demo_cost` (default 1) |
-| `GiveUp()`      | instance ends as failed                                                  | remaining attempts up to the cap |
+| `GiveUp()`      | instance ends as failed                                                  | the rest of the budget, up to `max_cost` |
 
-An instance that hits the attempt cap or is given up is charged all its attempts, as well as the
+An instance that ends unsolved, at the attempt cap or given up, is charged the whole budget, `max_cost`, whatever
+it spent, so failing is never cheaper than asking; a solved instance is charged its wrong attempts and the
 demonstrations it bought. The budget used is `100 * mean_cost / max_cost`, with
 `max_cost = attempt_cap + demo_cost * demo_cap`, 8 + 8 = 16, and lower is better; the
 `score` in `summary.json` and the report is its complement, `100 - budget used`.

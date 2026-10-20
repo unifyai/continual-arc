@@ -6,7 +6,7 @@ from conftest import as_users
 from continual_arc.aliases import TaskAliases
 from continual_arc.env import EnvConfig, RequestDemos
 from continual_arc.learner import BaseLearner
-from continual_arc.runner import load_run, run
+from continual_arc.runner import load_run, rescore, run
 from continual_arc.schedule import RANDOM, epilogue_schedule, sequential_params, stream_schedule
 from continual_arc.testing import DemoHungryLearner, EchoLearner, ShiftMemoryLearner
 
@@ -74,8 +74,9 @@ def test_epilogue_with_reset_each(fake_registry, fake_source):
 def test_echo_learner_hits_cap(fake_registry, fake_source):
     sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=sequential_params(2), mode="sequential")
     result = run(EchoLearner(), sched, config=EnvConfig(attempt_cap=3), registry=fake_registry)
-    assert all(r.cost == 3 and not r.solved for r in result.records)
-    assert result.summary["overall"]["score"] == 100 * (1 - 3 / EnvConfig(attempt_cap=3).max_cost)
+    # never solved: every instance costs the whole budget, 3 attempts + 8 demos
+    assert all(r.cost == EnvConfig(attempt_cap=3).max_cost == 11 and not r.solved for r in result.records)
+    assert result.summary["overall"]["score"] == 0
 
 
 def test_demo_hungry_learner_respects_cap(fake_registry, fake_source):
@@ -387,3 +388,23 @@ def test_the_cli_passes_the_alias_style(tmp_path, monkeypatch):
         cli.main(["run", "--learner", "continual_arc.testing:GiveUpLearner", "--schedule", str(sched), "--quiet",
                   "--alias-style", "names"])
     assert seen["alias_style"] == "names"
+
+
+def test_rescore_charges_an_old_run_as_the_benchmark_charges_now(fake_registry, fake_source, tmp_path):
+    """A run written under the earlier rule (an unsolved instance charged the attempt cap plus its demo requests) is
+    recharged: every unsolved instance costs max_cost, the summary follows, meta.json says so, and a second pass
+    changes nothing."""
+    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=sequential_params(2), mode="sequential")
+    out = tmp_path / "run"
+    config = EnvConfig(attempt_cap=3)
+    run(EchoLearner(), sched, config=config, out_dir=out, registry=fake_registry)
+    lines = [json.loads(line) for line in (out / "records.jsonl").read_text().splitlines()]
+    for d in lines:   # as the earlier rule charged them: the attempt cap, no demos asked
+        d["cost"] = 3.0
+    (out / "records.jsonl").write_text("".join(json.dumps(d) + "\n" for d in lines))
+    assert rescore(out) == len(lines)
+    _, _, records = load_run(out)
+    assert all(r.cost == config.max_cost == 11 for r in records)
+    assert json.loads((out / "summary.json").read_text())["overall"]["score"] == 0
+    assert json.loads((out / "meta.json").read_text())["rescored"]["records_changed"] == len(lines)
+    assert rescore(out) == 0

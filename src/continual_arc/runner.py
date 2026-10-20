@@ -447,3 +447,37 @@ def load_run(out_dir: str | Path) -> tuple[Schedule, EnvConfig, list[InstanceRec
         if line.strip()
     ]
     return schedule, config, records
+
+
+def rescore(out_dir: str | Path) -> int:
+    """Charge a run directory written before 20 Oct 2026 under the rule since (:mod:`continual_arc.env`): an unsolved
+    instance costs the whole budget, ``max_cost``, where it was charged the attempt cap plus its demo requests, and a
+    solved one costs what it was charged, the same under both. ``records.jsonl`` and the metrics in ``summary.json`` are
+    rewritten and ``meta.json`` gains a ``rescored`` entry saying when, how many records changed and the rule the run
+    was played under; the play itself (events, transcripts, the rules text the learner read) is left as it was. Returns
+    the number of records whose cost changed, none on a second pass."""
+    out_path = Path(out_dir)
+    schedule, config, records = load_run(out_path)
+    changed = 0
+    for record in records:
+        if not record.solved and record.cost != config.max_cost:
+            record.cost = config.max_cost
+            changed += 1
+    if not changed:
+        return 0
+    (out_path / "records.jsonl").write_text("".join(json.dumps(r.to_json()) + "\n" for r in records))
+    summary_path = out_path / "summary.json"
+    played = json.loads(summary_path.read_text()) if summary_path.exists() else {}
+    summary = summarize(records, config, checkpoints=(schedule.meta.get("config") or {}).get("checkpoints", ()))
+    summary.update({k: played[k] for k in ("protocol", "plugins", "addon") if k in played})
+    summary_path.write_text(json.dumps(summary, indent=1))
+    meta_path = out_path / "meta.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    meta["rescored"] = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "records_changed": changed,
+        "rule": "an unsolved instance costs max_cost",
+        "played_under": "an unsolved instance charged attempt_cap plus demo_cost per demo request, and so told",
+    }
+    meta_path.write_text(json.dumps(meta, indent=1))
+    return changed

@@ -56,8 +56,9 @@ def test_wrong_attempts_accumulate_then_cap(fake_registry, fake_source):
     r3 = env.step(Submit(wrong))
     assert r3.feedback.failed and r3.instance_done and r3.stream_done
     rec = r3.record
-    assert not rec.solved and rec.wrong_attempts == 3 and rec.cost == 3 and not rec.gave_up
-    assert env.total_cost == 3
+    # unsolved: the whole budget, 3 attempts + 8 demos at 1, the last step charging the rest of it
+    assert not rec.solved and rec.wrong_attempts == 3 and rec.cost == 11 and not rec.gave_up
+    assert r3.cost_delta == 9 and env.total_cost == 11
 
 
 def test_invalid_submission_counts_as_wrong(fake_registry, fake_source):
@@ -66,7 +67,7 @@ def test_invalid_submission_counts_as_wrong(fake_registry, fake_source):
     r = env.step(Submit([[1, 2], [3]]))
     assert not r.feedback.valid and not r.feedback.correct and r.feedback.attempts_used == 1
     r = env.step(Submit("garbage"))
-    assert r.instance_done and r.record.invalid_submissions == 2 and r.record.cost == 2
+    assert r.instance_done and r.record.invalid_submissions == 2 and r.record.cost == 10
 
 
 def test_demo_requests_cost_and_cap(fake_registry, fake_source):
@@ -86,18 +87,37 @@ def test_demo_requests_cost_and_cap(fake_registry, fake_source):
     assert r4.record.solved and r4.record.demo_requests == 2 and r4.record.cost == pytest.approx(1.0)
 
 
-def test_give_up_charges_remaining_cap(fake_registry, fake_source):
+def test_give_up_charges_the_rest_of_the_budget(fake_registry, fake_source):
     env, _ = make_env(fake_registry, fake_source, n=2, attempt_cap=5)
     obs = env.reset()
     wrong = [[9 for _ in row] for row in obs.input]
     env.step(Submit(wrong))
     env.step(RequestDemos())
     r = env.step(GiveUp())
-    assert isinstance(r.feedback, GiveUpFeedback) and r.feedback.charged == 4
+    assert isinstance(r.feedback, GiveUpFeedback) and r.feedback.charged == 11  # 13 less the 2 spent
     assert r.record.gave_up and not r.record.solved
-    assert r.record.wrong_attempts == 5 and r.record.cost == 6  # 5 attempts + 1 demo
-    assert env.total_cost == 6
+    assert r.record.wrong_attempts == 1 and r.record.demo_requests == 1 and r.record.cost == 13
+    assert env.total_cost == 13
     assert r.observation.step == 1
+
+
+def test_an_unsolved_instance_costs_the_whole_budget_however_it_failed(fake_registry, fake_source):
+    """Failing is never cheaper than trying: guessing to the cap, asking for every demonstration
+    first, and giving up at once all cost max_cost."""
+    costs = []
+    for demos, give_up in ((0, False), (8, False), (0, True)):
+        env, _ = make_env(fake_registry, fake_source, n=1)
+        obs = env.reset()
+        wrong = [[9 for _ in row] for row in obs.input]
+        for _ in range(demos):
+            env.step(RequestDemos())
+        if give_up:
+            r = env.step(GiveUp())
+        else:
+            while not (r := env.step(Submit(wrong))).instance_done:
+                pass
+        costs.append((r.record.cost, env.total_cost))
+    assert costs == [(16.0, 16.0)] * 3
 
 
 def test_step_after_done_raises(fake_registry, fake_source):

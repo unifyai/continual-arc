@@ -10,12 +10,14 @@ instance of a round is open at once, :meth:`ContinualArcEnv.step` names the inst
 it acts on, and the round's records are committed together, in slot order, when its
 last instance ends. With one user a round is one instance and the environment is serial.
 
-Cost per instance is ``wrong_attempts + demo_cost * demo_requests``. A failed
-instance (cap reached or give-up) is charged the full attempt cap. Demo requests
-beyond the instance's demo cap are refused at no cost: the configuration's cap, or
-fewer when the task's source has fewer demonstrations to serve (a held-out task, which
-has no generator, serves only its own pairs). The cost bound is the configuration's
-either way. Nothing else is scored.
+A solved instance costs ``wrong_attempts + demo_cost * demo_requests``. An instance
+that ends unsolved (cap reached or give-up) costs the whole budget,
+:attr:`EnvConfig.max_cost`, whatever it spent: failing is never cheaper than trying,
+and a demonstration is paid for only by an instance it helped to solve. Demo requests beyond the instance's demo
+cap are refused at no cost: the configuration's cap, or fewer when the task's source
+has fewer demonstrations to serve (a held-out task, which has no generator, serves only
+its own pairs). The cost bound is the configuration's either way. Nothing else is
+scored.
 """
 
 from __future__ import annotations
@@ -507,8 +509,9 @@ class ContinualArcEnv:
         next round opened. Returns the record, the next observation and, on a
         completed round, its records."""
         slot = self._slots[cur.index]
-        wrong = cur.attempts if solved else self.config.attempt_cap
-        cost = wrong + self.config.demo_cost * cur.demo_requests
+        spent = self._spent(cur)
+        cost = spent if solved else self.config.max_cost
+        self._total_cost += cost - spent
         record = InstanceRecord(
             step=cur.index,
             task_id=slot.task_id,
@@ -519,7 +522,7 @@ class ContinualArcEnv:
             instance_seed=slot.instance_seed,
             reset_before=slot.reset_before,
             solved=solved,
-            wrong_attempts=wrong,
+            wrong_attempts=cur.attempts,
             invalid_submissions=cur.invalid,
             demo_requests=cur.demo_requests,
             gave_up=gave_up,
@@ -562,8 +565,9 @@ class ContinualArcEnv:
         failed = cur.attempts >= self.config.attempt_cap
         fb = SubmitFeedback(correct=False, valid=valid, attempts_used=cur.attempts, failed=failed)
         if failed:
+            rest = self.config.max_cost - self._spent(cur)   # the unsolved instance's charge up to the whole budget
             record, nxt, committed = self._finish(cur, solved=False, gave_up=False)
-            return StepResult(fb, 1.0, True, nxt is None, record, nxt, committed)
+            return StepResult(fb, 1.0 + rest, True, nxt is None, record, nxt, committed)
         self._focus = cur.index
         return StepResult(fb, 1.0, False, False, None, self.observation(cur.index))
 
@@ -594,8 +598,11 @@ class ContinualArcEnv:
         return StepResult(fb, self.config.demo_cost, False, False, None, self.observation(cur.index))
 
     def _give_up(self, cur: _Current) -> StepResult:
-        charged = float(self.config.attempt_cap - cur.attempts)
-        self._total_cost += charged
+        charged = self.config.max_cost - self._spent(cur)   # the rest of the whole budget
         fb = GiveUpFeedback(charged=charged)
         record, nxt, committed = self._finish(cur, solved=False, gave_up=True)
         return StepResult(fb, charged, True, nxt is None, record, nxt, committed)
+
+    def _spent(self, cur: _Current) -> float:
+        """What ``cur`` has been charged so far: one per wrong attempt and ``demo_cost`` per demo request."""
+        return cur.attempts + self.config.demo_cost * cur.demo_requests
