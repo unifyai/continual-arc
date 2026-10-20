@@ -13,9 +13,9 @@ last instance ends. With one user a round is one instance and the environment is
 Cost per instance is ``wrong_attempts + demo_cost * demo_requests``. A failed
 instance (cap reached or give-up) is charged the full attempt cap. Demo requests
 beyond the instance's demo cap are refused at no cost: the configuration's cap, or
-fewer when the task's source has fewer demonstrations to serve (a task without
-generators on the ARC-AGI-2 track serves only its own pairs). The cost bound is the
-configuration's either way. Nothing else is scored.
+fewer when the task's source has fewer demonstrations to serve (a held-out task, which
+has no generator, serves only its own pairs). The cost bound is the configuration's
+either way. Nothing else is scored.
 """
 
 from __future__ import annotations
@@ -37,11 +37,10 @@ class EnvConfig:
     """Wrong submissions allowed before the instance is marked failed."""
     demo_cap: int = 8
     """Demo requests allowed per instance; further requests are refused at no cost. Each request
-    buys one more pair (``demos_per_request``): a fresh Re-ARC pair on the ARC-AGI-1 stream; on a task
-    without generators (the ARC-AGI-2 track, both epilogues) the task's own pairs and nothing after them,
-    so there an instance's cap is the number of pairs its task has left. With eight attempts and eight
-    requests the cost bound is 16 on every grid track (26 Sep; one request buying the whole set, bound 9,
-    from 23 Sep; own pairs only on the ARC-AGI-1 epilogue from 27 Sep)."""
+    buys one more pair (``demos_per_request``): a fresh Re-ARC pair on the stream; in the epilogue, whose
+    tasks have no generators, the task's own pairs and nothing after them, so there an instance's cap is the
+    number of pairs its task has left. With eight attempts and eight requests the cost bound is 16 (26 Sep;
+    one request buying the whole set, bound 9, from 23 Sep; own pairs only in the epilogue from 27 Sep)."""
     demo_cost: float = 1.0
     """Cost of one demo request, in units of one wrong attempt."""
     demos_per_request: int = 1
@@ -438,9 +437,8 @@ class ContinualArcEnv:
             end += 1
         for i in range(index, end):
             slot = self._slots[i]
-            visit = self._infos[i].exposure_index   # which visit of the task this is (every user's counted)
-            pair = self.registry.test_instance(slot.task_id, slot.instance_seed, exposure=visit)
-            self._open[i] = _Current(i, pair, self._infos[i], self._demo_cap(slot, pair, visit))
+            pair = self.registry.test_instance(slot.task_id, slot.instance_seed)
+            self._open[i] = _Current(i, pair, self._infos[i], self._demo_cap(slot, pair))
         self._round_end = end
         self._focus = index
         return self.observation(index)
@@ -569,10 +567,10 @@ class ContinualArcEnv:
         self._focus = cur.index
         return StepResult(fb, 1.0, False, False, None, self.observation(cur.index))
 
-    def _demo_cap(self, slot: Slot, pair: Pair, visit: int) -> int:
+    def _demo_cap(self, slot: Slot, pair: Pair) -> int:
         """The instance's demo cap: the configuration's, or the requests that the source's supply of
         demonstrations for the instance fills, when that is fewer."""
-        supply = self.registry.demo_supply(slot.task_id, slot.instance_seed, pair, exposure=visit)
+        supply = self.registry.demo_supply(slot.task_id, slot.instance_seed, pair)
         if supply is None:
             return self.config.demo_cap
         return min(self.config.demo_cap, -(-supply // self.config.demos_per_request))
@@ -589,7 +587,6 @@ class ContinualArcEnv:
             cur.demo_requests,
             self.config.demos_per_request,
             cur.pair,
-            exposure=cur.info.exposure_index,
         )
         cur.demo_requests += 1
         self._total_cost += self.config.demo_cost

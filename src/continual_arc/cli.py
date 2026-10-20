@@ -60,7 +60,7 @@ def _env_config(args, schedule) -> EnvConfig:
 def cmd_data(args) -> int:
     from continual_arc import data
 
-    datasets = tuple(args.datasets) if args.datasets else data.DATASETS
+    datasets = tuple(args.datasets) if args.datasets else (data.DATASET_ARC1,)
     for ds in datasets:
         if ds not in data.DATASETS:
             raise SystemExit(f"unknown dataset {ds!r}; choose from {data.DATASETS}")
@@ -211,17 +211,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("data", help="fetch or inspect the pinned upstream data")
     dsub = d.add_subparsers(dest="data_cmd", required=True)
-    df = dsub.add_parser("fetch", help="clone Re-ARC, ARC-AGI and ARC-AGI-2 at the pinned commits")
+    df = dsub.add_parser("fetch", help="clone Re-ARC and ARC-AGI at the pinned commits")
     df.add_argument("--force", action="store_true", help="re-clone even if present")
-    df.add_argument("--datasets", nargs="+", help="arc1 arc2 (default all)")
+    df.add_argument("--datasets", nargs="+",
+                    help="arc1, the track (the default); arc2 also clones ARC-AGI-2, whose public tasks new rules are "
+                         "screened against")
     ds = dsub.add_parser("status", help="show whether the data is present and pinned")
-    ds.add_argument("--datasets", nargs="+", help="arc1 arc2 (default all)")
+    ds.add_argument("--datasets", nargs="+", help="arc1 (the default) and arc2")
     d.set_defaults(func=cmd_data)
 
     s = sub.add_parser("schedule", help="build or inspect schedules")
     ssub = s.add_subparsers(dest="schedule_cmd", required=True)
     sm = ssub.add_parser("make", help="build a schedule from a named config")
-    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, arc2-{smoke,small}; no track is the default")
+    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}")
     sm.add_argument("--mode", help="workstreams | sequential | random | fresh (the transfer reference); required unless --epilogue-users is given")
     sm.add_argument("--seed", type=int, default=0)
     sm.add_argument("--users", type=int, default=1,

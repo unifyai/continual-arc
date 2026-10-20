@@ -10,7 +10,6 @@ def data_available(dataset: str = "arc1") -> bool:
 
 
 needs_data = pytest.mark.skipif(not data_available(), reason="pinned data not fetched")
-needs_arc2 = pytest.mark.skipif(not data_available("arc2"), reason="pinned ARC-AGI-2 data not fetched")
 
 
 @pytest.fixture

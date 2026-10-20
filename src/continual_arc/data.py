@@ -7,8 +7,9 @@ Three upstream repositories are pinned by commit:
 * ARC-AGI (Apache-2.0) provides the original 400 training and 400 evaluation
   tasks as JSON.
 * ARC-AGI-2 (Apache-2.0) provides the 1,000 training and 120 evaluation tasks
-  of the second edition, JSON in the same schema. It has no generators; see
-  :mod:`continual_arc.augment` for how instances are made from it.
+  of the second edition, JSON in the same schema. No track serves them: they are
+  fetched only on request (``arc2``), so that new rules, such as the held-out
+  season's, can be screened against every public ARC task.
 
 All are cloned into ``$CONTINUAL_ARC_DATA`` (default ``~/.cache/continual-arc``)
 by :func:`fetch`. Nothing is vendored into this package, so the benchmark data is
@@ -40,16 +41,14 @@ DATASET_ARC1 = "arc1"
 DATASET_ARC2 = "arc2"
 DATASETS = (DATASET_ARC1, DATASET_ARC2)
 
-# Upstream name -> (repo, commit, folder under the data root). ``arc1`` needs the
-# first two; ``arc2`` needs the third.
+# Upstream name -> (repo, commit, folder under the data root). ``arc1``, the track, needs the
+# first two; ``arc2`` the third.
 _UPSTREAMS = {
     "re-arc": (REARC_REPO, REARC_COMMIT, "re-arc"),
     "ARC-AGI": (ARC_REPO, ARC_COMMIT, "ARC-AGI"),
     "ARC-AGI-2": (ARC2_REPO, ARC2_COMMIT, "ARC-AGI-2"),
 }
-# ``arc2`` also needs ARC-AGI-1: the ARC-AGI-2 track serves only the tasks that are new to the
-# second edition (:func:`arc2_new_task_ids`), so it must know which ids the first edition has.
-_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2", "ARC-AGI")}
+_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2",)}
 
 
 class DataNotFound(RuntimeError):
@@ -113,7 +112,7 @@ def _head(path: Path) -> str | None:
         return None
 
 
-def fetch(force: bool = False, datasets: tuple[str, ...] = DATASETS) -> dict[str, str]:
+def fetch(force: bool = False, datasets: tuple[str, ...] = (DATASET_ARC1,)) -> dict[str, str]:
     """Clone the upstream repositories at their pinned commits.
 
     Returns a mapping of name -> local path. Safe to call repeatedly.
@@ -128,7 +127,7 @@ def fetch(force: bool = False, datasets: tuple[str, ...] = DATASETS) -> dict[str
     return out
 
 
-def status(datasets: tuple[str, ...] = DATASETS) -> dict[str, dict[str, object]]:
+def status(datasets: tuple[str, ...] = (DATASET_ARC1,)) -> dict[str, dict[str, object]]:
     """Report whether each upstream is present and at the pinned commit."""
     out: dict[str, dict[str, object]] = {}
     for dataset in datasets:
@@ -211,27 +210,4 @@ def arc_task_ids(split: str, dataset: str = DATASET_ARC1) -> list[str]:
     return sorted(p.stem for p in folder.glob("*.json"))
 
 
-def arc1_task_ids() -> frozenset[str]:
-    """Every ARC-AGI-1 task id, training and evaluation splits together."""
-    return frozenset(arc_task_ids("training", DATASET_ARC1)) | frozenset(arc_task_ids("evaluation", DATASET_ARC1))
-
-
-def arc2_new_task_ids(split: str) -> list[str]:
-    """The ARC-AGI-2 tasks of ``split`` that are not ARC-AGI-1 tasks.
-
-    The ARC-AGI-2 public training set carries the first edition inside it: 767 of its
-    1000 tasks are ARC-AGI-1 tasks (391 from its training split, 376 from its
-    evaluation split), and 6 of the 120 evaluation tasks are too. A model's
-    ARC-AGI-2 leaderboard score is measured on the calibrated evaluation sets, and
-    a stream drawn from the training set was in practice an ARC-AGI-1 stream,
-    solved at first sight by a model that scores 18 percent on the second edition
-    (23 September 2026). The training set is also uncalibrated, "very easy to very
-    difficult" in ARC Prize's words, so even its 233 new tasks do not carry the
-    board's difficulty. The track therefore draws its stream and its epilogue from
-    the 114 evaluation tasks new to ARC-AGI-2, the set the board is calibrated
-    against; the training split is left out. ``split`` is ``"evaluation"`` for
-    the track; ``"training"`` (233 tasks) is kept for ablations.
-    """
-    old = arc1_task_ids()
-    return [t for t in arc_task_ids(split, DATASET_ARC2) if t not in old]
 

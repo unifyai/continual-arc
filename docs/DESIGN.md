@@ -21,13 +21,12 @@ caching outputs pointless.
 | attempts | unlimited up to a cap; cost = wrong attempts | retention shows up as fewer attempts on recurrence |
 | task identity | task id always exposed | isolates memory from recognition; recognition can be a later track |
 | demos | on request, at a cost equal to one wrong attempt | makes remembering an economic decision |
-| score | mean cost per instance = wrong attempts + demo requests | one number per track; compute/tokens/memory are plotted, not scored |
-| tracks | two, one per ARC-AGI edition, named in every config (`arc1-small`, `arc2-small`); no default track; no pooled or averaged score across tracks | each edition gives signal for a different class of model, so an average would mix incommensurable measurements and a default would tie the benchmark to one class |
-| canonical protocol | per track: the `small` config, workstreams mode, epilogue on, default environment settings, mean over seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote per track, and the knobs must not let a non-standard run pass as it |
+| score | mean cost per instance = wrong attempts + demo requests | one number; compute/tokens/memory are plotted, not scored |
+| track | one, ARC-AGI-1 (`arc1`), named in every config (`arc1-small`); a bare size names nothing | its Re-ARC generators give every stream task fresh, verified instances without end, so a return is never a lookup; one track gives a learner one number, and the held-out season that verifies results is laid out as `arc1-small`. ARC-AGI-2 has no generators, so its stream rested on augmentation, and ARC-AGI-3 serves levels, not fresh instances of a rule (Dan, 19 Oct 2026) |
+| canonical protocol | the `arc1-small` config, workstreams mode, epilogue on, default environment settings, mean over seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
 | epilogue | never-seen evaluation tasks after the stream | measures forward transfer, not just retention |
 | add-ons | optional run-time auxiliary episodes, tagged separately | permits adaptive interventions such as spaced review without making them part of the learner protocol |
-| ARC-AGI-2 | stream and epilogue from the 114 evaluation tasks new to the second edition, the stream's 25 served under seeded augmentations (the training set is 767/1000 ARC-AGI-1 tasks and uncalibrated: a stream drawn from it was solved at first sight by a model at 18% on the ARC-AGI-2 leaderboard, 23 Sep 2026; the evaluation set is what the board is calibrated against) (D8 symmetry, colour relabelling with 0 fixed, restricted per task to what its rule survives: arc2_invariances.json labels all 114, and a visit takes a frame of its own; the stream draws the 100 tasks with eight distinct frames, the epilogue any of the 114; own pairs only, 26 Sep 2026), same augmentation for the test pair and its demos within an instance, a fresh one per instance; epilogue over the rest of the pool, unaugmented | no generators exist; augmentation keeps recurrence from being a lookup while presenting one consistent rule per instance. The assumption that rules commute with symmetry and relabelling fails for some tasks, and the paper says so |
 
 ## What a learner is shown
 
@@ -55,7 +54,7 @@ of the process, from blocked to structureless:
 
 * `sequential`: one task active, one spell of its whole supply, no return (blocked practice).
 * `workstreams`: the process's defaults, a few tasks active in bursts, dormant between them, new
-  tasks arriving; the mode of every track's canonical number.
+  tasks arriving; the mode of the canonical number.
 * `random`: every task active from the first step, spells that never end (the i.i.d. control; a
   system's workstreams score minus its random score is what burstiness and dormancy cost it).
 
@@ -171,10 +170,6 @@ test, not a floor. Harnesses, methods and weight-based learners are the standing
 `continual-arc-baselines`.
 
 ## Open questions
-
-* Settled 26 Sep 2026: the free ARC-AGI-2 augmentation changed the rule of about two thirds of
-  tasks from one instance to the next; each task is now drawn only under what its labelled rule
-  survives (`arc2_invariances.json`), one frame per visit.
 
 * Task-agnostic track (no task id) once the task-aware version is established.
 * Settled 27 Sep 2026: the ARC-AGI-1 epilogue serves only its tasks' own pairs too, so no track pads with

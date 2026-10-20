@@ -1,12 +1,9 @@
-"""Named benchmark configurations, the tracks they belong to, and the modes built
+"""Named benchmark configurations, the track they belong to, and the modes built
 from them.
 
-Continual-ARC is two tracks, one per ARC-AGI edition, and no track is the
-default: every configuration name carries its track (``arc1-small``,
-``arc2-small``). The tracks are not commensurable, because each edition gives
-signal for a different class of model, so there is no pooled or averaged score
-across them. Each track has one canonical number for each number of
-users served at once: the score on its ``small`` configuration in workstreams mode
+Continual-ARC is one track, ARC-AGI-1 (``arc1``), and every configuration name
+carries it (``arc1-small``), so a bare size such as ``small`` names nothing. The
+track has one canonical number for each number of users served at once: the score on its ``small`` configuration in workstreams mode
 with the epilogue, at the default environment settings, averaged over seeds 0, 1
 and 2, at 1, 2, 4, 8 or 16 users (:data:`CANONICAL_USERS`,
 :func:`canonical_protocol`); learners are compared only at the same number of
@@ -55,9 +52,8 @@ from __future__ import annotations
 
 import random
 from dataclasses import asdict, dataclass, field, replace
-from functools import cache
 
-from continual_arc.data import DATASET_ARC1, DATASET_ARC2, DATASETS
+from continual_arc.data import DATASET_ARC1
 from continual_arc.env import EnvConfig
 from continual_arc.schedule import (
     RANDOM,
@@ -69,13 +65,9 @@ from continual_arc.schedule import (
     stream_schedule,
 )
 from continual_arc.seeds import derive_seed
-from continual_arc.tasks import (
-    SOURCE_ARC2_EVAL,
-    SOURCE_ARC2_EVAL_AUG,
-    SOURCE_ARC_EVAL,
-    SOURCE_REARC,
-)
+from continual_arc.tasks import SOURCE_ARC_EVAL, SOURCE_REARC
 
+TRACKS = (DATASET_ARC1,)
 MODE_SEQUENTIAL = "sequential"
 MODE_WORKSTREAMS = "workstreams"
 MODE_RANDOM = "random"
@@ -108,14 +100,12 @@ class BenchmarkConfig:
     prefix reads of the run, the same whatever horizon the run was carried to."""
     env: EnvConfig = field(default_factory=EnvConfig)
     dataset: str = DATASET_ARC1
-    """``arc1``: the stream draws on Re-ARC generators over the ARC-AGI-1 training
-    tasks and the epilogue on the ARC-AGI-1 evaluation tasks. ``arc2``: the stream
-    draws on the ARC-AGI-2 training tasks under seeded augmentations (there are
-    no generators) and the epilogue on the 120 ARC-AGI-2 evaluation tasks."""
+    """The track: ``arc1``, whose stream draws on Re-ARC generators over the ARC-AGI-1
+    training tasks and whose epilogue on the ARC-AGI-1 evaluation tasks."""
 
     def __post_init__(self) -> None:
-        if self.dataset not in DATASETS:
-            raise ValueError(f"dataset must be one of {DATASETS}, got {self.dataset!r}")
+        if self.dataset not in TRACKS:
+            raise ValueError(f"dataset must be one of {TRACKS}, got {self.dataset!r}")
         if self.stream_length % self.n_tasks:
             raise ValueError("stream_length must be a multiple of n_tasks so sequential mode gives every task the same count")
         if self.users < 1:
@@ -151,11 +141,11 @@ class BenchmarkConfig:
 
     @property
     def stream_source(self) -> str:
-        return SOURCE_REARC if self.dataset == DATASET_ARC1 else SOURCE_ARC2_EVAL_AUG
+        return SOURCE_REARC
 
     @property
     def epilogue_source(self) -> str:
-        return SOURCE_ARC_EVAL if self.dataset == DATASET_ARC1 else SOURCE_ARC2_EVAL
+        return SOURCE_ARC_EVAL
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -198,39 +188,9 @@ CONFIGS: dict[str, BenchmarkConfig] = {
             concurrency=6, burst_mean=6.0, dormancy_median=300.0, dormancy_sigma=1.0, arrival_interval=20.0
         ),
     ),
-    # ARC-AGI-2: the same shapes over the second edition, stream and epilogue both drawn
-    # from the 114 evaluation tasks new to it (data.arc2_new_task_ids): the training set is
-    # mostly ARC-AGI-1 (767 of 1000) and uncalibrated, while the evaluation set is what the
-    # leaderboard is calibrated against. The stream serves its tasks' public pairs augmented
-    # (no generators exist), each task only under the symmetries and recolourings its rule
-    # survives (tasks.INVARIANCES_FILE, which labels all 114, so every size is covered), the
-    # epilogue the rest of the pool unaugmented, so ``n_tasks + n_epilogue_tasks`` cannot
-    # exceed 114. A demonstration request returns one of the task's own pairs, and an
-    # instance's demo cap is the number it has left (Dan, 26 Sep 2026).
-    "arc2-smoke": BenchmarkConfig(
-        name="arc2-smoke",
-        n_tasks=8,
-        stream_length=120,
-        n_epilogue_tasks=8,
-        workstreams=StreamParams(
-            concurrency=3, burst_mean=5.0, dormancy_median=20.0, dormancy_sigma=0.8, arrival_interval=10.0
-        ),
-        dataset=DATASET_ARC2,
-    ),
-    "arc2-small": BenchmarkConfig(
-        name="arc2-small",
-        n_tasks=25,
-        stream_length=200,
-        n_epilogue_tasks=25,
-        workstreams=StreamParams(
-            concurrency=4, burst_mean=3.0, dormancy_median=30.0, dormancy_sigma=1.0, arrival_interval=2.0
-        ),
-        dataset=DATASET_ARC2,
-    ),
 }
 
 
-TRACKS = tuple(DATASETS)
 CANONICAL_MODE = MODE_WORKSTREAMS
 CANONICAL_SEEDS = (0, 1, 2)
 CANONICAL_SIZE = "small"
@@ -318,8 +278,8 @@ def get_config(name_or_config: str | BenchmarkConfig) -> BenchmarkConfig:
     sizes = sorted({n.split("-", 1)[1] for n in CONFIGS})
     if name_or_config in sizes:
         raise KeyError(
-            f"config {name_or_config!r} does not name its track; there is no default track. "
-            f"Choose one of {', '.join(f'{t}-{name_or_config}' for t in TRACKS if f'{t}-{name_or_config}' in CONFIGS)}"
+            f"config {name_or_config!r} does not name its track; "
+            f"choose {', '.join(f'{t}-{name_or_config}' for t in TRACKS if f'{t}-{name_or_config}' in CONFIGS)}"
         )
     raise KeyError(f"unknown config {name_or_config!r}; choose from {sorted(CONFIGS)}")
 
@@ -378,55 +338,23 @@ def config_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
 
 
 def stream_task_pool(cfg: BenchmarkConfig) -> list[str]:
-    """Every task id the stream of ``cfg`` may draw on."""
-    if cfg.dataset == DATASET_ARC1:
-        from continual_arc.rearc import ReArc
+    """Every task id the stream of ``cfg`` may draw on: the ARC-AGI-1 training tasks, through their Re-ARC
+    generators."""
+    from continual_arc.rearc import ReArc
 
-        return ReArc().task_ids
-    # ARC-AGI-2: the evaluation tasks new to the second edition (data.arc2_new_task_ids) whose labels allow
-    # enough distinct frames for a visit never to show a grid an earlier visit showed
-    return list(arc2_stream_pool())
-
-
-@cache
-def arc2_stream_pool() -> tuple[str, ...]:
-    """The ARC-AGI-2 tasks a stream may draw: the new evaluation tasks with at least
-    ``tasks.MIN_STREAM_FRAMES`` distinct frames under their invariance labels. A task with fewer can only
-    be held out, as the epilogue serves each task once (Dan, 26 Sep 2026)."""
-    from continual_arc.data import arc2_new_task_ids
-    from continual_arc.tasks import MIN_STREAM_FRAMES, AugmentedArcSource
-
-    src = AugmentedArcSource("evaluation", dataset="arc2", invariances="labels")
-    return tuple(t for t in arc2_new_task_ids("evaluation") if len(src.frames(t)) >= MIN_STREAM_FRAMES)
-
-
-def shares_pool(cfg: BenchmarkConfig) -> bool:
-    """Whether stream and epilogue draw from one pool, the stream's tasks removed for the
-    epilogue: ``arc2``, whose stream and epilogue are both the new evaluation tasks."""
-    return cfg.dataset == DATASET_ARC2
+    return ReArc().task_ids
 
 
 def epilogue_task_pool(cfg: BenchmarkConfig) -> list[str]:
-    """Every task id the epilogue of ``cfg`` may draw on, before the stream's tasks
-    are removed where the pool is shared (:func:`shares_pool`). On ARC-AGI-2 that is every new evaluation
-    task, those with too few frames for the stream included."""
-    if cfg.dataset == DATASET_ARC2:
-        from continual_arc.data import arc2_new_task_ids
-
-        return arc2_new_task_ids("evaluation")
+    """Every task id the epilogue of ``cfg`` may draw on: the ARC-AGI-1 evaluation tasks."""
     from continual_arc.data import arc_task_ids
 
     return arc_task_ids("evaluation", dataset=cfg.dataset)
 
 
-def _held_out_tasks(cfg: BenchmarkConfig, seed: int, tasks: list[str], eval_task_ids: list[str]) -> list[str]:
-    """The configuration's held-out tasks at ``seed``: ``eval_task_ids`` with the stream's own
-    ``tasks`` removed where stream and epilogue share one pool (:func:`shares_pool`)."""
-    pool = eval_task_ids
-    if shares_pool(cfg):
-        chosen = set(tasks)
-        pool = [t for t in pool if t not in chosen]
-    return select_nested(pool, cfg.n_epilogue_tasks, seed, "epilogue", _size_chain(cfg, "n_epilogue_tasks"))
+def _held_out_tasks(cfg: BenchmarkConfig, seed: int, eval_task_ids: list[str]) -> list[str]:
+    """The configuration's held-out tasks at ``seed``, drawn from ``eval_task_ids``."""
+    return select_nested(eval_task_ids, cfg.n_epilogue_tasks, seed, "epilogue", _size_chain(cfg, "n_epilogue_tasks"))
 
 
 def _user_seeds(cfg: BenchmarkConfig, seed: int) -> list[int]:
@@ -446,38 +374,33 @@ def build_schedule(
 ) -> Schedule:
     """Build the schedule for ``mode`` under ``config`` and ``seed``.
 
-    ``rearc_task_ids`` (the stream pool, whatever the dataset) and
-    ``eval_task_ids`` default to the full pinned pools and are only overridable
-    for testing. For ``arc2`` the epilogue pool defaults to the stream pool and the
-    stream's selected tasks are always removed from it, so the epilogue is held out. The same ``config``/``seed`` pair selects the same task set in
-    every mode, so runs are comparable across modes.
+    ``rearc_task_ids`` (the stream pool) and ``eval_task_ids`` default to the full pinned
+    pools and are only overridable for testing. The same ``config``/``seed`` pair selects the
+    same task set in every mode, so runs are comparable across modes.
     """
     cfg = get_config(config)
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
-    pinned_pools = rearc_task_ids is None
     if rearc_task_ids is None:
         rearc_task_ids = stream_task_pool(cfg)
     tasks = config_tasks(cfg, rearc_task_ids, seed)
     source = cfg.stream_source
-
     if eval_task_ids is None:
-        # the pinned epilogue pool, or for a test's own stream pool on a shared track that pool itself
-        eval_task_ids = epilogue_task_pool(cfg) if pinned_pools or not shares_pool(cfg) else rearc_task_ids
+        eval_task_ids = epilogue_task_pool(cfg)
 
     def one_user(user_seed: int) -> Schedule:
         """One user's own schedule: the stream process and the epilogue order at ``user_seed``,
         over the tasks and held-out tasks drawn at the configuration's ``seed``."""
         if mode == MODE_FRESH:
             # the transfer reference: the held-out tasks alone, a fresh learner before each
-            return epilogue_schedule(_held_out_tasks(cfg, seed, tasks, eval_task_ids), user_seed, cfg.epilogue_source,
+            return epilogue_schedule(_held_out_tasks(cfg, seed, eval_task_ids), user_seed, cfg.epilogue_source,
                                      reset_each=True, name=f"{cfg.name}-fresh")
         one = stream_schedule(
             tasks, cfg.stream_length, user_seed, source, cfg.stream_params(mode), mode, name=f"{cfg.name}-{mode}",
             instances_per_task=cfg.instances_per_task,
         )
         if epilogue and cfg.n_epilogue_tasks > 0:
-            epi = epilogue_schedule(_held_out_tasks(cfg, seed, tasks, eval_task_ids), user_seed, cfg.epilogue_source,
+            epi = epilogue_schedule(_held_out_tasks(cfg, seed, eval_task_ids), user_seed, cfg.epilogue_source,
                                     reset_each=False, name="epilogue")
             one = one.concat(epi, name=one.name)
         return one
@@ -502,17 +425,10 @@ def build_schedule(
         "dataset": cfg.dataset,
         "track": cfg.track,
         "epilogue": bool(epilogue and cfg.n_epilogue_tasks > 0),
-        "pools": {"stream": len(rearc_task_ids), "epilogue": len(eval_task_ids),
-                  "shared": shares_pool(cfg), "arc2_new_only": cfg.dataset == DATASET_ARC2},
+        "pools": {"stream": len(rearc_task_ids), "epilogue": len(eval_task_ids)},
         "parts": parts,
         **user_meta,
     }
-    if cfg.dataset == DATASET_ARC2:
-        from continual_arc.tasks import INVARIANCES_FILE, invariances_digest
-
-        # Which labels restricted the stream's draw, and that only a task's own pairs are served.
-        sched.meta["arc2_augmentation"] = {"invariances": INVARIANCES_FILE, "sha256_12": invariances_digest(),
-                                           "own_pairs_only": True}
     return sched
 
 
@@ -540,13 +456,11 @@ def epilogue_for_users(
         raise ValueError(f"{cfg.name} has no epilogue")
     if not 1 <= users <= cfg.users:
         raise ValueError(f"users must be between 1 and {cfg.name}'s {cfg.users} users, got {users}")
-    pinned_pools = rearc_task_ids is None
     if rearc_task_ids is None:
         rearc_task_ids = stream_task_pool(cfg)
-    tasks = config_tasks(cfg, rearc_task_ids, seed)
     if eval_task_ids is None:
-        eval_task_ids = epilogue_task_pool(cfg) if pinned_pools or not shares_pool(cfg) else rearc_task_ids
-    held_out = _held_out_tasks(cfg, seed, tasks, eval_task_ids)
+        eval_task_ids = epilogue_task_pool(cfg)
+    held_out = _held_out_tasks(cfg, seed, eval_task_ids)
     user_seeds = _user_seeds(cfg, seed)[:users]
     per_user = [epilogue_schedule(held_out, s, cfg.epilogue_source, reset_each=False, name="epilogue")
                 for s in user_seeds]
@@ -559,7 +473,6 @@ def epilogue_for_users(
         "track": cfg.track,
         "epilogue": True,
         "epilogue_only": {"users": users, "of": cfg.users},
-        "pools": {"stream": len(rearc_task_ids), "epilogue": len(eval_task_ids),
-                  "shared": shares_pool(cfg), "arc2_new_only": cfg.dataset == DATASET_ARC2},
+        "pools": {"stream": len(rearc_task_ids), "epilogue": len(eval_task_ids)},
     }
     return sched

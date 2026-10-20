@@ -1,5 +1,4 @@
 import pytest
-from conftest import needs_arc2
 
 from continual_arc.configs import CONFIGS, MODES, build_schedule, get_config, select_tasks
 
@@ -64,27 +63,6 @@ def test_named_configs_arrivals_fit_in_stream():
         assert expected_arrival_span <= 0.75 * cfg.stream_length, cfg.name
 
 
-def test_arc2_config_uses_augmented_stream_and_arc2_epilogue():
-    from continual_arc.configs import build_schedule, get_config
-    from continual_arc.tasks import SOURCE_ARC2_EVAL, SOURCE_ARC2_EVAL_AUG
-
-    cfg = get_config("arc2-smoke")
-    assert cfg.dataset == "arc2"
-    pool = [f"a2-{i:03d}" for i in range(30)]
-    evals = [f"e2-{i:03d}" for i in range(20)]
-    sched = build_schedule(cfg, "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
-    sources = set(sched.sources.values())
-    assert sources == {SOURCE_ARC2_EVAL_AUG, SOURCE_ARC2_EVAL}
-    assert sched.meta["dataset"] == "arc2"
-    stream = [s for s in sched.slots if s.phase != "epilogue"]
-    assert all(sched.sources[s.task_id] == SOURCE_ARC2_EVAL_AUG for s in stream)
-    # one pool: the epilogue is drawn from it with the stream's tasks removed
-    shared = build_schedule(cfg, "workstreams", 0, rearc_task_ids=evals)
-    st = {s.task_id for s in shared.slots if s.phase != "epilogue"}
-    ep = {s.task_id for s in shared.slots if s.phase == "epilogue"}
-    assert st and ep and not st & ep and st | ep <= set(evals)
-
-
 def test_dataset_is_validated():
     import pytest
 
@@ -104,7 +82,6 @@ def test_bare_names_are_refused_because_no_track_is_the_default():
     with pytest.raises(KeyError, match="does not name its track"):
         get_config("small")
     assert get_config("arc1-small").track == "arc1"
-    assert get_config("arc2-small").track == "arc2"
 
 
 def test_canonical_protocol_per_track():
@@ -116,7 +93,7 @@ def test_canonical_protocol_per_track():
     )
     from continual_arc.env import EnvConfig
 
-    for track in ("arc1", "arc2"):
+    for track in ("arc1",):
         proto = canonical_protocol(track)
         assert proto["config"] == f"{track}-small" and proto["mode"] == "workstreams" and proto["epilogue"]
         assert proto["seeds"] == list(CANONICAL_SEEDS)
@@ -278,35 +255,7 @@ def test_checkpoints_are_horizons_within_the_stream_and_scale_with_the_users():
     assert with_users(one, 8).checkpoints == (32, 80) and with_users(with_users(one, 8), 2).checkpoints == (8, 20)
 
 
-@needs_arc2
-def test_arc2_pools_hold_only_tasks_new_to_the_second_edition():
-    from continual_arc.configs import epilogue_task_pool, stream_task_pool
-    from continual_arc.data import arc1_task_ids, arc2_new_task_ids, arc_task_ids
-
-    old = arc1_task_ids()
-    stream = stream_task_pool(get_config("arc2-small"))
-    epi = epilogue_task_pool(get_config("arc2-small"))
-    assert len(old) == 800
-    assert len(arc_task_ids("training", "arc2")) == 1000 and len(arc2_new_task_ids("training")) == 233
-    # the epilogue may hold out any of the 114 new tasks; the stream draws only those whose invariance labels
-    # allow enough distinct frames for no visit to repeat a grid (26 Sep 2026)
-    from continual_arc.tasks import MIN_STREAM_FRAMES, AugmentedArcSource
-
-    assert len(arc_task_ids("evaluation", "arc2")) == 120 and len(epi) == 114 and epi == arc2_new_task_ids("evaluation")
-    assert set(stream) < set(epi) and len(stream) == 100
-    src = AugmentedArcSource("evaluation", dataset="arc2", invariances="labels")
-    assert all(len(src.frames(t)) >= MIN_STREAM_FRAMES for t in stream)
-    assert all(len(src.frames(t)) < MIN_STREAM_FRAMES for t in set(epi) - set(stream))
-    assert not set(epi) & old
-    sched = build_schedule("arc2-small", "workstreams", 0)
-    st = {s.task_id for s in sched.slots if s.phase != "epilogue"}
-    ep = {s.task_id for s in sched.slots if s.phase == "epilogue"}
-    assert len(st) == 25 and len(ep) == 25 and not st & ep and not (st | ep) & old
-    assert st <= set(stream) and (st | ep) <= set(arc_task_ids("evaluation", "arc2"))
-    assert sched.meta["pools"] == {"stream": 100, "epilogue": 114, "shared": True, "arc2_new_only": True}
-
-
-def test_every_grid_track_caps_demo_requests_at_one():
-    for name in ("arc1-small", "arc1-medium", "arc2-smoke", "arc2-small"):
+def test_every_configuration_caps_demo_requests_at_one():
+    for name in ("arc1-small", "arc1-medium"):
         cfg = get_config(name)
         assert cfg.env.demo_cap == 8 and cfg.env.demos_per_request == 1 and cfg.env.attempt_cap == 8 and cfg.env.max_cost == 16, name

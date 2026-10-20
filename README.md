@@ -17,7 +17,7 @@
 # Continual-ARC
 
 ARC-AGI measures how efficiently a system picks up a new skill from a few examples, but it serves each task once.
-Continual-ARC serves a lifelong stream of tasks from ARC-AGI-1 and ARC-AGI-2 instead, in which the same tasks return
+Continual-ARC serves a lifelong stream of ARC-AGI-1 tasks instead, in which the same tasks return
 after dormant gaps with fresh instances while new tasks keep arriving. On each instance the learner may pay for one
 more demonstration or submit an answer, and it may try again after a wrong one. A wrong answer and a demonstration
 each cost one, against a cap of sixteen, and we charge the stream the share of that budget it used. A stronger model
@@ -27,7 +27,7 @@ the cache to 1 for perfect memory. A learner may keep anything at all between in
 keeping notes and a model updating its weights on the same scale.
 
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
-Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the two tracks and the measures.
+Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the track and the measures.
 The learners the paper evaluates, adapters for three agent harnesses among them, are in
 [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The records of every run it reports,
 with the trajectories behind them, are plain JSON in git at
@@ -48,19 +48,18 @@ and [submit the result](#submitting-a-result).
 * **Binary feedback.** Every submission is answered correct or incorrect, as ARC Prize answers it.
 * **Demonstrations cost.** One more input-output pair of the task is available on request, charged like a wrong
   attempt.
-* **Fresh instances.** On ARC-AGI-1 every test input and every demonstration is freshly drawn from the task's Re-ARC
-  generator, and on ARC-AGI-2 each visit of a task serves its own pairs in a frame no earlier visit used. A cached
-  answer never fits the next grid, and caching a demonstration is a choice with a price.
+* **Fresh instances.** Every test input and every demonstration of the stream is freshly drawn from the task's
+  Re-ARC generator. A cached answer never fits the next grid, and caching a demonstration is a choice with a price.
 * **Composable interventions.** Optional plug-ins can insert tagged auxiliary episodes without changing the
   schedule's exposure or gap metadata.
-* **One number per track.** The share learned over the track's stream, against the demo-cache floor on the same
+* **One number.** The share learned over the track's stream, against the demo-cache floor on the same
   model, with the budget used and the share solved beside it. Compute, tokens and memory are logged, not scored.
 
 ## Install
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
-uv run continual-arc data fetch     # clones Re-ARC, ARC-AGI and ARC-AGI-2 at pinned commits
+uv run continual-arc data fetch     # clones Re-ARC and ARC-AGI at pinned commits
 uv run pytest
 ```
 
@@ -74,12 +73,12 @@ The environment serves one instance at a time and accepts three actions:
 | action          | effect                                                                   | cost |
 |-----------------|--------------------------------------------------------------------------|------|
 | `Submit(grid)`  | correct → instance ends; wrong → one more attempt used                   | 1 if wrong |
-| `RequestDemos()`| returns one more demonstration pair, up to eight per instance (a ninth request is refused at no cost): a fresh Re-ARC pair on ARC-AGI-1; on a task without generators (the ARC-AGI-2 track and both epilogues) one of the task's own pairs, in the test's frame, and nothing after the last of them (the instance's demo cap is the pairs it has, and the observation shows it) | `demo_cost` (default 1) |
+| `RequestDemos()`| returns one more demonstration pair, up to eight per instance (a ninth request is refused at no cost): a fresh Re-ARC pair on the stream; in the epilogue, whose tasks have no generators, one of the task's own pairs, and nothing after the last of them (the instance's demo cap is the pairs it has, and the observation shows it) | `demo_cost` (default 1) |
 | `GiveUp()`      | instance ends as failed                                                  | remaining attempts up to the cap |
 
 An instance that hits the attempt cap or is given up is charged all its attempts, as well as the
 demonstrations it bought. The budget used is `100 * mean_cost / max_cost`, with
-`max_cost = attempt_cap + demo_cost * demo_cap`, 8 + 8 = 16 on the grid tracks, and lower is better; the
+`max_cost = attempt_cap + demo_cost * demo_cap`, 8 + 8 = 16, and lower is better; the
 `score` in `summary.json` and the report is its complement, `100 - budget used`.
 
 ## The share learned
@@ -208,44 +207,21 @@ the epilogue schedule. `protocol_of` lists both as deviations from the canonical
 ("stream cut at round 20", "epilogue alone, users 0–3 of 16"); `meta.config` is kept on both,
 so the label stays readable.
 
-## Tracks and the canonical number
+## The track and the canonical number
 
-Continual-ARC is two tracks, one per ARC-AGI edition, and no track is the default.
-Each edition gives signal for a different class of model (ARC-AGI-1 for small open
-models, ARC-AGI-2 for frontier models), so the tracks are not commensurable and there is
-no pooled or averaged score across them. Every
-configuration name carries its track:
+Continual-ARC is one track, ARC-AGI-1 (`arc1`), and every configuration name carries it:
 
 | track | configs | stream | epilogue |
 |---|---|---|---|
 | `arc1` | `arc1-smoke`, `arc1-small`, `arc1-medium`, `arc1-full` | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
-| `arc2` | `arc2-smoke`, `arc2-small` | a draw from the 100 of the 114 ARC-AGI-2 evaluation tasks new to the second edition whose labels allow eight distinct frames, each visit of a task in a frame of its own, drawn only from the augmentations the task's rule survives | the rest of the same 114, held out, unaugmented |
 
-Each track has exactly one canonical number: the share learned on its `small` configuration in
+The track has exactly one canonical number: the share learned on its `small` configuration in
 workstreams mode with the epilogue, at the default environment settings, against the demo-cache
 floor on the same model, at each canonical number of users. Seeds 0, 1 and 2 are all
 canonical; the paper reports seed 0, and the leaderboard compares runs at seed 0. Every run's `summary.json` and `meta.json` carry a `protocol` block that
 names the track and says whether the run is canonical; any other configuration, mode,
 seed or environment setting is an ablation and the report labels it as such. A bare
-size name such as `small` is refused, because that would make one track the default.
-
-**ARC-AGI-2.** `arc2-smoke` and `arc2-small` have the same shapes as the `arc1` configs
-over the second edition. Stream and epilogue both draw from the 114 evaluation tasks new
-to ARC-AGI-2 (`continual_arc.data.arc2_new_task_ids`), the stream's tasks removed for the
-epilogue. The public training set is not used: 767 of its 1000 tasks are ARC-AGI-1 tasks
-(a stream drawn from it was an ARC-AGI-1 stream in practice, solved at first sight by a
-model at 18% on the ARC-AGI-2 board) and its difficulty is uncalibrated, while the
-evaluation set is what the leaderboard is calibrated against, so the board's number is
-the right reference for this stream. ARC-AGI-2 has no generators, so the stream serves each task's public
-pairs under seeded augmentations, the same for the test pair and its demos within an
-instance. Each task is drawn only under the symmetries of the square its rule is unchanged
-by, relabelling only the colours with no fixed role in it, from per-task labels of all 114
-tasks (`continual_arc/arc2_invariances.json`, two independent labelling passes merged
-conservatively), so the rule a learner kept from one instance is the rule of the next; the
-k-th visit of a task is served in the k-th of its distinct frames, so no visit shows a grid
-an earlier visit showed. The stream draws only the 100 tasks with at least eight distinct
-frames (`configs.arc2_stream_pool`); the epilogue holds out any of the 114, unaugmented. An
-instance serves only the task's own pairs. `continual-arc data fetch` pins ARC-AGI-2 too (and ARC-AGI-1, to know which ids to exclude).
+size name such as `small` is refused: a configuration names its track.
 
 ## Quickstart
 
@@ -356,7 +332,7 @@ uv run continual-arc run \
 ```
 src/continual_arc/
   grids.py       grid validation and equality
-  data.py        pinned fetch of Re-ARC, ARC-AGI-1 and ARC-AGI-2
+  data.py        pinned fetch of Re-ARC and ARC-AGI-1, and of ARC-AGI-2 on request, whose public tasks new rules are screened against
   rearc.py       seeded, verified access to the Re-ARC generators
   tasks.py       task sources (generative Re-ARC, fixed ARC JSON) and registry
   schedule.py    Slot/Schedule, the one stream generator and its mode presets, the epilogue
@@ -380,7 +356,7 @@ on the public stream is taken as reported. It is marked verified once we have re
 which nobody outside unify has seen ([verified results](#verified-results)).
 
 1. Run your learner on a track's canonical protocol, its `small` configuration in workstreams order at seed 0
-   (`arc1-small` or `arc2-small`), with `continual-arc run`, and on the same configuration's `fresh`
+   (`arc1-small`), with `continual-arc run`, and on the same configuration's `fresh`
    reference if you want your forward transfer read. To drive an agent harness, start from the adapters and the
    tracking proxy in [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), which count every
    model call whatever the harness does. Read [what a learner may use](#what-a-learner-may-use) first.

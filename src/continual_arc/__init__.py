@@ -1,4 +1,4 @@
-"""Continual-ARC: a continual learning benchmark built on ARC-AGI-1, ARC-AGI-2 and Re-ARC.
+"""Continual-ARC: a continual learning benchmark built on ARC-AGI-1 and Re-ARC.
 
 The benchmark is a single environment with a single interface. A *schedule* is a
 sequence of (task_id, instance_seed) slots; the environment serves a freshly
