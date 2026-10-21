@@ -157,6 +157,7 @@ def run(
     env: ContinualArcEnv | None = None,
     resume: bool = False,
     alias_style: str = "hex",
+    max_concurrent: int | None = None,
 ) -> RunResult:
     """Run ``learner`` over ``schedule`` and return records plus summary.
 
@@ -168,7 +169,9 @@ def run(
     restored and the stream continues from the next one; records and events are
     appended and ``meta.json`` gains a ``resumed_at`` entry. The learner's own
     persistent state is the learner's business. ``alias_style`` is how the learner's view
-    names tasks (:data:`continual_arc.aliases.ALIAS_STYLES`).
+    names tasks (:data:`continual_arc.aliases.ALIAS_STYLES`). ``max_concurrent`` caps how many of
+    a round's users a concurrent learner serves at once (all of them by default), for a round wider
+    than the machine: every user still acts on the state the round began with.
     """
     if env is None:
         env = build_env(schedule, config, registry)
@@ -247,7 +250,7 @@ def run(
                 round_open = True
             if concurrent:
                 committed = _serve_round_concurrently(learner, env, manager, indices, max_actions_per_instance,
-                                                      events_fp, progress, shown)
+                                                      events_fp, progress, shown, max_concurrent)
                 if records_fp is not None:
                     for finished in committed:
                         records_fp.write(json.dumps(finished.to_json()) + "\n")
@@ -346,7 +349,8 @@ def _event_line(obs, learner_action, action, result, feedback) -> str:
     ) + "\n"
 
 
-def _serve_round_concurrently(learner, env, manager, indices, max_actions, events_fp, progress, shown) -> list[InstanceRecord]:
+def _serve_round_concurrently(learner, env, manager, indices, max_actions, events_fp, progress, shown,
+                              max_concurrent=None) -> list[InstanceRecord]:
     """Serve one round of a collective schedule with every user at their own pace: one thread per
     instance, acting, stepping and observing until the instance ends, the environment (and the
     run's files) behind one lock. A wipe the round is marked for happens once, before any user
@@ -400,7 +404,7 @@ def _serve_round_concurrently(learner, env, manager, indices, max_actions, event
             failed.set()
             raise
 
-    with ThreadPoolExecutor(max_workers=len(indices), thread_name_prefix="user") as pool:
+    with ThreadPoolExecutor(max_workers=min(len(indices), max_concurrent or len(indices)), thread_name_prefix="user") as pool:
         futures = [pool.submit(serve, index) for index in indices]
     for future in futures:
         future.result()  # the first failure, if any

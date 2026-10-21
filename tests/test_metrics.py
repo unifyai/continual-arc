@@ -7,7 +7,9 @@ from continual_arc.metrics import (
     score,
     share_learned,
     summarize,
+    transfer,
 )
+from continual_arc.report import transfer_report
 
 
 def rec(step, task, phase="stream", exp=0, gap=None, cost=0.0, solved=True, demos=0, seed=None):
@@ -63,7 +65,7 @@ def test_summarize_shape():
 
 
 def test_forward_transfer():
-    run_recs = [rec(9, "e1", phase="epilogue", cost=1, seed=100), rec(10, "e2", phase="epilogue", cost=2, seed=101)]
+    run_recs = [rec(9, "e1", phase="held-out-test", cost=1, seed=100), rec(10, "e2", phase="held-out-test", cost=2, seed=101)]
     ref_recs = [rec(9, "e1", phase="epilogue", cost=4, seed=100), rec(10, "e2", phase="epilogue", cost=2, seed=101),
                 rec(11, "e3", phase="epilogue", cost=9, seed=102)]
     t = forward_transfer(run_recs, ref_recs, CFG)
@@ -71,6 +73,58 @@ def test_forward_transfer():
     assert t["mean_transfer"] == 1.5
     assert t["transfer_score_points"] == 100 * 1.5 / 16
     assert t["per_task"]["e1"]["transfer"] == 3
+
+
+def held(costs, start=0, phase="held-out-test"):
+    """One instance of the held-out test per held-out task, ``e0``, ``e1``, ..., unsolved at the cap."""
+    return [rec(start + i, f"e{i}", phase=phase, cost=c, solved=c < 16, seed=100 + i) for i, c in enumerate(costs)]
+
+
+def test_transfer_counts_a_runs_frozen_test_alone_and_takes_a_fresh_runs_epilogue_as_a_reference():
+    # the run's epilogue played while still learning never counts; a fresh run's epilogue, wiped before every task,
+    # is frozen by construction and serves as a reference for the held-out test
+    run, reset, floor = held([2, 2, 2, 2]), held([4, 4, 4, 4], phase="epilogue"), held([6, 6, 6, 6])
+    assert transfer(run, reset, floor, CFG, reps=0)["transfer"] == 100 * (4 - 2) / 16
+    assert transfer(held([2, 2, 2, 2], phase="epilogue"), reset, floor, CFG, reps=0)["n"] == 0
+
+
+def test_the_seen_test_reads_new_instances_of_the_streams_tasks_and_clusters_by_task():
+    def seen(costs):
+        # two instances of each of two stream tasks, so the bootstrap draws tasks, not instances
+        return [rec(i, f"t{i // 2}", phase="seen-test", cost=c, solved=c < 16, seed=500 + i) for i, c in enumerate(costs)]
+    run, reset, floor = seen([1, 1, 3, 3]), seen([5, 5, 5, 5]), seen([6, 6, 6, 6])
+    t = transfer(run, reset, floor, CFG, test="seen", reps=200)
+    assert t["test"] == "seen" and t["n"] == 4 and t["tasks"] == 2 and t["transfer"] == 100 * (5 - 2) / 16
+    assert transfer_report(t).startswith("Transfer on the seen test")
+    assert t["ci95"] == [100 * 2 / 16, 100 * 4 / 16]   # a draw takes each task's two instances together
+    assert transfer(run, reset, floor, CFG, reps=0)["n"] == 0   # none of them is a held-out instance
+
+
+def test_transfer_reads_the_stronger_reference():
+    run, reset, floor = held([2, 2, 2, 2]), held([4, 4, 4, 4]), held([6, 6, 6, 6])
+    t = transfer(run, reset, floor, CFG, reps=0)
+    assert t["reference"] == "reset" and t["n"] == 4 and t["tasks"] == 4
+    assert t["transfer"] == 100 * (4 - 2) / 16
+    assert t["solved"] == {"run": 1.0, "reset": 1.0, "floor": 1.0}
+
+
+def test_transfer_a_learner_that_plays_dumb_when_empty_meets_the_bare_model():
+    # Garbage with an empty memory makes the reset copy fail every task at the cap; the bare
+    # model is then the reference, and the run gains only its edge over it.
+    run, reset, floor = held([2, 2, 2, 2]), held([16, 16, 16, 16]), held([3, 3, 3, 3])
+    t = transfer(run, reset, floor, CFG, reps=0)
+    assert t["reference"] == "floor" and t["solved"]["reset"] == 0.0
+    assert t["transfer"] == 100 * (3 - 2) / 16
+
+
+def test_transfer_matches_instances_and_bootstraps_over_tasks():
+    run = held([1, 1, 1, 1, 1, 1])
+    reset = held([3, 3, 3, 3, 3, 3]) + [rec(50, "stream-task", cost=9)]
+    floor = held([5, 5, 5, 5, 5])  # one held-out instance short
+    t = transfer(run, reset, floor, CFG, reps=200)
+    assert t["n"] == 5 and t["transfer"] == 100 * 2 / 16
+    assert t["ci95"][0] == t["ci95"][1] == t["transfer"]  # every task transfers alike, so every draw agrees
+    assert transfer(run, reset, [], CFG)["transfer"] is None
 
 
 def test_checkpoint_scores_read_the_stream_prefix():

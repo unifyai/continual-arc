@@ -68,14 +68,16 @@ def test_modes_share_the_slot_seeds_and_differ_in_order():
 
 
 def test_workstreams_streams_are_frozen():
-    """The canonical streams must never change under refactoring: cells already run on them."""
+    """The canonical streams must never change under refactoring: cells already run on them, and the
+    paper's trained rows resume each round as a prefix of theirs. Only the stream is frozen, so a
+    configuration's held-out epilogue can grow without moving a slot of it."""
     gold = json.loads((Path(__file__).parent / "fixtures" / "stream-golden.json").read_text())
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
     for key, digest in gold.items():
         cfg, mode, seed = key.split("/")
         s = build_schedule(cfg, mode, int(seed), rearc_task_ids=pool, eval_task_ids=evals)
-        stream = [(x.task_id, x.instance_seed, x.phase, x.reset_before) for x in s.slots]
+        stream = [(x.task_id, x.instance_seed, x.phase, x.reset_before) for x in s.slots if x.phase == PHASE_STREAM]
         assert hashlib.sha256(json.dumps(stream).encode()).hexdigest() == digest, key
 
 

@@ -70,9 +70,26 @@ def text_report(summary: dict, title: str = "Continual-ARC run") -> str:
 
 
 def transfer_report(transfer: dict) -> str:
+    title = f"Transfer on the {transfer['test']} test, against the stronger of the learner reset and the bare model"
+    lines = [title, "-" * len(title), f"matched instances: {transfer['n']}"]
+    if not transfer["n"]:
+        return "\n".join(lines + ["no instance of the test was played by all three runs"]) + "\n"
+    solved = transfer["solved"]
+    lines += [
+        f"budget used:  run {_fmt(transfer['run_budget'], 1)}   reset {_fmt(transfer['reset_budget'], 1)}   "
+        f"floor {_fmt(transfer['floor_budget'], 1)}   (reference: {transfer['reference']})",
+        f"share solved:  run {_fmt(solved['run'])}   reset {_fmt(solved['reset'])}   floor {_fmt(solved['floor'])}",
+    ]
+    ci = transfer["ci95"]
+    span = f"  (95% interval {_fmt(ci[0], 1)} to {_fmt(ci[1], 1)}, {transfer['reps']} task resamples)" if ci else ""
+    lines.append(f"transfer: {_fmt(transfer['transfer'], 1)} points{span}")
+    return "\n".join(lines) + "\n"
+
+
+def compare_report(transfer: dict) -> str:
     lines = [
-        "Forward transfer on the held-out epilogue",
-        "-----------------------------------------",
+        "Forward transfer on the held-out epilogue, against one reference run",
+        "--------------------------------------------------------------------",
         f"matched instances: {transfer['n_matched']}",
         f"run mean cost:       {_fmt(transfer['run_mean_cost'])}",
         f"reference mean cost: {_fmt(transfer['reference_mean_cost'])}",

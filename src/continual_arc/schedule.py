@@ -43,7 +43,17 @@ from continual_arc.seeds import derive_seed
 
 PHASE_STREAM = "stream"
 PHASE_EPILOGUE = "epilogue"
-PHASES = (PHASE_STREAM, PHASE_EPILOGUE)
+# The two frozen tests after the stream (continual_arc.configs.test_schedule), each a phase of its own
+PHASE_HELD_OUT_TEST = "held-out-test"
+PHASE_SEEN_TEST = "seen-test"
+PHASES = (PHASE_STREAM, PHASE_EPILOGUE, PHASE_HELD_OUT_TEST, PHASE_SEEN_TEST)
+TEST_HELD_OUT = "held-out"
+TEST_SEEN = "seen"
+TESTS = (TEST_HELD_OUT, TEST_SEEN)
+# each test's phase; the held-out test's references may also be fresh runs, whose held-out instances are an epilogue
+# with the learner wiped before each, frozen by construction
+TEST_PHASE = {TEST_HELD_OUT: PHASE_HELD_OUT_TEST, TEST_SEEN: PHASE_SEEN_TEST}
+TEST_REFERENCE_PHASES = {TEST_HELD_OUT: (PHASE_HELD_OUT_TEST, PHASE_EPILOGUE), TEST_SEEN: (PHASE_SEEN_TEST,)}
 
 
 @dataclass(frozen=True)

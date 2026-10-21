@@ -95,10 +95,11 @@ def test_canonical_protocol_per_track():
 
     for track in ("arc1",):
         proto = canonical_protocol(track)
-        assert proto["config"] == f"{track}-small" and proto["mode"] == "workstreams" and proto["epilogue"]
+        assert proto["config"] == f"{track}-small" and proto["mode"] == "workstreams"
+        assert proto["tests"] == ["held-out", "seen"]
         assert proto["seeds"] == list(CANONICAL_SEEDS)
     pool = [f"t{i:03d}" for i in range(40)]
-    evals = [f"e{i:03d}" for i in range(40)]
+    evals = [f"e{i:03d}" for i in range(120)]
     sched = build_schedule("arc1-small", "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
     assert sched.meta["track"] == "arc1"
     p = protocol_of(sched, EnvConfig())
@@ -109,7 +110,10 @@ def test_canonical_protocol_per_track():
     p = protocol_of(sched)
     assert not p["canonical"]
     assert any("sequential" in d for d in p["deviations"]) and any("seed 7" in d for d in p["deviations"])
-    assert any("no epilogue" in d for d in p["deviations"])
+    # the frozen tests replaced the epilogue, so a stream without one is the canonical protocol
+    sched = build_schedule("arc1-small", "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals, epilogue=False)
+    p = protocol_of(sched, EnvConfig())
+    assert p["canonical"] and p["deviations"] == [] and not p["epilogue"]
 
 
 def test_a_configuration_served_to_several_users_gives_each_a_stream_of_their_own():
@@ -135,11 +139,11 @@ def test_a_configuration_served_to_several_users_gives_each_a_stream_of_their_ow
     sched = build_schedule(cfg, "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
     assert sched.users == 16 and sched.meta["config"]["users"] == 16 and len(sched.meta["users"]["seeds"]) == 16
     rounds = sched.rounds()
-    assert rounds[-1] + 1 == 200 + 25  # 200 stream rounds, then every user's 25 held-out tasks
+    assert rounds[-1] + 1 == 200 + 100  # 200 stream rounds, then every user's 100 held-out tasks
     assert [s.user for s in sched.slots] == [i % 16 for i in range(len(sched))]  # a round is every user, in order
     sched.check_users()
     stream = [s for s in sched.slots if s.phase != "epilogue"]
-    assert len(stream) == 3_200 and len(sched) == 3_600
+    assert len(stream) == 3_200 and len(sched) == 4_800
     assert set(Counter(s.task_id for s in stream).values()) == {128}  # every task 128 times over the team
     assert set(Counter((s.user, s.task_id) for s in stream).values()) == {8}  # and 8 times per user
     # the same tasks as one user alone, stream and epilogue alike
@@ -193,8 +197,8 @@ def test_collective_fresh_reference_wipes_before_every_round():
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
     sched = build_schedule(with_users("arc1-small", 16), "fresh", 0, rearc_task_ids=pool, eval_task_ids=evals)
-    assert len(sched) == 400 and sched.rounds()[-1] + 1 == 25
-    assert [s.reset_before for s in sched.slots] == [i % 16 == 0 for i in range(400)]  # once per round
+    assert len(sched) == 1_600 and sched.rounds()[-1] + 1 == 100
+    assert [s.reset_before for s in sched.slots] == [i % 16 == 0 for i in range(1_600)]  # once per round
 
 
 def test_epilogue_for_users_matches_the_full_schedules_own_epilogue():
@@ -207,7 +211,7 @@ def test_epilogue_for_users_matches_the_full_schedules_own_epilogue():
     k = 4
     epi = epilogue_for_users(cfg, 3, k, rearc_task_ids=pool, eval_task_ids=evals)
     assert epi.users == k and epi.phases() == ["epilogue"]
-    assert epi.rounds()[-1] + 1 == 25  # as many rounds as the full schedule's own epilogue
+    assert epi.rounds()[-1] + 1 == 100  # as many rounds as the full schedule's own epilogue
     for u in range(k):
         mine = [(s.task_id, s.instance_seed, s.phase, s.reset_before)
                 for s in full.slots if s.phase == "epilogue" and s.user == u]
@@ -259,3 +263,47 @@ def test_every_configuration_caps_demo_requests_at_one():
     for name in ("arc1-small", "arc1-medium"):
         cfg = get_config(name)
         assert cfg.env.demo_cap == 8 and cfg.env.demos_per_request == 1 and cfg.env.attempt_cap == 8 and cfg.env.max_cost == 16, name
+
+
+def test_the_held_out_test_is_user_0s_epilogue_played_at_once_from_the_end_state():
+    from continual_arc.configs import epilogue_for_users, protocol_of, test_schedule, with_users
+    pool, evals = [f"t{i:03d}" for i in range(40)], [f"e{i:03d}" for i in range(120)]
+    test = test_schedule(with_users("arc1-small", 4), 0, "held-out", rearc_task_ids=pool, eval_task_ids=evals)
+    epilogue = epilogue_for_users("arc1-small", 0, 1, rearc_task_ids=pool, eval_task_ids=evals)
+    assert [(s.task_id, s.instance_seed) for s in test.slots] == [(s.task_id, s.instance_seed) for s in epilogue.slots]
+    # one round: every instance a user of its own, each starting from its own copy of the end state
+    assert test.users == len(test.slots) == 100 and [s.user for s in test.slots] == list(range(100))
+    assert {s.phase for s in test.slots} == {"held-out-test"} and not any(s.reset_before for s in test.slots)
+    assert test.meta["test"] == "held-out" and protocol_of(test)["canonical"]
+
+
+def test_the_seen_test_draws_new_instances_of_the_streams_tasks():
+    from continual_arc.configs import (
+        SEEN_TEST_PER_TASK,
+        config_tasks,
+        get_config,
+        test_schedule,
+        with_users,
+    )
+    pool, evals = [f"t{i:03d}" for i in range(40)], [f"e{i:03d}" for i in range(120)]
+    test = test_schedule("arc1-small", 0, "seen", rearc_task_ids=pool, eval_task_ids=evals)
+    tasks = config_tasks(get_config("arc1-small"), pool, 0)
+    assert sorted(s.task_id for s in test.slots) == sorted(tasks * SEEN_TEST_PER_TASK) and len(test.slots) == 100
+    assert {s.phase for s in test.slots} == {"seen-test"} and set(test.sources.values()) == {"rearc"}
+    stream = build_schedule(with_users("arc1-small", 16), "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    seeds = [s.instance_seed for s in test.slots]
+    assert len(set(seeds)) == 100 and not set(seeds) & {s.instance_seed for s in stream.slots}
+
+
+def test_a_narrower_test_restores_the_end_state_before_every_instance():
+    from continual_arc.configs import test_schedule
+    pool, evals = [f"t{i:03d}" for i in range(40)], [f"e{i:03d}" for i in range(120)]
+    wide = test_schedule("arc1-small", 0, "seen", rearc_task_ids=pool, eval_task_ids=evals)
+    narrow = test_schedule("arc1-small", 0, "seen", width=25, rearc_task_ids=pool, eval_task_ids=evals)
+    assert narrow.users == 25 and [s.user for s in narrow.slots] == [i % 25 for i in range(100)]
+    assert all(s.reset_before for s in narrow.slots)   # each user plays four, every one from the end state
+    assert [(s.task_id, s.instance_seed) for s in narrow.slots] == [(s.task_id, s.instance_seed) for s in wide.slots]
+    with pytest.raises(ValueError, match="width"):
+        test_schedule("arc1-small", 0, "seen", width=30, rearc_task_ids=pool, eval_task_ids=evals)
+    with pytest.raises(ValueError, match="test must be"):
+        test_schedule("arc1-small", 0, "epilogue", rearc_task_ids=pool, eval_task_ids=evals)

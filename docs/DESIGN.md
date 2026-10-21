@@ -15,23 +15,24 @@ caching outputs pointless.
 
 | decision | choice | why |
 |---|---|---|
-| base data | ARC-AGI-1 training tasks via Re-ARC; ARC-AGI-1 evaluation tasks for the epilogue | generators exist for all 400 training tasks; the evaluation set is genuinely held out |
+| base data | ARC-AGI-1 training tasks via Re-ARC; ARC-AGI-1 evaluation tasks for the held-out test | generators exist for all 400 training tasks; the evaluation set is genuinely held out |
 | learners | any; four-method protocol | the point is a fair arena for memory-based and gradient-based methods |
 | feedback | correct/incorrect only | matches ARC Prize scoring; keeps it close to RL |
 | attempts | unlimited up to a cap; cost = wrong attempts | retention shows up as fewer attempts on recurrence |
 | task identity | task id always exposed | isolates memory from recognition; recognition can be a later track |
 | demos | on request, at a cost equal to one wrong attempt | makes remembering an economic decision |
 | score | mean cost per instance = wrong attempts + demo requests | one number; compute/tokens/memory are plotted, not scored |
-| track | one, ARC-AGI-1 (`arc1`), named in every config (`arc1-small`); a bare size names nothing | its Re-ARC generators give every stream task fresh, verified instances without end, so a return is never a lookup; one track gives a learner one number, and the held-out season that verifies results is laid out as `arc1-small`. ARC-AGI-2 has no generators, so its stream rested on augmentation, and ARC-AGI-3 serves levels, not fresh instances of a rule (Dan, 19 Oct 2026) |
-| canonical protocol | the `arc1-small` config, workstreams mode, epilogue on, default environment settings, mean over seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
+| headline | T on the held-out test: the budget a learner saves there against the stronger of itself reset and the bare model on the same instances; T on the seen test and the share learned on the stream beside it (20 and 21 Oct 2026, below) | no cache helps on a task never seen, both references play the learner's own model, and a learner cannot gain by playing dumb with an empty memory |
+| track | one, ARC-AGI-1 (`arc1`), named in every config (`arc1-small`); a bare size names nothing | its Re-ARC generators give every stream task fresh, verified instances without end, so a return is never a lookup; one track gives a learner one number, and the held-out season that verifies results streams as `arc1-small` does. ARC-AGI-2 has no generators, so its stream rested on augmentation, and ARC-AGI-3 serves levels, not fresh instances of a rule (Dan, 19 Oct 2026) |
+| canonical protocol | the `arc1-small` config's stream in workstreams mode, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
-| epilogue | never-seen evaluation tasks after the stream | measures forward transfer, not just retention |
+| frozen tests | after the stream, two tests, each one round in which every instance is a user of its own from the learner's state at the stream's end: the held-out test, one instance of each of 100 never-seen evaluation tasks on `arc1-small` (25 until 20 Oct 2026), and the seen test, four fresh instances of each of the stream's 25 tasks (21 Oct 2026, below) | the held-out test reads generalisation and the seen test memorisation; a test during which the learner keeps learning would mix what it built on the stream with what it builds on the test |
 | add-ons | optional run-time auxiliary episodes, tagged separately | permits adaptive interventions such as spaced review without making them part of the learner protocol |
 
 ## What a learner is shown
 
 The task id, the input and the instance's own counters, and nothing about the stream: no position, no
-length, no phase and no exposure count. The epilogue is not announced and nothing is frozen for it.
+length, no phase and no exposure count. Neither test is announced: a test instance looks like a stream instance.
 Why (Dan, 20 Sep 2026): the stream simulates a new worker in an office, who is not told they are in a
 fixed-length evaluation; showing the position invited end-game behaviour, and an exposure count did
 the learner's remembering for it. Whether a task was met before is for the learner's own memory to say.
@@ -59,9 +60,10 @@ of the process, from blocked to structureless:
   system's workstreams score minus its random score is what burstiness and dormancy cost it).
 
 Every configuration gives each task the same supply of instances and every mode serves exactly that
-supply, so the modes are one multiset of instances in three orders. Every mode ends with the same epilogue, the held-out tasks once each, nothing reset.
-`fresh` is not a mode but the transfer reference: the epilogue alone, met by a learner whose state is
-wiped before each held-out task.
+supply, so the modes are one multiset of instances in three orders. Every mode can end with the same epilogue, the
+held-out tasks once each, nothing reset, which no measure reads since the frozen tests. `fresh` is not a mode but the
+epilogue alone, met by a learner whose state is wiped before each held-out task, which can stand in for the held-out
+test's reset reference.
 
 Why these three (Dan, 21 Sep 2026): the first design's `isolated` mode wiped the learner's state at task
 boundaries, an intervention on the system dressed as a schedule, with no analogue in any job; it became
@@ -72,7 +74,13 @@ retention-by-gap curve; `random` replaced it. The workstreams streams are frozen
 
 ## Metrics
 
-* headline: `score = 100 · (1 − mean_cost / max_cost)`, `max_cost = attempt_cap + demo_cost · demo_cap`
+* headline, T on the held-out test: `min(U(reset), U(floor)) − U(run)` over the test's instances, where U is the
+  budget used, `100 · mean_cost / max_cost`, `run` is the learner's own frozen test, `reset` the same learner from
+  nothing and `floor` the bare model (the demo-cache floor with nothing cached), each played on the same instances
+  apart from the run's own test, with a bootstrap over tasks that chooses the reference again in each draw and the
+  share solved of all three beside it (`metrics.transfer`, `continual-arc transfer`); the seen test is read the same
+  way (`--test seen`)
+* score: `100 · (1 − mean_cost / max_cost)`, `max_cost = attempt_cap + demo_cost · demo_cap`
 * cost of an instance: its wrong attempts plus `demo_cost` per demo request when it is solved, and `max_cost` when it
   is not. Until 20 Oct 2026 an unsolved instance was charged the attempt cap plus its demo requests, so failing
   without asking cost 8 and asking for every demonstration before failing cost 16: a learner that never asked and
@@ -83,13 +91,48 @@ retention-by-gap curve; `random` replaced it. The workstreams streams are frozen
 * retention: mean cost on re-exposure bucketed by gap (1-10, 11-30, 31-100, 101-300, 301+)
 * exposure curve: mean cost by exposure index (0, 1, 2, 3-5, 6-10, 11+)
 * learning curve: cumulative and windowed mean cost
-* forward transfer: reference epilogue cost − run epilogue cost, matched by task and seed
+* share learned: the share of the learnable budget a run saves on the stream beyond a cache of its
+  demonstrations, against the demo-cache floor on the same model and stream (`metrics.share_learned`)
+* forward transfer against one reference: reference cost − run cost on a frozen test, matched by task and seed
+  (`metrics.forward_transfer`, `continual-arc compare`)
 
 Add-on episodes are included in total resource accounting and exposed in
 `by_phase`, but primary benchmark metrics exclude them. The original schedule's
 exposure indices and gaps are preserved when an add-on inserts an episode. An
 add-on may schedule a fresh task instance, but it must not inspect or mutate
 learner state; that boundary keeps interventions comparable across harnesses.
+
+## Why transfer is the headline
+
+Settled 20 Oct 2026, on 100 held-out tasks so that it can resolve a few points (25 tasks met once could not). The
+share learned has two flaws that model progress makes worse. Each stream task recurs under its alias, and its
+demonstrations hold everything needed to solve it, so writing one program per alias and keeping it is close to
+optimal: the naive program library saves about two thirds of the learnable budget at every effort on GPT-6 Luna. And
+a strong model leaves little to learn: the learnable budget falls from 38.6 points at low effort to 15.0 at high.
+Transfer avoids both. A held-out task was never seen, so no cached program or answer helps on it, and both references
+play the learner's own model, so the score is the learning, not the model.
+
+A learner judged against its own reset copy alone could fake transfer by holding back whenever its memory is empty:
+answer garbage until it has seen a stream, then try. That costs one stream instance and wins every comparison, since
+the reset copy's memory is always empty. Against the stronger of the reset copy and the bare model, garbage gains
+nothing. What is left is a learner that plays exactly as well as the bare model with an empty memory and uses its full
+strategy after a stream: it is credited with its edge over the bare model on new tasks, and a design that keeps its
+best strategy for after a warm-up earns the same without meaning to. On the public held-out tasks a learner could also
+look answers up after its stream and play dumb before it; the private season has nothing to look up. A placebo
+reference, the same learner after a stream of equal length that teaches nothing, would close the warm-up case too; it
+was declined for now (20 Oct 2026), so verified runs rest on their public code and its review.
+
+Settled 21 Oct 2026: both tests are frozen, and the learning-on epilogue they replace is discarded. A learner that
+keeps learning while it meets 100 held-out tasks mixes what it built on the stream with what it builds on them, and
+over 100 tasks the second can swamp the first; a frozen test reads the first alone. Each test is one round in which
+every instance is a user of its own from the state at the stream's end, so it takes about the time of one instance. The
+seen test is not a repeat of the stream: it serves instances the stream never served to a learner that can no longer
+change, so it reads what was kept of each rule at the end, while the stream's share learned reads the same memory as
+it is built. The stream is the learning curve and the tests are its end points; a test from an earlier round is
+possible wherever that round's state was kept.
+
+Transfer has a ceiling of its own: a model that already solves the held-out tasks with no stream behind it leaves
+nothing to transfer to. When cheap models outgrow it, a later version is needed, not a different number.
 
 ## Plug-in interface
 

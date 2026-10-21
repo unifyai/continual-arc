@@ -408,3 +408,16 @@ def test_rescore_charges_an_old_run_as_the_benchmark_charges_now(fake_registry, 
     assert json.loads((out / "summary.json").read_text())["overall"]["score"] == 0
     assert json.loads((out / "meta.json").read_text())["rescored"]["records_changed"] == len(lines)
     assert rescore(out) == 0
+
+
+def test_a_wide_round_can_be_served_a_few_users_at_a_time(fake_registry, fake_source):
+    from continual_arc.testing import ConcurrentRoundMemoryLearner, RoundMemoryLearner
+
+    ids = fake_source.task_ids()[:4]
+    sched = as_users(stream_schedule(ids, 24, seed=2, source=fake_source.name, params=sequential_params(6),
+                                     mode="sequential"), 4)
+    serial = run(RoundMemoryLearner(), sched, registry=fake_registry)
+    learner = ConcurrentRoundMemoryLearner(delay_s=0.01)
+    result = run(learner, sched, registry=fake_registry, max_concurrent=2)
+    assert learner.max_inside <= 2   # never more than two users mid-action
+    assert [(r.step, r.cost, r.solved) for r in result.records] == [(r.step, r.cost, r.solved) for r in serial.records]

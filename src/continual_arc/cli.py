@@ -10,6 +10,7 @@ from pathlib import Path
 
 from continual_arc._version import __version__
 from continual_arc.env import EnvConfig
+from continual_arc.schedule import TEST_HELD_OUT, TESTS
 
 ENV_KEYS = ("attempt_cap", "demo_cap", "demo_cost", "demos_per_request", "diff_lb", "diff_ub")
 
@@ -81,11 +82,20 @@ def cmd_schedule(args) -> int:
     from continual_arc.schedule import Schedule
 
     if args.schedule_cmd == "make":
-        from continual_arc.configs import build_schedule, epilogue_for_users, with_users
+        from continual_arc.configs import (
+            build_schedule,
+            epilogue_for_users,
+            test_schedule,
+            with_users,
+        )
 
         config = with_users(args.config, args.users)
 
-        if args.epilogue_users is not None:
+        if args.test is not None:
+            if args.mode is not None or args.rounds is not None or args.epilogue_users is not None:
+                raise SystemExit("--test builds a frozen test alone; --mode, --rounds and --epilogue-users do not apply")
+            sched = test_schedule(config, args.seed, args.test, width=args.width)
+        elif args.epilogue_users is not None:
             if args.mode is not None:
                 raise SystemExit("--epilogue-users builds the held-out epilogue alone; --mode does not apply to it")
             if args.rounds is not None:
@@ -173,17 +183,32 @@ def cmd_report(args) -> int:
     return 0
 
 
-def cmd_compare(args) -> int:
-    from continual_arc.metrics import forward_transfer
+def cmd_transfer(args) -> int:
+    from continual_arc.metrics import transfer
     from continual_arc.report import transfer_report
     from continual_arc.runner import load_run
 
     _, config, run_records = load_run(args.run_dir)
-    _, _, ref_records = load_run(args.reference_dir)
-    transfer = forward_transfer(run_records, ref_records, config)
-    print(transfer_report(transfer))
+    _, _, reset_records = load_run(args.reset_dir)
+    _, _, floor_records = load_run(args.floor_dir)
+    result = transfer(run_records, reset_records, floor_records, config, test=args.test, reps=args.reps)
+    print(transfer_report(result))
     if args.json:
-        print(json.dumps(transfer, indent=1))
+        print(json.dumps(result, indent=1))
+    return 0
+
+
+def cmd_compare(args) -> int:
+    from continual_arc.metrics import forward_transfer
+    from continual_arc.report import compare_report
+    from continual_arc.runner import load_run
+
+    _, config, run_records = load_run(args.run_dir)
+    _, _, ref_records = load_run(args.reference_dir)
+    result = forward_transfer(run_records, ref_records, config, test=args.test)
+    print(compare_report(result))
+    if args.json:
+        print(json.dumps(result, indent=1))
     return 0
 
 
@@ -243,6 +268,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="build the held-out epilogue alone, for the first K of the --users "
                          "(each in the order and instance seeds the full schedule's own epilogue gives them); "
                          "not combined with --mode, --rounds or --no-epilogue")
+    sm.add_argument("--test", choices=TESTS, help="build a frozen test alone (configs.test_schedule): held-out or seen")
+    sm.add_argument("--width", type=int, help="with --test, how many users play at once (default all of them)")
     sm.add_argument("--out", help="output path (default <name>-seed<seed>.json)")
     sv = ssub.add_parser("show", help="summarise a schedule file")
     sv.add_argument("path")
@@ -277,9 +304,20 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--window", type=int, default=50)
     rp.set_defaults(func=cmd_report)
 
-    c = sub.add_parser("compare", help="forward transfer of a run against a reference run")
+    t = sub.add_parser("transfer", help="the headline: what a run saves on a frozen test after its stream, against "
+                                        "the stronger of the learner reset and the bare model")
+    t.add_argument("run_dir", help="the run's frozen test (configs.test_schedule)")
+    t.add_argument("reset_dir", help="the same learner on the same instances with its state wiped before each")
+    t.add_argument("floor_dir", help="the bare model (the demo-cache floor) on the same model and instances")
+    t.add_argument("--test", choices=TESTS, default=TEST_HELD_OUT, help="which frozen test: held-out (default) or seen")
+    t.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% interval")
+    t.add_argument("--json", action="store_true")
+    t.set_defaults(func=cmd_transfer)
+
+    c = sub.add_parser("compare", help="forward transfer of a run against one reference run")
     c.add_argument("run_dir")
     c.add_argument("reference_dir")
+    c.add_argument("--test", choices=TESTS, default=TEST_HELD_OUT)
     c.add_argument("--json", action="store_true")
     c.set_defaults(func=cmd_compare)
 

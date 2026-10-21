@@ -3,11 +3,10 @@ from them.
 
 Continual-ARC is one track, ARC-AGI-1 (``arc1``), and every configuration name
 carries it (``arc1-small``), so a bare size such as ``small`` names nothing. The
-track has one canonical number for each number of users served at once: the score on its ``small`` configuration in workstreams mode
-with the epilogue, at the default environment settings, averaged over seeds 0, 1
-and 2, at 1, 2, 4, 8 or 16 users (:data:`CANONICAL_USERS`,
-:func:`canonical_protocol`); learners are compared only at the same number of
-users. Every other configuration, mode, seed, number of users or setting is an
+track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream in
+workstreams mode and then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2,
+4, 8 or 16 users (:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only at the same number
+of users. Every other configuration, mode, seed, number of users or setting is an
 ablation and is labelled as such in run metadata and reports (:func:`protocol_of`).
 
 A configuration fixes the number of tasks, the stream length, the workstream
@@ -22,10 +21,15 @@ modes are named settings of its parameters, from blocked to structureless:
 * ``workstreams`` — a few tasks active at once in bursts, dormancy between, new tasks arriving (the canonical protocol).
 * ``random``      — every task active from the first step, sampled uniformly (no temporal structure).
 
-Each mode is followed by the epilogue of never-seen evaluation tasks. ``fresh`` is
-not a mode but the reference run for forward transfer: the epilogue tasks alone,
-met by a learner whose state is wiped before each, so that transfer is the
-epilogue cost after a lifetime minus the cost with no lifetime behind it.
+A mode may be followed by the epilogue of never-seen evaluation tasks, met while the learner still learns, which no
+measure reads since the frozen tests replaced it. ``fresh`` is not a mode but the epilogue tasks alone, met by a
+learner whose state is wiped before each, which serves as the held-out test's reset reference.
+
+After the stream the system is measured by two frozen tests (:func:`test_schedule`; Dan, 21 Oct 2026): the
+held-out tasks, and new instances of the stream's own tasks, every instance played from the system's state at the
+stream's end with nothing learnt between them, so that what a system learnt is measured apart from its learning. The
+held-out test measures what carries to tasks it never met, the seen test what it kept of the tasks it did; both are
+read against the same two references as transfer (:func:`continual_arc.metrics.transfer`).
 
 A configuration is served to a number of users (:func:`with_users`): how many people the
 system serves at once, and so how much experience arrives between two updates. One user is
@@ -56,8 +60,14 @@ from dataclasses import asdict, dataclass, field, replace
 from continual_arc.data import DATASET_ARC1
 from continual_arc.env import EnvConfig
 from continual_arc.schedule import (
+    PHASE_SEEN_TEST,
     RANDOM,
+    TEST_HELD_OUT,
+    TEST_PHASE,
+    TEST_SEEN,
+    TESTS,
     Schedule,
+    Slot,
     StreamParams,
     epilogue_schedule,
     interleave_users,
@@ -165,7 +175,7 @@ CONFIGS: dict[str, BenchmarkConfig] = {
         name="arc1-small",
         n_tasks=25,
         stream_length=200,
-        n_epilogue_tasks=25,
+        n_epilogue_tasks=100,
         workstreams=StreamParams(
             concurrency=4, burst_mean=3.0, dormancy_median=30.0, dormancy_sigma=1.0, arrival_interval=2.0
         ),
@@ -212,10 +222,59 @@ def canonical_protocol(track: str) -> dict:
         "config": canonical_config_name(track),
         "mode": CANONICAL_MODE,
         "users": list(CANONICAL_USERS),
-        "epilogue": True,
+        "tests": list(TESTS),
         "seeds": list(CANONICAL_SEEDS),
         "env": get_config(canonical_config_name(track)).env.to_json(),
     }
+
+
+# the seen test's instances of each stream task: arc1-small's 25 tasks give 100, as many as the held-out test's
+SEEN_TEST_PER_TASK = 4
+
+
+def test_schedule(
+    config: str | BenchmarkConfig,
+    seed: int,
+    test: str,
+    width: int | None = None,
+    rearc_task_ids: list[str] | None = None,
+    eval_task_ids: list[str] | None = None,
+) -> Schedule:
+    """One of the two frozen tests after ``config``'s stream at ``seed`` (the module docstring).
+
+    ``held-out``: the held-out tasks, each once, at the instances user 0 meets in the epilogue
+    (:func:`epilogue_for_users`), so the transfer references serve it as they are. ``seen``:
+    :data:`SEEN_TEST_PER_TASK` new instances of each of the stream's tasks, at instance seeds of their
+    own (``derive_seed(seed, "seen-test", i)``), which no stream slot draws, in a seeded order.
+
+    Every instance is played from the system's state at the stream's end and nothing passes from one
+    to another. ``width`` users play at once, every instance by default: one round, each user's own
+    state the end state. With fewer, each user plays several and restores the end state before each
+    (``reset_before``), which is what a frozen test's learner does when it resets. The test is the
+    same at any width: only how many instances play at once differs."""
+    cfg = get_config(config)
+    if test == TEST_HELD_OUT:
+        epilogue = epilogue_for_users(cfg, seed, 1, rearc_task_ids, eval_task_ids)
+        drawn = [(s.task_id, s.instance_seed) for s in epilogue.slots]
+        sources = dict(epilogue.sources)
+    elif test == TEST_SEEN:
+        tasks = sorted(config_tasks(cfg, rearc_task_ids if rearc_task_ids is not None else stream_task_pool(cfg),
+                                    seed))
+        order = [tid for tid in tasks for _ in range(SEEN_TEST_PER_TASK)]
+        random.Random(derive_seed(seed, PHASE_SEEN_TEST)).shuffle(order)
+        drawn = [(tid, derive_seed(seed, PHASE_SEEN_TEST, i)) for i, tid in enumerate(order)]
+        sources = {tid: cfg.stream_source for tid in tasks}
+    else:
+        raise ValueError(f"test must be {TEST_HELD_OUT!r} or {TEST_SEEN!r}, got {test!r}")
+    n = len(drawn)
+    width = n if width is None else width
+    if not 1 <= width <= n or n % width:
+        raise ValueError(f"width must divide the test's {n} instances, got {width}")
+    slots = [Slot(tid, instance_seed, TEST_PHASE[test], reset_before=width < n, user=i % width)
+             for i, (tid, instance_seed) in enumerate(drawn)]
+    return Schedule(name=f"{cfg.name}-{test}-test", seed=seed, slots=slots, sources=sources, users=width,
+                    meta={"config": cfg.to_json(), "seed": seed, "dataset": cfg.dataset, "track": cfg.track,
+                          "test": test, "width": width})
 
 
 def protocol_of(schedule, env_config=None) -> dict:
@@ -235,6 +294,12 @@ def protocol_of(schedule, env_config=None) -> dict:
     name = cfg_meta.get("name") or schedule.name
     mode = meta.get("mode")
     seed = meta.get("seed", schedule.seed)
+    if meta.get("test"):   # a frozen test is canonical when its configuration and seed are
+        deviations = ([f"configuration {name} is not {canonical_config_name(track)}"]
+                      if name != canonical_config_name(track) else [])
+        deviations += [f"seed {seed} is not one of the canonical seeds {CANONICAL_SEEDS}"] if seed not in CANONICAL_SEEDS else []
+        return {"track": track, "config": name, "test": meta["test"], "width": meta.get("width", schedule.users),
+                "seed": seed, "canonical": not deviations, "deviations": deviations}
     epilogue = bool(meta.get("epilogue", False))
     epilogue_only = meta.get("epilogue_only")
     cut_to_round = meta.get("cut_to_round")
@@ -248,8 +313,6 @@ def protocol_of(schedule, env_config=None) -> dict:
         deviations.append(f"{users} users is not one of the canonical numbers of users {CANONICAL_USERS}")
     if not epilogue_only and mode != CANONICAL_MODE:
         deviations.append(f"mode {mode} is not {CANONICAL_MODE}")
-    if not epilogue:
-        deviations.append("no epilogue")
     if seed not in CANONICAL_SEEDS:
         deviations.append(f"seed {seed} is not one of the canonical seeds {CANONICAL_SEEDS}")
     if cut_to_round is not None:
