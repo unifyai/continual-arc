@@ -75,9 +75,9 @@ retention-by-gap curve; `random` replaced it. The workstreams streams are frozen
 ## Metrics
 
 * headline, T on the held-out test: `min(U(reset), U(floor)) − U(run)` over the test's instances, where U is the
-  budget used, `100 · mean_cost / max_cost`, `run` is the learner's own frozen test, `reset` the same learner from
-  nothing and `floor` the bare model (the demo-cache floor with nothing cached), each played on the same instances
-  apart from the run's own test, with a bootstrap over tasks that chooses the reference again in each draw and the
+  budget used, `100 · mean_cost / max_cost`, `run` is the learner's own frozen test, `reset` the same learner reset
+  before each instance and `floor` the bare model (the stateless floor), each played on the same instances apart from
+  the run's own test, with a bootstrap over tasks that chooses the reference again in each draw and the
   share solved of all three beside it (`metrics.transfer`, `continual-arc transfer`); the seen test is read the same
   way (`--test seen`)
 * score: `100 · (1 − mean_cost / max_cost)`, `max_cost = attempt_cap + demo_cost · demo_cap`

@@ -98,15 +98,17 @@ After the stream the learner plays two tests, each built by `configs.test_schedu
 | `seen` | four fresh instances of each of the stream's 25 tasks, at instance seeds no stream draws | memorisation: what the learner kept of the rules it met |
 
 Each test is one round in which every instance is a user of its own, so every instance meets the learner as the
-stream left it, and nothing learnt on one test instance reaches another, since a learner's state changes only between
-rounds ([regimes](#regimes)). A test takes about as long as one instance, and nothing tells the learner it has begun.
-A learner that cannot serve 100 users at once plays a test narrower, `--width N` users a round: then every instance is
-marked `reset_before`, and the learner's `reset` must restore its state at the end of the stream rather than wipe it.
-`runner.run(..., max_concurrent=k)` serves a concurrent learner's round k users at a time instead.
+stream left it, and nothing learnt on one test instance reaches another, since a learner changes what it carries only
+in `end_round` ([regimes](#regimes)). A test takes about as long as one instance, and nothing tells the learner it has
+begun. A learner that keeps a demonstration the moment it buys one breaks that contract, and on the seen test it would
+pass the pair to another instance of the same task in the same round. A learner that cannot serve 100 users at once
+plays a test narrower, `--width N` users a round: then every instance is marked `reset_before`, and the learner's
+`reset` must restore its state at the end of the stream rather than wipe it. `runner.run(..., max_concurrent=k)`
+serves a concurrent learner's round k users at a time instead.
 
 Both tests are read with T, against the stronger of two references on the same instances, each played on its own, apart
-from the learner's own test: the same learner reset, a new instance of it that has met no stream, and the bare model,
-the demo-cache floor of the same model with nothing cached:
+from the learner's own test: the same learner reset before each instance, and the bare model, the stateless floor of
+the same model, which keeps nothing from one instance to the next:
 
 ```
 T = min(U(reset), U(floor)) - U(learner)
@@ -148,20 +150,22 @@ for test in ("held-out", "seen"):
 ```
 
 A learner that holds a model client or a process saves what it keeps instead, and loads it into a new instance for
-each test. The references play the same two schedules from nothing, each into a directory of its own, and
-`continual-arc transfer` reads T from the three runs of a test, with a 95 percent interval from a bootstrap over tasks
-and the share solved of each:
+each test. The references play the same instances one at a time, `--width 1`, so that the runner resets the learner
+before each, each into a directory of its own, and `continual-arc transfer` reads T from the three runs of a test, with
+a 95 percent interval from a bootstrap over tasks and the share solved of each:
 
 ```bash
-continual-arc run --learner my_pkg.learners:MyLearner --schedule held-out.json --out runs/my-reset-held-out
-continual-arc run --learner my_pkg.learners:MyLearner --schedule seen.json --out runs/my-reset-seen
-continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out runs/demo-cache-held-out
-continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen runs/demo-cache-seen
+continual-arc schedule make --config arc1-small --seed 0 --test held-out --width 1 --out held-out-1.json
+continual-arc schedule make --config arc1-small --seed 0 --test seen --width 1 --out seen-1.json
+continual-arc run --learner my_pkg.learners:MyLearner --schedule held-out-1.json --out runs/my-reset-held-out
+continual-arc run --learner my_pkg.learners:MyLearner --schedule seen-1.json --out runs/my-reset-seen
+continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out runs/stateless-held-out
+continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen runs/stateless-seen
 ```
 
-The bare model's runs come from `continual_arc_baselines.systems.bare.BareDemoCacheLearner` in
-[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), played on the same two schedules
-(`arc-baselines run --schedule held-out.json`).
+The bare model's runs come from `continual_arc_baselines.systems.bare.BareModelLearner` in
+[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), played on the same width-1 schedules
+(`arc-baselines run --schedule held-out-1.json`).
 
 ## The share learned
 
@@ -305,8 +309,8 @@ uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule ws.json 
 uv run continual-arc report runs/my-ws --plots
 uv run continual-arc learned runs/my-ws runs/demo-cache-ws   # share learned over the stream
 # each test played from the end of the stream, and its references (the two frozen tests, above)
-uv run continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out runs/demo-cache-held-out   # the headline
-uv run continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen runs/demo-cache-seen
+uv run continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out runs/stateless-held-out   # the headline
+uv run continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen runs/stateless-seen
 ```
 
 ## Writing a learner
@@ -322,6 +326,8 @@ class MyLearner(BaseLearner):
         return RequestDemos()                 # or Submit(grid) or GiveUp()
     def observe(self, obs, action, feedback):
         ...                                   # SubmitFeedback / DemosFeedback / GiveUpFeedback
+    def end_round(self):                      # what it carries between instances changes only here
+        ...
     def resources(self):                      # cumulative counters, logged per instance
         return {"tokens": ..., "state_bytes": ...}
 ```
@@ -356,8 +362,8 @@ against these rules:
 * **Every model named.** Every model the learner calls is named in the submission and
   reached through the tracking proxy of
   [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The
-  share learned and T are read against the demo-cache floor of the model the learner
-  plays with, the strongest if it plays with several. A model that only teaches it, such as a
+  share learned and T are read against the floors of the model the learner plays with,
+  the strongest if it plays with several. A model that only teaches it, such as a
   stronger model labelling its games for training, is part of its training: those calls
   count in its training compute, shown beside the score.
 * **Learning only from what it was shown.** A learner learns from its observations and
@@ -431,14 +437,15 @@ on the public stream is taken as reported. It is marked verified once we have re
 which nobody outside unify has seen ([verified results](#verified-results)).
 
 1. Run your learner on the track's canonical protocol at seed 0 (`arc1-small`): its stream in workstreams order with
-   `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset on each of
-   them ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start from the adapters
+   `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset before each
+   instance of them ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start from the adapters
    and the tracking proxy in [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), which count
    every model call whatever the harness does. Read [what a learner may use](#what-a-learner-may-use) first.
-2. Unless the leaderboard already has them, run the demo-cache floor on your model: on the same stream, the zero of
-   your share learned, and on the two tests, the bare model that T is read against.
-   `continual_arc_baselines.systems.bare.BareDemoCacheLearner` in the baselines plays all three cheaply. The floors'
-   streams of every model the paper ran are in the v0.1.0 run records.
+2. Unless the leaderboard already has them, run the floors of your model from the baselines, three cheap runs: the
+   demo-cache floor on the same stream, the zero of your share learned
+   (`continual_arc_baselines.systems.bare.BareDemoCacheLearner`), and the stateless floor on the two tests one
+   instance at a time, the bare model that T is read against (`BareModelLearner`). Both floors' streams of every model
+   the paper ran are in the v0.1.0 run records.
 3. Copy every run directory the runner wrote to `results/<track>/<name>/`, and add a `submission.json` to your
    learner's stream, naming the floor's stream and each test's three runs:
 
@@ -452,9 +459,9 @@ which nobody outside unify has seen ([verified results](#verified-results)).
      "floor": "results/arc1/demo-cache-luna6-medium",
      "tests": {
        "held-out": {"run": "results/arc1/my-learner-held-out", "reset": "results/arc1/my-learner-reset-held-out",
-                    "floor": "results/arc1/demo-cache-luna6-medium-held-out"},
+                    "floor": "results/arc1/stateless-luna6-medium-held-out"},
        "seen": {"run": "results/arc1/my-learner-seen", "reset": "results/arc1/my-learner-reset-seen",
-                "floor": "results/arc1/demo-cache-luna6-medium-seen"}
+                "floor": "results/arc1/stateless-luna6-medium-seen"}
      },
      "notes": "anything a reader needs to know to read the number"
    }
@@ -463,7 +470,7 @@ which nobody outside unify has seen ([verified results](#verified-results)).
 4. Check it: `uv run python scripts/check_result.py results/<track>/<name>`. It rebuilds every run's schedule from its
    configuration, order or test, and seed, checks that its records cover every slot and that its summary is the one
    the records give, that your tests were played under your stream's task names and that the references are runs of
-   your learner and of the floor, and prints the numbers the leaderboard will show, T on the held-out test first.
+   your learner and of the stateless floor, and prints the numbers the leaderboard will show, T on the held-out test first.
 5. Open a pull request. Questions go to this repository's issues.
 
 ### Verified results
@@ -491,9 +498,8 @@ Within about a quarter of an hour the issue says the run has started. We install
 whole, inside the sandbox the paper's runs used, which reaches nothing but the tracking proxy: the proxy makes every
 model call on your key, and your code never holds it. At a seed of its own, your learner plays the season's stream and
 then its frozen held-out test, one instance of each held-out rule in one round, from where the stream left it. Two
-references play the same test instances, each on its own: your learner reset, a new instance of it that has met no
-stream, and the bare model it plays with. The demo-cache floor of that model plays the stream too, for the share
-learned. The issue then gets T on the held-out test with its 95 percent interval, the share learned on the held-out
+references play the same test instances one at a time, each on its own: your learner reset before each instance, and
+the bare model it plays with. The demo-cache floor of that model plays the stream too, for the share learned. The issue then gets T on the held-out test with its 95 percent interval, the share learned on the held-out
 stream with its interval, the learnable budget, the budget used, the share solved and what each run's model calls
 cost, and the result joins the leaderboard as verified, beside your public-stream result if you sent one. We delete
 the key on our side; delete it at OpenRouter too. Only the numbers come back: the records, and anything your learner

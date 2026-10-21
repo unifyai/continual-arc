@@ -7,12 +7,12 @@ A submitted run is the directory the benchmark's runner wrote for the learner's 
 names what the leaderboard shows, the demo-cache floor's run on the same model and stream (`floor`), which the share
 learned is read against, and the frozen tests played after the stream (`tests`): for the held-out test and, if it was
 played, the seen test, the learner's own test, played from where its stream left it, and its two references, the
-same learner reset and the bare model (the demo-cache floor with nothing cached), each played on its own. Every
+same learner reset before each instance and the bare model (the stateless floor), each played on its own. Every
 directory is relative to this repository.
 
 The check passes when every run's schedule is the one the benchmark builds for its configuration, order or test, and
 seed, its records cover every slot of it, its summary is the one its records give, the learner's tests were played
-under its stream's task names (`alias-salt`), and the references are runs of the same learner and of the demo-cache
+under its stream's task names (`alias-salt`), and the references are runs of the same learner and of the stateless
 floor. It then prints the leaderboard's numbers: T on the held-out test first (the points of the budget saved against
 the stronger of the two references, higher is better), T on the seen test, the share learned over the stream (the
 share of the learnable budget saved beyond the floor) and the budget used and share solved on the stream (100 times
@@ -36,6 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RUN_FILES = ("records.jsonl", "summary.json", "schedule.json", "config.json", "meta.json")
 SUBMISSION_FIELDS = ("name", "learner", "model", "code", "contact")
 FLOOR = "BareDemoCacheLearner"
+BARE = "BareModelLearner"
 ROLES = ("run", "reset", "floor")
 REFERENCE = {"reset": "learner reset", "floor": "bare model"}
 
@@ -98,8 +99,8 @@ def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict, learner: st
         problems += found
         loaded[role] = records
         who = learner_of(d)
-        if role == "floor" and FLOOR not in who:
-            problems.append(f"{label}: not a run of the demo-cache floor ({FLOOR})")
+        if role == "floor" and BARE not in who:
+            problems.append(f"{label}: not a run of the stateless floor ({BARE})")
         if role == "reset" and who != learner:
             problems.append(f"{label}: not a run of the learner the stream ran ({learner})")
         if role == "run" and (d / SALT_FILE).read_text() != (run_dir / SALT_FILE).read_text():
