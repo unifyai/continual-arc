@@ -491,13 +491,20 @@ tasks, and 25 held out. To have a learner verified on it:
 
 3. Open an issue with the [Verify my learner](https://github.com/unifyai/continual-arc/issues/new?template=verify.yml)
    form: your public GitHub repository and the commit to run, the import path of your learner class (installable from
-   the repository with pip, implementing `continual_arc.learner`), the OpenRouter model it plays with and its
-   reasoning effort, any other models it calls, and the encrypted key.
+   the repository with pip, implementing `continual_arc.learner`, and built with no arguments, so its settings are its
+   class's defaults), the OpenRouter model it plays with and its reasoning effort, any other models it calls, and the
+   encrypted key. A harness adapter on the baselines' `SystemLearner` depends on
+   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc-baselines@v0.1.0` alone, which brings the
+   benchmark with it.
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,
 whole, inside the sandbox the paper's runs used, which reaches nothing but the tracking proxy: the proxy makes every
 model call on your key, and your code never holds it. At a seed of its own, your learner plays the season's stream and
-then its frozen held-out test, one instance of each held-out rule in one round, from where the stream left it. Two
+then its frozen held-out test from where the stream left it, one instance of each held-out rule. A harness on the
+baselines' `SystemLearner`, which keeps everything as files and holds one conversation, plays them one at a time, as
+`arc-baselines test` plays a harness's tests: before each one we stop it and put its state directory back as the
+stream left it. Any other learner plays them in one round, every rule a user of its own, so it keeps each user's work
+apart and changes what it keeps only once the round ends, as the learner protocol asks. Two
 references play the same test instances one at a time, each on its own: your learner reset before each instance, and
 the bare model it plays with. The demo-cache floor of that model plays the stream too, for the share learned. The issue then gets T on the held-out test with its 95 percent interval, the share learned on the held-out
 stream with its interval, the learnable budget, the budget used, the share solved and what each run's model calls
