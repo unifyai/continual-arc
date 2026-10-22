@@ -83,7 +83,8 @@ def check_run(run_dir: Path, expected, label: str) -> tuple[list[str], tuple]:
 def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict,
                learner: str) -> tuple[list[str], tuple[dict, dict] | None]:
     """One frozen test's three runs; returns the problems and T, with the bare model read against the same reset (a
-    negative T there is a reset that plays below the bare model), or None if they cannot be read."""
+    positive T there is a reset that uses more of the budget than the bare model, so plays below it), or None if they
+    cannot be read."""
     problems, loaded = [], {}
     for role in ROLES:
         if not dirs.get(role):
@@ -157,7 +158,7 @@ def check(run_dir: Path) -> list[str]:
             print(f"  {test} test: T {t['transfer']:+.1f} points (95% interval {lo:+.1f} to {hi:+.1f}) against the "
                   f"learner reset, budget used {t['run_budget']:.1f}, solved {100 * t['solved']['run']:.1f}%")
             if bare["transfer"] is not None:
-                flag = ": flagged, the reset plays below the bare model" if bare["transfer"] < 0 else ""
+                flag = ": flagged, the reset plays below the bare model" if bare["transfer"] > 0 else ""
                 print(f"    the reset used {bare['reset_budget']:.1f} and the bare model {bare['run_budget']:.1f}{flag}")
     if learned and learned["share_learned"] is not None:
         lo, hi = learned["ci95"] or (float("nan"), float("nan"))
