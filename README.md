@@ -151,8 +151,8 @@ for test in ("held-out", "seen"):
 
 A learner that holds a model client or a process saves what it keeps instead, and loads it into a new instance for
 each test. The references play the same instances one at a time, `--width 1`, so that the runner resets the learner
-before each, each into a directory of its own, and `continual-arc transfer` reads T from the three runs of a test, with
-a 95 percent interval from a bootstrap over tasks and the share solved of each:
+before each, each into a directory of its own, and `continual-arc transfer` reads T from the two runs of a test, the learner's and its reset's,
+with a 95 percent interval from a bootstrap over tasks and the share solved of each:
 
 ```bash
 continual-arc schedule make --config arc1-small --seed 0 --test held-out --width 1 --out held-out-1.json
