@@ -28,8 +28,8 @@ met. So after the stream we freeze the learner and give it two tests. Each is on
 from the learner's state at the end of the stream, so nothing learnt on one test instance reaches another. The seen
 test serves fresh instances of the tasks the learner met, which measures memorisation. The held-out test serves 100
 ARC-AGI-1 evaluation tasks it never met, which measures generalisation, and it is the headline. We read each test as T,
-the points of the budget a learner saves against the stronger of itself reset and the bare model on the same
-instances, so a stronger model scores no higher for being stronger. A learner may keep anything at all between
+the points of the budget a learner saves against itself reset before each instance, in its own harness and on the
+same instances, so a stronger model scores no higher for being stronger. A learner may keep anything at all between
 instances, which puts an agent harness keeping notes and a model updating its weights on the same scale.
 
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
@@ -106,18 +106,18 @@ plays a test narrower, `--width N` users a round: then every instance is marked 
 `reset` must restore its state at the end of the stream rather than wipe it. `runner.run(..., max_concurrent=k)`
 serves a concurrent learner's round k users at a time instead.
 
-Both tests are read with T, against the stronger of two references on the same instances, each played on its own, apart
-from the learner's own test: the same learner reset before each instance, and the bare model, the stateless floor of
-the same model, which keeps nothing from one instance to the next:
+Both tests are read with T, against the same learner reset before each instance, played on the same instances on its
+own, apart from the learner's own test:
 
 ```
-T = min(U(reset), U(floor)) - U(learner)
+T = U(reset) - U(learner)
 ```
 
-with U the budget used over the test's instances, in points of the budget. Both references play the learner's own
-model, so a stronger model is not credited for being stronger, and the bare model keeps a learner from scoring by
-playing worse whenever its memory is empty; the reasons, and what remains open, are in
-[docs/DESIGN.md](docs/DESIGN.md#why-transfer-is-the-headline).
+with U the budget used over the test's instances, in points of the budget. The reset plays the learner's own model in
+its own harness, so a stronger model is not credited for being stronger, and the harness, the environment the learner
+learns in, is part of the baseline rather than measured against a model without it. The bare model is not a reference;
+a result also shows the bare model on the same instances, and a reset that plays below it is flagged beside its T.
+The reasons, and what remains open, are in [docs/DESIGN.md](docs/DESIGN.md#why-transfer-is-the-headline).
 
 ```bash
 continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --out ws.json
@@ -159,44 +159,47 @@ continual-arc schedule make --config arc1-small --seed 0 --test held-out --width
 continual-arc schedule make --config arc1-small --seed 0 --test seen --width 1 --out seen-1.json
 continual-arc run --learner my_pkg.learners:MyLearner --schedule held-out-1.json --out runs/my-reset-held-out
 continual-arc run --learner my_pkg.learners:MyLearner --schedule seen-1.json --out runs/my-reset-seen
-continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out runs/stateless-held-out
-continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen runs/stateless-seen
+continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out
+continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen
 ```
 
-The bare model's runs come from `continual_arc_baselines.systems.bare.BareModelLearner` in
+The bare model's runs, shown beside T, come from `continual_arc_baselines.systems.bare.BareModelLearner` in
 [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), played on the same width-1 schedules
 (`arc-baselines run --schedule held-out-1.json`).
 
 ## The share learned
 
 The budget used rewards whatever the learner brings to the stream, and most of that is its
-model: a stronger model with a cache of the pairs it has bought scores better without learning
-anything, since re-reading the kept pairs costs only compute, which is never charged. So a
-learner is read against the **demo-cache floor** on the same model and stream, the bare model
-shown every pair it has bought for a task again at no cost. The cache is the scale's zero.
-Its one is perfect memory on the same model: the floor's own charge on each task's first
-round, and nothing on any return. Between them lies the **learnable budget**, which shrinks
-as the model gets stronger, and the **share learned** is the part of it a learner saves:
+model and its harness. So a learner is read against **itself reset**, the same model in the same
+harness with its state wiped before every instance of the same stream, which carries nothing
+from one instance to the next. The reset is the scale's zero. Its one is perfect memory on the
+same system: the reset's own charge on each task's first exposure, and nothing on any return.
+Between them lies the **learnable budget**, which shrinks as the system gets stronger, and the
+**share learned** is the part of it a learner saves:
 
 ```
-share learned = (U(floor) - U(learner)) / (U(floor) - U(perfect memory))
+share learned = (U(reset) - U(learner)) / (U(reset) - U(perfect memory))
 ```
 
-with U the budget used over the stream. A learner that only caches scores 0, one that answers
-every returning task at no cost scores 1, and one worse than the cache scores below 0. The
-learnable budget says how much a track leaves a model to learn: when it is small, the model has
-outgrown the track and the next edition measures it. The share learned reads memorisation while it is
-being built, and the seen test what is left of it at the end.
+with U the budget used over the stream. A learner that keeps nothing scores 0, one that answers
+every returning task at no cost scores 1, and one worse than its reset scores below 0. Keeping
+the demonstrations a task was shown is a kind of memory, and a learner that does so scores above
+0 for it. The learnable budget says how much a track leaves a system to learn: when it is small,
+the system has outgrown the track and the next edition measures it. The share learned reads
+memorisation while it is being built, and the seen test what is left of it at the end.
 
 ```bash
-continual-arc learned runs/my-ws runs/demo-cache-ws     # same model, same schedule
+continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --reset-each --out ws-reset.json
+continual-arc run --learner my_pkg.learners:MyLearner --schedule ws-reset.json --out runs/my-ws-reset
+continual-arc learned runs/my-ws runs/my-ws-reset
 ```
 
 prints the share with a 95 percent interval from a bootstrap over tasks
-(`continual_arc.metrics.share_learned`). The floor's run comes from
-`continual_arc_baselines.systems.bare.BareDemoCacheLearner` in
-[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), one cheap run per
-model.
+(`continual_arc.metrics.share_learned`). `--reset-each` serves the same stream with the learner
+wiped before every slot; a learner that keeps nothing between instances is its own reset. Each
+of the run's instances is read against the reset's play of the same instance, or, for one the
+reset never met (another user's, at more users than the reset served), against the reset's mean
+on the task.
 
 
 ## Modes
@@ -307,10 +310,12 @@ uv run continual-arc schedule make --config arc1-small --seed 0 --test seen --ou
 uv run continual-arc schedule show ws.json --head 40
 uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule ws.json --out runs/my-ws
 uv run continual-arc report runs/my-ws --plots
-uv run continual-arc learned runs/my-ws runs/demo-cache-ws   # share learned over the stream
-# each test played from the end of the stream, and its references (the two frozen tests, above)
-uv run continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out runs/stateless-held-out   # the headline
-uv run continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen runs/stateless-seen
+uv run continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --reset-each --out ws-reset.json
+uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule ws-reset.json --out runs/my-ws-reset
+uv run continual-arc learned runs/my-ws runs/my-ws-reset   # share learned over the stream
+# each test played from the end of the stream, and the learner reset on it (the two frozen tests, above)
+uv run continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out   # the headline
+uv run continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen
 ```
 
 ## Writing a learner
@@ -358,12 +363,12 @@ against these rules:
 * **Nothing about ARC brought in.** No ARC, Re-ARC, ARC-GEN or other task data,
   answers or solvers inside the learner, its prompts or its starting memory, and no
   rebuilding of the schedule. What a model learned in pretraining is its prior, which
-  the demo-cache floor on the same model already carries.
+  the learner's own reset on the same model already carries.
 * **Every model named.** Every model the learner calls is named in the submission and
   reached through the tracking proxy of
   [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The
-  share learned and T are read against the floors of the model the learner plays with,
-  the strongest if it plays with several. A model that only teaches it, such as a
+  share learned and T read the learner against itself reset, on the same models. A
+  model that only teaches it, such as a
   stronger model labelling its games for training, is part of its training: those calls
   count in its training compute, shown beside the score.
 * **Learning only from what it was shown.** A learner learns from its observations and
@@ -437,17 +442,18 @@ on the public stream is taken as reported. It is marked verified once we have re
 which nobody outside unify has seen ([verified results](#verified-results)).
 
 1. Run your learner on the track's canonical protocol at seed 0 (`arc1-small`): its stream in workstreams order with
-   `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset before each
-   instance of them ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start from the adapters
+   `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset: on the same
+   stream, wiped before every instance (`schedule make --reset-each`, [the share learned](#the-share-learned)), and
+   before each instance of the tests ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start
+   from the adapters
    and the tracking proxy in [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), which count
    every model call whatever the harness does. Read [what a learner may use](#what-a-learner-may-use) first.
-2. Unless the leaderboard already has them, run the floors of your model from the baselines, three cheap runs: the
-   demo-cache floor on the same stream, the zero of your share learned
-   (`continual_arc_baselines.systems.bare.BareDemoCacheLearner`), and the stateless floor on the two tests one
-   instance at a time, the bare model that T is read against (`BareModelLearner`). Both floors' streams of every model
-   the paper ran are in the v0.1.0 run records.
+2. Unless the leaderboard already has it, run the bare model you play with on the two tests, one instance at a time,
+   from the baselines (`continual_arc_baselines.systems.bare.BareModelLearner`): two cheap runs, shown beside your T,
+   which is flagged if your reset plays below them. The bare model's tests of every model the paper ran are in the
+   run records.
 3. Copy every run directory the runner wrote to `results/<track>/<name>/`, and add a `submission.json` to your
-   learner's stream, naming the floor's stream and each test's three runs:
+   learner's stream, naming your reset's stream and each test's three runs:
 
    ```json
    {
@@ -456,12 +462,12 @@ which nobody outside unify has seen ([verified results](#verified-results)).
      "model": "GPT-6 Luna, medium effort",
      "code": "https://github.com/you/my-learner",
      "contact": "you@example.com",
-     "floor": "results/arc1/demo-cache-luna6-medium",
+     "reset": "results/arc1/my-learner-ws-reset",
      "tests": {
        "held-out": {"run": "results/arc1/my-learner-held-out", "reset": "results/arc1/my-learner-reset-held-out",
-                    "floor": "results/arc1/stateless-luna6-medium-held-out"},
+                    "bare": "results/arc1/bare-luna6-medium-held-out"},
        "seen": {"run": "results/arc1/my-learner-seen", "reset": "results/arc1/my-learner-reset-seen",
-                "floor": "results/arc1/stateless-luna6-medium-seen"}
+                "bare": "results/arc1/bare-luna6-medium-seen"}
      },
      "notes": "anything a reader needs to know to read the number"
    }
@@ -469,8 +475,9 @@ which nobody outside unify has seen ([verified results](#verified-results)).
 
 4. Check it: `uv run python scripts/check_result.py results/<track>/<name>`. It rebuilds every run's schedule from its
    configuration, order or test, and seed, checks that its records cover every slot and that its summary is the one
-   the records give, that your tests were played under your stream's task names and that the references are runs of
-   your learner and of the stateless floor, and prints the numbers the leaderboard will show, T on the held-out test first.
+   the records give, that your tests were played under your stream's task names, that your reset is a run of your
+   learner and the bare runs are the bare model's, and prints the numbers the leaderboard will show, T on the held-out
+   test first, with the flag if your reset plays below the bare model.
 5. Open a pull request. Questions go to this repository's issues.
 
 ### Verified results
@@ -480,7 +487,7 @@ instances, checked against every public ARC task: 25 streamed over 200 instances
 tasks, and 25 held out. To have a learner verified on it:
 
 1. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner's
-   run and its floor have cost tens of dollars), and keep OpenRouter's Private Input & Output Logging off on its
+   run and its reset have cost tens of dollars), and keep OpenRouter's Private Input & Output Logging off on its
    account, since it would show you the held-out tasks; a run with it on is void.
 2. Encrypt the key with our public key, so that only the private half, which never leaves Secret Manager, can read it:
 
@@ -504,9 +511,10 @@ then its frozen held-out test from where the stream left it, one instance of eac
 baselines' `SystemLearner`, which keeps everything as files and holds one conversation, plays them one at a time, as
 `arc-baselines test` plays a harness's tests: before each one we stop it and put its state directory back as the
 stream left it. Any other learner plays them in one round, every rule a user of its own, so it keeps each user's work
-apart and changes what it keeps only once the round ends, as the learner protocol asks. Two
-references play the same test instances one at a time, each on its own: your learner reset before each instance, and
-the bare model it plays with. The demo-cache floor of that model plays the stream too, for the share learned. The issue then gets T on the held-out test with its 95 percent interval, the share learned on the held-out
+apart and changes what it keeps only once the round ends, as the learner protocol asks. Your learner reset plays the
+season's stream wiped before every instance, for the share learned, and the same test instances one at a time, wiped
+before each, for T; the bare model it plays with plays the test instances too, and a reset that plays below it is
+flagged beside T. The issue then gets T on the held-out test with its 95 percent interval, the share learned on the held-out
 stream with its interval, the learnable budget, the budget used, the share solved and what each run's model calls
 cost, and the result joins the leaderboard as verified, beside your public-stream result if you sent one. We delete
 the key on our side; delete it at OpenRouter too. Only the numbers come back: the records, and anything your learner

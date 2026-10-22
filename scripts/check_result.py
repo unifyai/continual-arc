@@ -4,19 +4,20 @@
 
 A submitted run is the directory the benchmark's runner wrote for the learner's stream (`records.jsonl`,
 `summary.json`, `schedule.json`, `config.json`, `meta.json`) with a `submission.json` beside them. `submission.json`
-names what the leaderboard shows, the demo-cache floor's run on the same model and stream (`floor`), which the share
-learned is read against, and the frozen tests played after the stream (`tests`): for the held-out test and, if it was
-played, the seen test, the learner's own test, played from where its stream left it, and its two references, the
-same learner reset before each instance and the bare model (the stateless floor), each played on its own. Every
-directory is relative to this repository.
+names what the leaderboard shows, the learner reset on the same stream (`reset`: `schedule make --reset-each`), which
+the share learned is read against, and the frozen tests played after the stream (`tests`): for the held-out test and,
+if it was played, the seen test, the learner's own test, played from where its stream left it, the same learner reset
+before each instance, which T is read against, and the bare model (the stateless floor), shown beside T, each played
+on its own. Every directory is relative to this repository.
 
 The check passes when every run's schedule is the one the benchmark builds for its configuration, order or test, and
 seed, its records cover every slot of it, its summary is the one its records give, the learner's tests were played
-under its stream's task names (`alias-salt`), and the references are runs of the same learner and of the stateless
-floor. It then prints the leaderboard's numbers: T on the held-out test first (the points of the budget saved against
-the stronger of the two references, higher is better), T on the seen test, the share learned over the stream (the
-share of the learnable budget saved beyond the floor) and the budget used and share solved on the stream (100 times
-the mean charge over the cap, lower is better). Nothing here calls a model or the network.
+under its stream's task names (`alias-salt`), the resets are runs of the same learner and the bare runs of the
+stateless floor. It then prints the leaderboard's numbers: T on the held-out test first (the points of the budget saved
+against the learner reset, higher is better), flagged when the reset plays below the bare model, T on the seen test,
+the share learned over the stream (the share of the learnable budget saved over the reset) and the budget used and
+share solved on the stream (100 times the mean charge over the cap, lower is better). Nothing here calls a model or
+the network.
 """
 
 from __future__ import annotations
@@ -35,10 +36,8 @@ ROOT = Path(__file__).resolve().parent.parent
 
 RUN_FILES = ("records.jsonl", "summary.json", "schedule.json", "config.json", "meta.json")
 SUBMISSION_FIELDS = ("name", "learner", "model", "code", "contact")
-FLOOR = "BareDemoCacheLearner"
 BARE = "BareModelLearner"
-ROLES = ("run", "reset", "floor")
-REFERENCE = {"reset": "learner reset", "floor": "bare model"}
+ROLES = ("run", "reset", "bare")
 
 
 def budget(records, cap: float) -> tuple[float, float] | None:
@@ -81,8 +80,10 @@ def check_run(run_dir: Path, expected, label: str) -> tuple[list[str], tuple]:
     return problems, (schedule, config, records)
 
 
-def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict, learner: str) -> tuple[list[str], dict | None]:
-    """One frozen test's three runs; returns the problems and T, or None if they cannot be read."""
+def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict,
+               learner: str) -> tuple[list[str], tuple[dict, dict] | None]:
+    """One frozen test's three runs; returns the problems and T, with the bare model read against the same reset (a
+    negative T there is a reset that plays below the bare model), or None if they cannot be read."""
     problems, loaded = [], {}
     for role in ROLES:
         if not dirs.get(role):
@@ -99,7 +100,7 @@ def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict, learner: st
         problems += found
         loaded[role] = records
         who = learner_of(d)
-        if role == "floor" and BARE not in who:
+        if role == "bare" and BARE not in who:
             problems.append(f"{label}: not a run of the stateless floor ({BARE})")
         if role == "reset" and who != learner:
             problems.append(f"{label}: not a run of the learner the stream ran ({learner})")
@@ -107,7 +108,8 @@ def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict, learner: st
             problems.append(f"{label}: not played under the stream's task names (copy its {SALT_FILE} first)")
     if problems or len(loaded) < len(ROLES):
         return problems, None
-    return problems, transfer(loaded["run"], loaded["reset"], loaded["floor"], config, test=test)
+    return problems, (transfer(loaded["run"], loaded["reset"], config, test=test),
+                      transfer(loaded["bare"], loaded["reset"], config, test=test, reps=0))
 
 
 def check(run_dir: Path) -> list[str]:
@@ -124,17 +126,17 @@ def check(run_dir: Path) -> list[str]:
         if not isinstance(submission.get(field), str) or not submission[field].strip():
             problems.append(f"submission.json needs a {field}")
     learned = None
-    floor_dir = ROOT / str(submission.get("floor", ""))
-    if not submission.get("floor") or not (floor_dir / "records.jsonl").exists():
-        problems.append("submission.json needs a floor: the directory of the demo-cache floor's run on the same model and stream")
+    reset_dir = ROOT / str(submission.get("reset", ""))
+    if not submission.get("reset") or not (reset_dir / "records.jsonl").exists():
+        problems.append("submission.json needs a reset: the directory of your learner's run of the same stream, wiped "
+                        "before every instance (schedule make --reset-each)")
     else:
-        if FLOOR not in learner_of(floor_dir):
-            problems.append(f"{submission['floor']} is not a run of the demo-cache floor ({FLOOR})")
-        _, _, floor_records = load_run(floor_dir)
-        try:
-            learned = share_learned(records, floor_records, config)
-        except ValueError as e:
-            problems.append(str(e))
+        found, (_, _, reset_records) = check_run(reset_dir, expected.reset_each(), f"the reset ({submission['reset']})")
+        problems += found
+        if learner_of(reset_dir) != learner_of(run_dir):
+            problems.append(f"{submission['reset']} is not a run of the learner the stream ran ({learner_of(run_dir)})")
+        if reset_records:
+            learned = share_learned(records, reset_records, config)
     tests = submission.get("tests") or {}
     if TEST_HELD_OUT not in tests:
         problems.append("submission.json's tests name no held-out test, whose T is the headline")
@@ -148,11 +150,15 @@ def check(run_dir: Path) -> list[str]:
     line = f"{run_dir}: {protocol['config']} {protocol['mode']} seed {protocol['seed']}, "
     line += "canonical" if protocol["canonical"] else "not canonical (" + "; ".join(protocol["deviations"]) + ")"
     print(line)
-    for test, t in results.items():
-        if t and t["transfer"] is not None:
+    for test, read in results.items():
+        if read and read[0]["transfer"] is not None:
+            t, bare = read
             lo, hi = t["ci95"] or (float("nan"), float("nan"))
             print(f"  {test} test: T {t['transfer']:+.1f} points (95% interval {lo:+.1f} to {hi:+.1f}) against the "
-                  f"{REFERENCE[t['reference']]}, budget used {t['run_budget']:.1f}, solved {100 * t['solved']['run']:.1f}%")
+                  f"learner reset, budget used {t['run_budget']:.1f}, solved {100 * t['solved']['run']:.1f}%")
+            if bare["transfer"] is not None:
+                flag = ": flagged, the reset plays below the bare model" if bare["transfer"] < 0 else ""
+                print(f"    the reset used {bare['reset_budget']:.1f} and the bare model {bare['run_budget']:.1f}{flag}")
     if learned and learned["share_learned"] is not None:
         lo, hi = learned["ci95"] or (float("nan"), float("nan"))
         print(f"  share learned {learned['share_learned']:+.2f} ±{learned['se']:.2f} (95% interval {lo:+.2f} to {hi:+.2f}), "

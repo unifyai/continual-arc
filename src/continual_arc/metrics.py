@@ -4,11 +4,12 @@ Every measure starts from the charge of each instance: wrong attempts plus demon
 against a cap. The budget used is 100 times the mean charge over the cap (lower is better);
 ``summary.json`` carries its complement as ``score``. The headline is transfer
 (:func:`transfer`): the budget a run saves on held-out tasks it meets after its stream, against
-the stronger of the same learner reset and the bare model on the same tasks. No cache helps on a
-task never seen, and both references play the run's own model, so a stronger model does not
-score higher for being stronger. Second comes the share learned (:func:`share_learned`): the
-budget used on the stream read against the demo-cache floor on the same model and stream, as the
-share of the learnable budget a run saves beyond a cache of its demonstrations.
+the same learner reset before each of them. Second comes the share learned
+(:func:`share_learned`): the budget a run saves on its stream against the same learner reset
+before every instance, as a share of the learnable budget. Both read a system against itself,
+in its own harness and on its own model, so a stronger model does not score higher for being
+stronger, and the harness, the environment the system learns in, is part of the baseline
+rather than measured against a model without it (Dan, 22 Oct 2026).
 
 Diagnostics, all derived from the same per-instance records:
 
@@ -18,10 +19,9 @@ Diagnostics, all derived from the same per-instance records:
 * learning curve — cumulative and windowed mean cost over the stream;
 * checkpoints — the score over the first k stream instances for the horizons a
   configuration names, so runs of different lengths compare where both reached;
-* epilogue    — cost on the held-out phase, and forward transfer against one
-  reference run (:func:`forward_transfer`), of which the headline takes the stronger of two;
-* share learned — the share of the learnable budget a run saves beyond a cache of its demonstrations,
-  against the demo-cache floor on the same model and stream (:func:`share_learned`);
+* epilogue    — cost on the held-out phase;
+* share learned — the share of the learnable budget a run saves over the same learner reset
+  before every instance of the same stream (:func:`share_learned`);
 * users       — in the collective regime, each user's own view: the spread of per-user stream
   scores, and cost by how many times the user had met the task before (their own exposure,
   the curve an individual run of the same stream draws), beside the team's exposure above.
@@ -283,41 +283,9 @@ def summarize(
     }
 
 
-def forward_transfer(
-    run_records: Sequence[InstanceRecord],
-    reference_records: Sequence[InstanceRecord],
-    config: EnvConfig,
-    test: str = TEST_HELD_OUT,
-) -> dict:
-    """The cost of ``run`` on a frozen test (``test``: held-out or seen) relative to a ``reference`` run on the
-    same instances.
-
-    Positive ``mean_transfer`` means the run needed less cost per instance than the reference.
-    Instances are matched by task and instance seed, so both runs must serve the same test.
-    """
-    ref = {(r.task_id, r.instance_seed): r for r in reference_records if r.phase in TEST_REFERENCE_PHASES[test]}
-    matched: list[tuple[InstanceRecord, InstanceRecord]] = []
-    for r in run_records:
-        if r.phase != TEST_PHASE[test]:
-            continue
-        key = (r.task_id, r.instance_seed)
-        if key in ref:
-            matched.append((r, ref[key]))
-    diffs = [ref_r.cost - run_r.cost for run_r, ref_r in matched]
-    return {
-        "n_matched": len(matched),
-        "run_mean_cost": _mean([a.cost for a, _ in matched]),
-        "reference_mean_cost": _mean([b.cost for _, b in matched]),
-        "mean_transfer": _mean(diffs),
-        "transfer_score_points": (100.0 * _mean(diffs) / config.max_cost) if diffs else None,
-        "per_task": {a.task_id: {"run": a.cost, "reference": b.cost, "transfer": b.cost - a.cost} for a, b in matched},
-    }
-
-
 def transfer(
     run_records: Sequence[InstanceRecord],
     reset_records: Sequence[InstanceRecord],
-    floor_records: Sequence[InstanceRecord],
     config: EnvConfig,
     test: str = TEST_HELD_OUT,
     reps: int = 2000,
@@ -325,64 +293,53 @@ def transfer(
 ) -> dict:
     """The headline: the budget ``run`` saves on a frozen test after its stream (``test``: the held-out
     tasks, or new instances of the stream's own; :func:`continual_arc.configs.test_schedule`), against
-    the stronger of two references that never had the stream.
+    the same learner reset before each test instance, which never had the stream::
 
-    Only ``run``'s records of the test's own phase count, so an epilogue it played while still
-    learning never does; a reference's held-out instances may also be a fresh run's epilogue, which
-    wipes the learner before each and so is frozen by construction.
+        transfer = U(reset) - U(run)
 
-    ``reset`` is the same learner wiped before each held-out task (its ``fresh`` run), and
-    ``floor`` is the bare model on the same held-out instances (the demo-cache floor's epilogue or
-    fresh run, which are alike, since a cache holds nothing for a task never seen)::
-
-        transfer = min(U(reset), U(floor)) - U(run)
-
-    where U is the budget used, 100 times the mean charge over the cap, over the held-out
-    instances all three played; positive is better. Held-out tasks are new, so no cache of
-    programs or demonstrations helps on them, and both references play the run's own model, so a
-    stronger model is not credited for being stronger.
-
-    The reference is whichever of the two used less budget. A learner judged against its own reset
-    copy alone could play dumb whenever its memory is empty, answering garbage until it has seen
-    a stream, and count the difference as transfer; against the stronger reference, the most
-    holding back can earn is the learner's edge over the bare model on new tasks (Dan, 20 Oct
-    2026). Taking the stronger of two noisy references understates transfer by at most the noise
-    between them and never overstates it. The 95 percent interval is a bootstrap over held-out
-    tasks that chooses the reference again in each draw. All three runs must serve the same
-    epilogue: instances are matched by task and instance seed."""
-    runs = {"run": run_records, "reset": reset_records, "floor": floor_records}
-    phases = {"run": (TEST_PHASE[test],), "reset": TEST_REFERENCE_PHASES[test], "floor": TEST_REFERENCE_PHASES[test]}
+    where U is the budget used, 100 times the mean charge over the cap, over the test instances
+    both played; positive is better. Only ``run``'s records of the test's own phase count, so an
+    epilogue it played while still learning never does. ``reset`` is the same system, its model
+    and harness, with its state wiped before each instance and played apart from the run's own
+    test (its reference play, or a fresh run's epilogue, which wipes the learner before each and
+    so is frozen by construction), so what transfers is what the stream left in the system, and a
+    stronger model is not credited for being stronger. The bare model is not a reference: a
+    learner is read in the harness it learns in (Dan, 22 Oct 2026). A learner that played worse
+    whenever its memory was empty would score here for it, so a verified run is also played bare
+    on the same instances, and a reset that falls below the bare model is flagged beside its T
+    (docs/HELD-OUT.md). The 95 percent interval is a bootstrap over the test's tasks, since a task's
+    instances rise and fall together. Both runs must serve the same test: instances are matched by
+    task and instance seed."""
+    runs = {"run": run_records, "reset": reset_records}
+    phases = {"run": (TEST_PHASE[test],), "reset": TEST_REFERENCE_PHASES[test]}
     held = {
         name: {(r.task_id, r.instance_seed): r for r in records if r.phase in phases[name]}
         for name, records in runs.items()
     }
-    keys = sorted(set(held["run"]) & set(held["reset"]) & set(held["floor"]))
+    keys = sorted(set(held["run"]) & set(held["reset"]))
     if not keys:
         return {"test": test, "n": 0, "transfer": None}
-    cells: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])  # run, reset, floor, count
+    cells: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])  # run, reset, count
     for key in keys:
         c = cells[key[0]]
-        for i, name in enumerate(runs):
-            c[i] += held[name][key].cost
-        c[3] += 1
+        c[0] += held["run"][key].cost
+        c[1] += held["reset"][key].cost
+        c[2] += 1
 
-    def point(tasks: Sequence[str]) -> tuple[float, float, float]:
-        n = sum(cells[t][3] for t in tasks)
-        run, reset, floor = (100.0 * sum(cells[t][i] for t in tasks) / config.max_cost / n for i in range(3))
-        return run, reset, floor
+    def point(tasks: Sequence[str]) -> tuple[float, float]:
+        n = sum(cells[t][2] for t in tasks)
+        run, reset = (100.0 * sum(cells[t][i] for t in tasks) / config.max_cost / n for i in range(2))
+        return run, reset
 
     tasks = sorted(cells)
-    run, reset, floor = point(tasks)
+    run, reset = point(tasks)
     out = {
         "test": test,
         "n": len(keys),
         "tasks": len(tasks),
         "run_budget": run,
         "reset_budget": reset,
-        "floor_budget": floor,
-        "reference": "reset" if reset <= floor else "floor",
-        "reference_budget": min(reset, floor),
-        "transfer": min(reset, floor) - run,
+        "transfer": reset - run,
         "solved": {name: sum(held[name][k].solved for k in keys) / len(keys) for name in runs},
         "ci95": None,
         "se": None,
@@ -393,8 +350,8 @@ def transfer(
     rng = random.Random(seed)
     draws = []
     for _ in range(reps):
-        b_run, b_reset, b_floor = point([tasks[rng.randrange(len(tasks))] for _ in tasks])
-        draws.append(min(b_reset, b_floor) - b_run)
+        b_run, b_reset = point([tasks[rng.randrange(len(tasks))] for _ in tasks])
+        draws.append(b_reset - b_run)
     draws.sort()
     mean = sum(draws) / len(draws)
     out["ci95"] = [draws[int(0.025 * len(draws))], draws[min(len(draws) - 1, int(0.975 * len(draws)))]]
@@ -404,67 +361,74 @@ def transfer(
 
 def share_learned(
     run_records: Sequence[InstanceRecord],
-    floor_records: Sequence[InstanceRecord],
+    reset_records: Sequence[InstanceRecord],
     config: EnvConfig,
     reps: int = 2000,
     seed: int = 0,
 ) -> dict:
-    """The share of the learnable budget ``run`` saves beyond a cache of its demonstrations.
+    """The share of the learnable budget ``run`` saves on its stream over the same learner reset.
 
-    ``floor`` is the demo-cache floor on the same model and the same stream: the bare model,
-    shown again at no cost every pair it has bought for a task. A cache needs no learning, and
-    with a strong enough model, re-reading the kept pairs costs only compute, which is never
-    charged, so the floor is the zero of the scale. Its one is perfect memory on the same model:
-    the floor's own charge on each task's first round, and nothing on any return. Between them
-    lies the learnable budget, which shrinks as the model gets stronger; a run's share learned
-    is the part of it the run saves::
+    ``reset`` is the same system, its model and harness, wiped before every instance of the same
+    stream (a fresh run; for a system that keeps nothing between instances, the system itself),
+    which is the zero of the scale. Its one is perfect memory on the same system: the reset's own
+    charge on each task's first exposure in the run, and nothing on any return. Between them lies
+    the learnable budget, and a run's share learned is the part of it the run saves::
 
-        lift = U(floor) - U(run)
-        learnable budget = U(floor) - U(perfect memory)
+        lift = U(reset) - U(run)
+        learnable budget = U(reset) - U(perfect memory)
         share learned = lift / learnable budget
 
-    where U is the budget used, 100 times the mean charge over the cap, over the stream slots
-    both runs played (a run in progress is read as far as it goes). Because both ends of the
-    scale are the same model's, a stronger model scores no higher for being stronger, and
-    knowledge a learner carries into the stream counts only where it beats the cache. The
-    95 percent interval is a bootstrap over tasks, since a task's instances rise and fall
-    together. ``share_learned`` is None when the floor leaves nothing to learn.
-
-    Both runs must serve the same schedule: slots are matched by step, and a slot whose task
-    or instance seed differs raises."""
-    floor = {r.step: r for r in _stream_records(floor_records)}
-    cells: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])  # run, floor, first visits, count
+    where U is the budget used, 100 times the mean charge over the cap, over the run's stream
+    slots (a run in progress is read as far as it goes). Each slot is read against the reset's
+    play of the same instance, task and instance seed, where the reset has played it; where it
+    has not, because it has not got that far or because the run serves more users than it does,
+    the reset's mean charge on the task stands for the instance, since a reset carries nothing
+    from one instance to the next. A slot of a task the reset has not met is left out. Both ends
+    of the scale are the same system's, so a stronger model scores no higher for being stronger,
+    and the harness is part of the baseline (Dan, 22 Oct 2026). The 95 percent interval is a
+    bootstrap over tasks, since a task's instances rise and fall together. ``share_learned`` is
+    None when the reset leaves nothing to learn."""
+    reset_stream = _stream_records(reset_records)
+    by_instance = {(r.task_id, r.instance_seed): r.cost for r in reset_stream}
+    by_task: dict[str, list[float]] = defaultdict(list)
+    for r in reset_stream:
+        by_task[r.task_id].append(r.cost)
+    task_mean = {task: sum(costs) / len(costs) for task, costs in by_task.items()}
+    cells: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0, 0.0])  # run, reset, perfect memory, count
+    same = 0
     for r in _stream_records(run_records):
-        f = floor.get(r.step)
-        if f is None:
-            continue
-        if (f.task_id, f.instance_seed) != (r.task_id, r.instance_seed):
-            raise ValueError(f"slot {r.step} differs between the run ({r.task_id}) and the floor ({f.task_id}): "
-                             "the floor must have played the same schedule")
+        ref = by_instance.get((r.task_id, r.instance_seed))
+        if ref is None:
+            ref = task_mean.get(r.task_id)
+            if ref is None:
+                continue
+        else:
+            same += 1
         c = cells[r.task_id]
         c[0] += r.cost
-        c[1] += f.cost
-        c[2] += f.cost if f.exposure_index == 0 else 0.0
+        c[1] += ref
+        c[2] += ref if r.exposure_index == 0 else 0.0
         c[3] += 1
 
     def point(tasks: Sequence[str]) -> tuple[float, float, float, float]:
         n = sum(cells[t][3] for t in tasks)
-        run, flo, first = (100.0 * sum(cells[t][i] for t in tasks) / config.max_cost / n for i in range(3))
-        return run, flo, first, n
+        run, reset, first = (100.0 * sum(cells[t][i] for t in tasks) / config.max_cost / n for i in range(3))
+        return run, reset, first, n
 
     tasks = sorted(cells)
     if not tasks:
         return {"n": 0, "share_learned": None}
-    run, flo, first, n = point(tasks)
-    learnable = flo - first
+    run, reset, first, n = point(tasks)
+    learnable = reset - first
     out = {
         "n": int(n),
+        "same_instances": same,
         "run_budget": run,
-        "floor_budget": flo,
+        "reset_budget": reset,
         "perfect_memory_budget": first,
         "learnable_budget": learnable,
-        "lift": flo - run,
-        "share_learned": (flo - run) / learnable if learnable > 0 else None,
+        "lift": reset - run,
+        "share_learned": (reset - run) / learnable if learnable > 0 else None,
         "ci95": None,
         "se": None,
         "reps": reps,
@@ -475,9 +439,9 @@ def share_learned(
     draws = []
     for _ in range(reps):
         sample = [tasks[rng.randrange(len(tasks))] for _ in tasks]
-        b_run, b_flo, b_first, _ = point(sample)
-        if b_flo > b_first:
-            draws.append((b_flo - b_run) / (b_flo - b_first))
+        b_run, b_reset, b_first, _ = point(sample)
+        if b_reset > b_first:
+            draws.append((b_reset - b_run) / (b_reset - b_first))
     draws.sort()
     mean = sum(draws) / len(draws)
     out["ci95"] = [draws[int(0.025 * len(draws))], draws[min(len(draws) - 1, int(0.975 * len(draws)))]]

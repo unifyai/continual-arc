@@ -70,15 +70,14 @@ def text_report(summary: dict, title: str = "Continual-ARC run") -> str:
 
 
 def transfer_report(transfer: dict) -> str:
-    title = f"Transfer on the {transfer['test']} test, against the stronger of the learner reset and the bare model"
+    title = f"Transfer on the {transfer['test']} test, against the learner reset before each instance"
     lines = [title, "-" * len(title), f"matched instances: {transfer['n']}"]
     if not transfer["n"]:
-        return "\n".join(lines + ["no instance of the test was played by all three runs"]) + "\n"
+        return "\n".join(lines + ["no instance of the test was played by both runs"]) + "\n"
     solved = transfer["solved"]
     lines += [
-        f"budget used:  run {_fmt(transfer['run_budget'], 1)}   reset {_fmt(transfer['reset_budget'], 1)}   "
-        f"floor {_fmt(transfer['floor_budget'], 1)}   (reference: {transfer['reference']})",
-        f"share solved:  run {_fmt(solved['run'])}   reset {_fmt(solved['reset'])}   floor {_fmt(solved['floor'])}",
+        f"budget used:  run {_fmt(transfer['run_budget'], 1)}   reset {_fmt(transfer['reset_budget'], 1)}",
+        f"share solved:  run {_fmt(solved['run'])}   reset {_fmt(solved['reset'])}",
     ]
     ci = transfer["ci95"]
     span = f"  (95% interval {_fmt(ci[0], 1)} to {_fmt(ci[1], 1)}, {transfer['reps']} task resamples)" if ci else ""
@@ -86,35 +85,24 @@ def transfer_report(transfer: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def compare_report(transfer: dict) -> str:
-    lines = [
-        "Forward transfer on the held-out epilogue, against one reference run",
-        "--------------------------------------------------------------------",
-        f"matched instances: {transfer['n_matched']}",
-        f"run mean cost:       {_fmt(transfer['run_mean_cost'])}",
-        f"reference mean cost: {_fmt(transfer['reference_mean_cost'])}",
-        f"mean transfer (reference - run): {_fmt(transfer['mean_transfer'])}  "
-        f"({_fmt(transfer['transfer_score_points'])} score points)",
-    ]
-    return "\n".join(lines) + "\n"
-
-
 def learned_report(learned: dict) -> str:
     lines = [
-        "Share learned on the stream, against the demo-cache floor",
-        "---------------------------------------------------------",
-        f"matched instances: {learned['n']}",
+        "Share learned on the stream, against the learner reset before every instance",
+        "----------------------------------------------------------------------------",
+        f"read instances: {learned['n']}",
     ]
     if not learned["n"]:
-        return "\n".join(lines + ["no slot of the run is in the floor's records"]) + "\n"
+        return "\n".join(lines + ["no task of the run is in the reset's records"]) + "\n"
     lines += [
-        f"budget used:      run {_fmt(learned['run_budget'], 1)}   floor {_fmt(learned['floor_budget'], 1)}   "
+        f"read against the reset's own play of the instance: {learned['same_instances']} "
+        f"(the rest against its mean on the task)",
+        f"budget used:      run {_fmt(learned['run_budget'], 1)}   reset {_fmt(learned['reset_budget'], 1)}   "
         f"perfect memory {_fmt(learned['perfect_memory_budget'], 1)}",
-        f"learnable budget: {_fmt(learned['learnable_budget'], 1)} points (the floor's budget less perfect memory's)",
-        f"saved beyond the cache: {_fmt(learned['lift'], 1)} points",
+        f"learnable budget: {_fmt(learned['learnable_budget'], 1)} points (the reset's budget less perfect memory's)",
+        f"saved over the reset: {_fmt(learned['lift'], 1)} points",
     ]
     if learned["share_learned"] is None:
-        lines.append("share learned: undefined, since the floor leaves nothing to learn on this model")
+        lines.append("share learned: undefined, since the reset leaves nothing to learn")
     else:
         ci = learned["ci95"]
         span = f"  (95% interval {_fmt(ci[0])} to {_fmt(ci[1])}, {learned['reps']} task resamples)" if ci else ""

@@ -36,7 +36,7 @@ import math
 import random
 from collections import Counter
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 
 from continual_arc.seeds import derive_seed
@@ -222,6 +222,19 @@ class Schedule:
             user_count[mine] += 1  # a user has one slot per round, so their own count moves at once
             user_last[mine] = r
         return infos
+
+    def reset_each(self) -> Schedule:
+        """The same slots with the learner's state wiped before every one: the learner reset before every
+        instance of its own stream, the share learned's reference (:func:`continual_arc.metrics.share_learned`).
+        In the collective regime a wipe belongs to the round, so every round starts from nothing."""
+        return Schedule(
+            name=f"{self.name}-reset",
+            seed=self.seed,
+            slots=[replace(s, reset_before=True) for s in self.slots],
+            sources=dict(self.sources),
+            meta={**self.meta, "reset_each": True},
+            users=self.users,
+        )
 
     def concat(self, other: Schedule, name: str | None = None) -> Schedule:
         sources = dict(self.sources)

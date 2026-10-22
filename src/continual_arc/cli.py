@@ -91,6 +91,9 @@ def cmd_schedule(args) -> int:
 
         config = with_users(args.config, args.users)
 
+        if args.reset_each and (args.test is not None or args.epilogue_users is not None):
+            raise SystemExit("--reset-each wipes the learner before every slot of a stream; a frozen test and the "
+                             "held-out epilogue already say when their learner is wiped")
         if args.test is not None:
             if args.mode is not None or args.rounds is not None or args.epilogue_users is not None:
                 raise SystemExit("--test builds a frozen test alone; --mode, --rounds and --epilogue-users do not apply")
@@ -110,6 +113,8 @@ def cmd_schedule(args) -> int:
             sched = build_schedule(config, args.mode, args.seed, epilogue=not args.no_epilogue)
             if args.rounds is not None:
                 sched = sched.first_rounds(args.rounds)
+            if args.reset_each:
+                sched = sched.reset_each()
         out = Path(args.out) if args.out else Path(f"{sched.name}-seed{args.seed}.json")
         sched.save(out)
         print(f"wrote {out}")
@@ -190,23 +195,8 @@ def cmd_transfer(args) -> int:
 
     _, config, run_records = load_run(args.run_dir)
     _, _, reset_records = load_run(args.reset_dir)
-    _, _, floor_records = load_run(args.floor_dir)
-    result = transfer(run_records, reset_records, floor_records, config, test=args.test, reps=args.reps)
+    result = transfer(run_records, reset_records, config, test=args.test, reps=args.reps)
     print(transfer_report(result))
-    if args.json:
-        print(json.dumps(result, indent=1))
-    return 0
-
-
-def cmd_compare(args) -> int:
-    from continual_arc.metrics import forward_transfer
-    from continual_arc.report import compare_report
-    from continual_arc.runner import load_run
-
-    _, config, run_records = load_run(args.run_dir)
-    _, _, ref_records = load_run(args.reference_dir)
-    result = forward_transfer(run_records, ref_records, config, test=args.test)
-    print(compare_report(result))
     if args.json:
         print(json.dumps(result, indent=1))
     return 0
@@ -218,8 +208,8 @@ def cmd_learned(args) -> int:
     from continual_arc.runner import load_run
 
     _, config, run_records = load_run(args.run_dir)
-    _, _, floor_records = load_run(args.floor_dir)
-    learned = share_learned(run_records, floor_records, config, reps=args.reps)
+    _, _, reset_records = load_run(args.reset_dir)
+    learned = share_learned(run_records, reset_records, config, reps=args.reps)
     print(learned_report(learned))
     if args.json:
         print(json.dumps(learned, indent=1))
@@ -264,6 +254,9 @@ def build_parser() -> argparse.ArgumentParser:
                          "the canonical numbers")
     sm.add_argument("--no-epilogue", action="store_true", help="omit the held-out epilogue")
     sm.add_argument("--rounds", type=int, help="cut the schedule to its first N rounds (stop a stream short)")
+    sm.add_argument("--reset-each", action="store_true", dest="reset_each",
+                    help="wipe the learner before every slot: the learner reset on its own stream, which the share "
+                         "learned reads a run against (continual-arc learned)")
     sm.add_argument("--epilogue-users", type=int, dest="epilogue_users",
                     help="build the held-out epilogue alone, for the first K of the --users "
                          "(each in the order and instance seeds the full schedule's own epilogue gives them); "
@@ -305,26 +298,18 @@ def build_parser() -> argparse.ArgumentParser:
     rp.set_defaults(func=cmd_report)
 
     t = sub.add_parser("transfer", help="the headline: what a run saves on a frozen test after its stream, against "
-                                        "the stronger of the learner reset and the bare model")
+                                        "the same learner reset before each instance")
     t.add_argument("run_dir", help="the run's frozen test (configs.test_schedule)")
     t.add_argument("reset_dir", help="the same learner on the same instances with its state wiped before each")
-    t.add_argument("floor_dir", help="the bare model (the demo-cache floor) on the same model and instances")
     t.add_argument("--test", choices=TESTS, default=TEST_HELD_OUT, help="which frozen test: held-out (default) or seen")
     t.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% interval")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_transfer)
 
-    c = sub.add_parser("compare", help="forward transfer of a run against one reference run")
-    c.add_argument("run_dir")
-    c.add_argument("reference_dir")
-    c.add_argument("--test", choices=TESTS, default=TEST_HELD_OUT)
-    c.add_argument("--json", action="store_true")
-    c.set_defaults(func=cmd_compare)
-
-    lr = sub.add_parser("learned", help="share of the learnable budget a run saves beyond the demo-cache floor "
-                                        "on the same model and stream")
+    lr = sub.add_parser("learned", help="share of the learnable budget a run saves on its stream over the same "
+                                        "learner reset before every instance")
     lr.add_argument("run_dir")
-    lr.add_argument("floor_dir", help="the demo-cache floor's run on the same model and schedule")
+    lr.add_argument("reset_dir", help="the same learner wiped before every instance of the same stream (a fresh run)")
     lr.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% interval")
     lr.add_argument("--json", action="store_true")
     lr.set_defaults(func=cmd_learned)

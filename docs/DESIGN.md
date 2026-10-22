@@ -22,7 +22,7 @@ caching outputs pointless.
 | task identity | task id always exposed | isolates memory from recognition; recognition can be a later track |
 | demos | on request, at a cost equal to one wrong attempt | makes remembering an economic decision |
 | score | mean cost per instance = wrong attempts + demo requests | one number; compute/tokens/memory are plotted, not scored |
-| headline | T on the held-out test: the budget a learner saves there against the stronger of itself reset and the bare model on the same instances; T on the seen test and the share learned on the stream beside it (20 and 21 Oct 2026, below) | no cache helps on a task never seen, both references play the learner's own model, and a learner cannot gain by playing dumb with an empty memory |
+| headline | T on the held-out test: the budget a learner saves there against itself reset before each instance, on the same instances; T on the seen test and the share learned on the stream, against the learner reset on its own stream, beside it (20, 21 and 22 Oct 2026, below) | no cache helps on a task never seen, and the reset plays the learner's own model in its own harness, the environment the learner learns in |
 | track | one, ARC-AGI-1 (`arc1`), named in every config (`arc1-small`); a bare size names nothing | its Re-ARC generators give every stream task fresh, verified instances without end, so a return is never a lookup; one track gives a learner one number, and the held-out season that verifies results streams as `arc1-small` does. ARC-AGI-2 has no generators, so its stream rested on augmentation, and ARC-AGI-3 serves levels, not fresh instances of a rule (Dan, 19 Oct 2026) |
 | canonical protocol | the `arc1-small` config's stream in workstreams mode, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
@@ -74,12 +74,11 @@ retention-by-gap curve; `random` replaced it. The workstreams streams are frozen
 
 ## Metrics
 
-* headline, T on the held-out test: `min(U(reset), U(floor)) − U(run)` over the test's instances, where U is the
-  budget used, `100 · mean_cost / max_cost`, `run` is the learner's own frozen test, `reset` the same learner reset
-  before each instance and `floor` the bare model (the stateless floor), each played on the same instances apart from
-  the run's own test, with a bootstrap over tasks that chooses the reference again in each draw and the
-  share solved of all three beside it (`metrics.transfer`, `continual-arc transfer`); the seen test is read the same
-  way (`--test seen`)
+* headline, T on the held-out test: `U(reset) − U(run)` over the test's instances, where U is the budget used,
+  `100 · mean_cost / max_cost`, `run` is the learner's own frozen test and `reset` the same learner reset before each
+  instance, played on the same instances apart from the run's own test, with a bootstrap over tasks and the share
+  solved of both beside it (`metrics.transfer`, `continual-arc transfer`); the seen test is read the same way
+  (`--test seen`)
 * score: `100 · (1 − mean_cost / max_cost)`, `max_cost = attempt_cap + demo_cost · demo_cap`
 * cost of an instance: its wrong attempts plus `demo_cost` per demo request when it is solved, and `max_cost` when it
   is not. Until 20 Oct 2026 an unsolved instance was charged the attempt cap plus its demo requests, so failing
@@ -91,10 +90,8 @@ retention-by-gap curve; `random` replaced it. The workstreams streams are frozen
 * retention: mean cost on re-exposure bucketed by gap (1-10, 11-30, 31-100, 101-300, 301+)
 * exposure curve: mean cost by exposure index (0, 1, 2, 3-5, 6-10, 11+)
 * learning curve: cumulative and windowed mean cost
-* share learned: the share of the learnable budget a run saves on the stream beyond a cache of its
-  demonstrations, against the demo-cache floor on the same model and stream (`metrics.share_learned`)
-* forward transfer against one reference: reference cost − run cost on a frozen test, matched by task and seed
-  (`metrics.forward_transfer`, `continual-arc compare`)
+* share learned: the share of the learnable budget a run saves on its stream over the same learner reset before
+  every instance (`metrics.share_learned`, `continual-arc learned`, the reset served by `schedule make --reset-each`)
 
 Add-on episodes are included in total resource accounting and exposed in
 `by_phase`, but primary benchmark metrics exclude them. The original schedule's
@@ -109,18 +106,26 @@ share learned has two flaws that model progress makes worse. Each stream task re
 demonstrations hold everything needed to solve it, so writing one program per alias and keeping it is close to
 optimal: the naive program library saves about two thirds of the learnable budget at every effort on GPT-6 Luna. And
 a strong model leaves little to learn: the learnable budget falls from 38.6 points at low effort to 15.0 at high.
-Transfer avoids both. A held-out task was never seen, so no cached program or answer helps on it, and both references
-play the learner's own model, so the score is the learning, not the model.
+Transfer avoids both. A held-out task was never seen, so no cached program or answer helps on it, and the reference
+plays the learner's own model, so the score is the learning, not the model.
 
-A learner judged against its own reset copy alone could fake transfer by holding back whenever its memory is empty:
-answer garbage until it has seen a stream, then try. That costs one stream instance and wins every comparison, since
-the reset copy's memory is always empty. Against the stronger of the reset copy and the bare model, garbage gains
-nothing. What is left is a learner that plays exactly as well as the bare model with an empty memory and uses its full
-strategy after a stream: it is credited with its edge over the bare model on new tasks, and a design that keeps its
-best strategy for after a warm-up earns the same without meaning to. On the public held-out tasks a learner could also
-look answers up after its stream and play dumb before it; the private season has nothing to look up. A placebo
-reference, the same learner after a stream of equal length that teaches nothing, would close the warm-up case too; it
-was declined for now (20 Oct 2026), so verified runs rest on their public code and its review.
+Settled 22 Oct 2026: each learner is read against itself reset, and the bare model is no reference. From 20 to 22 Oct
+T was read against the stronger of the reset and the bare model, and the share learned against the demo-cache floor,
+the bare model shown again the pairs it bought. Both put a model without the learner's harness in the baseline, and
+the harness is where a harness-based system learns: Qwen3.5-9B solves 31 of the 100 held-out tasks alone and 13 in
+prime-agent, so its rows were read against what the model does without its harness, while GLM-5.3 Flash, whose
+harness lifts it, was read against its reset. Against the reset, a learner that learns to drive its harness better is
+credited for it. The demo-cache floor stays as a learner like any other, read against its own reset, the stateless
+floor.
+
+What the bare model guarded against is a known gap. A learner judged against its own reset copy alone can fake
+transfer by holding back whenever its memory is empty: answer garbage until it has seen a stream, then try. That costs
+one stream instance and wins every comparison, since the reset copy's memory is always empty. A design that keeps its
+best strategy for after a warm-up earns the same without meaning to, and on the public held-out tasks a learner could
+also look answers up after its stream and play dumb before it; the private season has nothing to look up. So every
+result also shows the bare model on its test instances, and a reset that plays below it is flagged beside its T, for
+review of its public code. A placebo reference, the same learner after a stream of equal length that teaches nothing,
+would close the gap without the bare model; it was declined on 20 Oct 2026.
 
 Settled 21 Oct 2026: both tests are frozen, and the learning-on epilogue they replace is discarded. A learner that
 keeps learning while it meets 100 held-out tasks mixes what it built on the stream with what it builds on them, and
@@ -205,7 +210,8 @@ existing learners and runs keep their current behavior.
 
 ## Reference learners (run in `continual-arc-baselines`)
 
-Two floors assume nothing beyond the interface, and every result is read against them:
+Two floors assume nothing beyond the interface. Since 22 Oct 2026 no result is read against them (each learner is
+read against itself reset, above); they stay as the model alone, beside every other learner:
 
 1. Stateless: requests demonstrations on every instance and carries nothing between instances.
 2. Demo cache: requests demonstrations once per task id and replays them to the stateless solver

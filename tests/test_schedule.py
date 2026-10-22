@@ -275,6 +275,15 @@ def test_even_visits_in_every_mode():
     assert a.slots == b.slots
 
 
+
+def test_reset_each_wipes_the_learner_before_every_slot_of_the_same_stream():
+    stream = as_users(stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, mode="random"), 2)
+    reset = stream.reset_each()
+    assert [(s.task_id, s.instance_seed, s.user) for s in reset.slots] == [(s.task_id, s.instance_seed, s.user)
+                                                                          for s in stream.slots]
+    assert all(s.reset_before for s in reset.slots) and not any(s.reset_before for s in stream.slots)
+    assert reset.users == stream.users and reset.meta["reset_each"] and reset.name == stream.name + "-reset"
+
 def test_first_rounds_is_a_literal_prefix():
     stream = stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, mode="random")
     epi = epilogue_schedule(["e1", "e2", "e3"], seed=1, source="eval")
