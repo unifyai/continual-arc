@@ -248,12 +248,6 @@ user, all open at once, the round's records are committed together, and the lear
 `begin_round` and `end_round` hooks bracket it. The contract is that whatever the learner
 carries between instances changes only in `end_round`, so every user of a round meets the
 state the round began with. Every observation and record says whose work it is (`user`).
-The system is one for the team: whatever it keeps, a model's weights or a harness's notes,
-serves every user, and what it learns from one user reaches every user from the next round.
-The baselines' harnesses do it with one store for the team, which every user's copy is checked
-out from as the round begins and every user's changes merge into as their instance ends, a
-conflict resolved by the harness's own model. A system that keeps a memory for each user apart
-is another design, an ablation compared only with its like.
 
 A learner that can serve the users of a round at the same time sets
 `concurrent_users = True` and reports its counters per user (`user_resources(user)`): the
