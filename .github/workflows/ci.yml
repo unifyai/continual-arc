@@ -14,18 +14,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v3
+      # The workspace's lock covers the baselines' Pythons alone, so the benchmark's own environment is built by hand
+      # and every command runs in it as it is (--no-sync).
       - name: Install
         run: |
           uv venv --python ${{ matrix.python-version }}
           uv pip install -e ".[dev]"
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run --no-sync ruff check src tests
       - name: Cache pinned data
         uses: actions/cache@v4
         with:
           path: ~/.cache/continual-arc
           key: continual-arc-data-${{ hashFiles('src/continual_arc/data.py') }}
       - name: Fetch pinned data
-        run: uv run continual-arc data fetch
+        run: uv run --no-sync continual-arc data fetch
       - name: Test
-        run: uv run pytest
+        run: uv run --no-sync pytest
+
+  baselines:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Lint
+        working-directory: baselines
+        run: uv run --no-sync ruff check src tests
+      - name: Test
+        working-directory: baselines
+        run: uv run --no-sync pytest
+
+  training:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --all-packages
+      - name: Lint
+        working-directory: training
+        run: uv run --no-sync ruff check .
+      # Without ask_sd, torch or a GPU: the tests that need them skip.
+      - name: Test
+        working-directory: training
+        run: |
+          PYTHONPATH=.:../src:../baselines/src uv run --no-sync python -m pytest
+          uv run --no-sync bash test_frozen.sh
+          uv run --no-sync bash test_paper_backup.sh

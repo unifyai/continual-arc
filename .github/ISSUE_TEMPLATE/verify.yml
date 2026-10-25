@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        We rerun your learner on the held-out season at a seed of its own: 25 new rules nobody outside unify has seen, streamed over 200 instances, then a frozen test of 25 more held out, played from where the stream left your learner. Its T on that test is read against your learner reset and the bare model it plays with, each on the same instances, and its share learned against the demo-cache floor of that model on the same stream. Your code runs in the same sandbox as the paper's runs and reaches nothing but our tracking proxy, which makes its model calls on your key. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
+        We rerun your learner on the held-out season at a seed of its own: 25 new rules nobody outside unify has seen, streamed over 200 instances, then a frozen test of 25 more held out, played from where the stream left your learner. Its T on that test is read against your learner reset on the same instances, with the bare model it plays with shown beside it, and its share learned against your learner reset on the same stream. Your code runs in the same sandbox as the paper's runs and reaches nothing but our tracking proxy, which makes its model calls on your key. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
 
         Your model calls are yours to pay, on your key; we pay for the machine. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner and its floor have cost tens of dollars), and encrypt it with our public key:
 
@@ -56,7 +56,7 @@ body:
     id: model
     attributes:
       label: Model it plays with
-      description: The OpenRouter model id. Your share learned is read against this model's demo-cache floor.
+      description: The OpenRouter model id. The bare model shown beside your T is this one.
       placeholder: openai/gpt-6-luna
     validations:
       required: true

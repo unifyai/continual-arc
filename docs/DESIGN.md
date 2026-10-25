@@ -39,7 +39,7 @@ the learner's remembering for it. Whether a task was met before is for the learn
 
 `Observation` still carries `step`, `n_steps`, `phase` and `exposure_index`: the runner and the
 adapters key their bookkeeping on them, and the diagnostics use exposure from the schedule. The
-adapters in `continual-arc-baselines` render prompts without them (`systems/protocol.py`), but nothing
+adapters in `baselines/` render prompts without them (`systems/protocol.py`), but nothing
 in this package stops a Python learner from reading them.
 
 ## Modes as schedules
@@ -208,7 +208,7 @@ The old `Addon` and `BaseAddon` interfaces remain supported. They expose only
 should use `BasePlugin`. A no-op plug-in is equivalent to omitting `plugins`, so
 existing learners and runs keep their current behavior.
 
-## Reference learners (run in `continual-arc-baselines`)
+## Reference learners (run in `baselines/`)
 
 Two floors assume nothing beyond the interface. Since 22 Oct 2026 no result is read against them (each learner is
 read against itself reset, above); they stay as the model alone, beside every other learner:
@@ -222,7 +222,7 @@ read against itself reset, above); they stay as the model alone, beside every ot
 No floor may carry domain knowledge (Dan, 23 Sep 2026), so a program library, which assumes a task
 is a pure function of its input and verifies code against the demonstrations, is a method under
 test, not a floor. Harnesses, methods and weight-based learners are the standing experiments of
-`continual-arc-baselines`.
+`baselines/`.
 
 ## Open questions
 

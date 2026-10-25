@@ -11,7 +11,8 @@
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Paper</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
   <a href="https://unify.ai/continual-arc/leaderboard">Leaderboard</a> ·
-  <a href="https://github.com/unifyai/continual-arc-baselines">Baselines</a>
+  <a href="baselines">Baselines</a> ·
+  <a href="training">Training</a>
 </p>
 
 # Continual-ARC
@@ -35,8 +36,8 @@ instances, which puts an agent harness keeping notes and a model updating its we
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
 Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the track and the measures.
 The learners the paper evaluates, adapters for three agent harnesses among them, are in
-[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The records of its GPT-6 Luna runs,
-with the trajectories behind them, are plain JSON in git at
+[`baselines/`](baselines), and the training of its trained rows is in [`training/`](training). The records of its
+GPT-6 Luna runs, with the trajectories behind them, are plain JSON in git at
 [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the
 [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and every task, figure, run and
 trajectory of the paper can be explored and replayed at [unify.ai/continual-arc](https://unify.ai/continual-arc).
@@ -164,7 +165,7 @@ continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen
 ```
 
 The bare model's runs, shown beside T, come from `continual_arc_baselines.systems.bare.BareModelLearner` in
-[continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), played on the same width-1 schedules
+[`baselines/`](baselines), played on the same width-1 schedules
 (`arc-baselines run --schedule held-out-1.json`).
 
 ## The share learned
@@ -366,7 +367,7 @@ against these rules:
   the learner's own reset on the same model already carries.
 * **Every model named.** Every model the learner calls is named in the submission and
   reached through the tracking proxy of
-  [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines). The
+  [`baselines/`](baselines). The
   share learned and T read the learner against itself reset, on the same models. A
   model that only teaches it, such as a
   stronger model labelling its games for training, is part of its training: those calls
@@ -433,6 +434,8 @@ src/continual_arc/
   cli.py         continual-arc command line
   testing.py     data-free task source and trivial learners for tests
 docs/DESIGN.md   design rationale and decisions
+baselines/       the learners the paper evaluates, its harness adapters and the tracking proxy (baselines/README.md)
+training/        the training of the paper's trained rows on Qwen3.5-9B (training/README.md)
 ```
 
 ## Submitting a result
@@ -446,7 +449,7 @@ which nobody outside unify has seen ([verified results](#verified-results)).
    stream, wiped before every instance (`schedule make --reset-each`, [the share learned](#the-share-learned)), and
    before each instance of the tests ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start
    from the adapters
-   and the tracking proxy in [continual-arc-baselines](https://github.com/unifyai/continual-arc-baselines), which count
+   and the tracking proxy in [`baselines/`](baselines), which count
    every model call whatever the harness does. Read [what a learner may use](#what-a-learner-may-use) first.
 2. Unless the leaderboard already has it, run the bare model you play with on the two tests, one instance at a time,
    from the baselines (`continual_arc_baselines.systems.bare.BareModelLearner`): two cheap runs, shown beside your T,
@@ -501,8 +504,8 @@ tasks, and 25 held out. To have a learner verified on it:
    the repository with pip, implementing `continual_arc.learner`, and built with no arguments, so its settings are its
    class's defaults), the OpenRouter model it plays with and its reasoning effort, any other models it calls, and the
    encrypted key. A harness adapter on the baselines' `SystemLearner` depends on
-   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc-baselines@v0.1.0` alone, which brings the
-   benchmark with it.
+   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.2.0#subdirectory=baselines` alone,
+   which brings the benchmark with it.
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,
 whole, inside the sandbox the paper's runs used, which reaches nothing but the tracking proxy: the proxy makes every
