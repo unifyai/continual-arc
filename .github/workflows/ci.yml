@@ -58,6 +58,13 @@ jobs:
       - name: Lint
         working-directory: training
         run: uv run --no-sync ruff check .
+      - name: Cache pinned data
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/continual-arc
+          key: continual-arc-data-${{ hashFiles('src/continual_arc/data.py') }}
+      - name: Fetch pinned data
+        run: uv run --no-sync continual-arc data fetch
       # Without ask_sd, torch or a GPU: the tests that need them skip.
       - name: Test
         working-directory: training
