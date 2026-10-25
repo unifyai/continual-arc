@@ -5,10 +5,10 @@ from pathlib import Path
 
 import httpx
 import pytest
-from continual_workbench.accounting import CostJournal
-from continual_workbench.context import create_context
 
-from continual_arc_baselines.proxy import PLACEHOLDER_KEY, LLMProxy, reasoning_tail
+from continual_arc_baselines.attempt import Attempt
+from continual_arc_baselines.costs import CostJournal
+from continual_arc_baselines.proxy import PLACEHOLDER_KEY, LLMProxy
 from continual_arc_baselines.tracking import JournalSink, Tracker
 
 from .fake_upstream import FakeUpstream
@@ -155,8 +155,8 @@ def test_openrouter_style_path_prefix_is_accepted(upstream):
     assert upstream.requests[0]["path"] == "/v1/chat/completions"
 
 
-def test_journal_sink_writes_workbench_costs(upstream, tmp_path):
-    context = create_context(tmp_path, "proxy-run", {"experiment_id": "t", "project_key": "t"})
+def test_journal_sink_writes_the_cost_journal_and_the_event_log(upstream, tmp_path):
+    context = Attempt.create("proxy run", root=tmp_path)
     tracker = Tracker()
     tracker.subscribe(JournalSink(context, provider="openrouter"))
     with LLMProxy(upstream.base_url, tracker=tracker) as proxy:
@@ -293,193 +293,6 @@ def test_every_past_reply_carries_its_reasoning_under_the_thinking_field_and_one
     assert fixed[2] == {"role": "assistant", "content": "b", "reasoning_content": ""}
     assert fixed[3] == {"role": "assistant", "content": "c", "reasoning_content": ""}
     assert fixed[0] == messages[0] and fixed[4] == messages[4] and untouched == messages
-
-
-def _tool_call(i: int) -> list[dict]:
-    return [{"id": f"c{i}", "type": "function", "function": {"name": "ipython", "arguments": "{}"}}]
-
-
-def test_past_reasoning_is_kept_for_the_current_turn_or_the_latest_call_only():
-    # an earlier turn (a tool call, then the reply), a new user message, and two calls into the turn under way
-    history = [{"role": "system", "content": "s"},
-               {"role": "user", "content": "task"},
-               {"role": "assistant", "content": "", "reasoning_content": "r1", "tool_calls": _tool_call(1)},
-               {"role": "tool", "content": "out1", "tool_call_id": "c1"},
-               {"role": "assistant", "content": "request", "reasoning": "r2"},
-               {"role": "user", "content": "demos"},
-               {"role": "assistant", "content": "", "reasoning_content": "r3", "tool_calls": _tool_call(3)},
-               {"role": "tool", "content": "out3", "tool_call_id": "c3"},
-               {"role": "assistant", "content": "", "reasoning_content": "r4", "tool_calls": _tool_call(4)},
-               {"role": "tool", "content": "out4", "tool_call_id": "c4"}]
-    new_turn = history + [{"role": "assistant", "content": "submit", "reasoning_content": "r5"},
-                          {"role": "user", "content": "wrong"}]
-    server = FakeUpstream().start()
-    seen = []
-    tracker = Tracker()
-    tracker.subscribe(seen.append)
-    try:
-        for keep in ("all", "turn", "call"):
-            for messages in (history, new_turn):
-                with LLMProxy(server.base_url, thinking_field="reasoning_content", keep_reasoning=keep,
-                              tracker=tracker, capture_content=True) as proxy:
-                    httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": messages},
-                               timeout=10)
-        with LLMProxy(server.base_url, keep_reasoning="call") as proxy:  # no thinking field: the key is left out
-            httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": history}, timeout=10)
-        with pytest.raises(ValueError):
-            LLMProxy(server.base_url, keep_reasoning="none")
-    finally:
-        server.stop()
-
-    def reasoning(body: dict) -> list:
-        return [m.get("reasoning_content", m.get("reasoning")) for m in body["messages"] if m["role"] == "assistant"]
-
-    sent = [r["body"] for r in server.requests]
-    assert reasoning(sent[0]) == ["r1", "r2", "r3", "r4"]
-    assert reasoning(sent[1]) == ["r1", "r2", "r3", "r4", "r5"]
-    assert reasoning(sent[2]) == ["", "", "r3", "r4"]           # turn: the tool loop under way keeps its reasoning
-    assert reasoning(sent[3]) == ["", "", "", "", ""]           # a new user message starts a new turn
-    assert reasoning(sent[4]) == ["", "", "", "r4"]             # call: only the latest reply keeps it
-    assert reasoning(sent[5]) == ["", "", "", "", ""]
-    assert not any(k in m for m in sent[6]["messages"][:8] for k in ("reasoning", "reasoning_content"))
-    assert sent[6]["messages"][8]["reasoning_content"] == "r4"
-    for body in sent:  # nothing else about a turn changes
-        assert [{k: v for k, v in m.items() if k not in ("reasoning", "reasoning_content")} for m in body["messages"]] \
-            == [{k: v for k, v in m.items() if k not in ("reasoning", "reasoning_content")}
-                for m in (new_turn if len(body["messages"]) == len(new_turn) else history)]
-    captured = [c.request_body for c in seen if c.status == "completed"]
-    assert captured == sent[:6]  # the captured request is the one the server received
-
-
-def test_a_pruned_reply_can_keep_the_end_of_its_reasoning():
-    long = ("I looked at the grid and counted the colours in each row.\n"
-            "The rule seems to be a shift of each row by one. So I will request demos.")
-    history = [{"role": "user", "content": "task"},
-               {"role": "assistant", "content": "", "reasoning": long, "tool_calls": _tool_call(1)},
-               {"role": "tool", "content": "out1", "tool_call_id": "c1"},
-               {"role": "assistant", "content": "", "reasoning_content": "short", "tool_calls": _tool_call(2)},
-               {"role": "tool", "content": "out2", "tool_call_id": "c2"},
-               {"role": "assistant", "content": "", "reasoning_content": long, "tool_calls": _tool_call(3)},
-               {"role": "tool", "content": "out3", "tool_call_id": "c3"}]
-    server = FakeUpstream().start()
-    try:
-        with LLMProxy(server.base_url, thinking_field="reasoning_content", keep_reasoning="call",
-                      reasoning_tail=80) as proxy:
-            httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": history}, timeout=10)
-    finally:
-        server.stop()
-    sent = server.requests[0]["body"]["messages"]
-    # from the first line that starts in its last 80 characters
-    assert sent[1]["reasoning_content"] == "The rule seems to be a shift of each row by one. So I will request demos."
-    assert "reasoning" not in sent[1]
-    assert sent[3]["reasoning_content"] == "short"  # shorter than the tail: whole
-    assert sent[5]["reasoning_content"] == long     # the latest reply: all of it
-    assert reasoning_tail("no break in these words at all", 12) == "words at all"  # no line or sentence start: as cut
-
-
-def test_an_older_reply_can_carry_a_summary_of_its_reasoning_written_by_the_served_model(tmp_path):
-    long = "First I read the grid. " * 10 + "So I decided to request demonstrations."
-    server = FakeUpstream(reply="I read the grid and decided to request demonstrations.", reasoning=long).start()
-    log = tmp_path / "summaries.jsonl"
-    try:
-        with LLMProxy(server.base_url, thinking_field="reasoning_content", keep_reasoning="call",
-                      reasoning_summary=100, summary_log=log,
-                      body_overrides={"model": "served", "chat_template_kwargs": {"reasoning_effort": "high"},
-                                      "return_token_ids": True},
-                      summary_overrides={"chat_template_kwargs": {"reasoning_effort": "low"}}) as proxy:
-            # the harness's first call: its reply carries the long reasoning, which is summarised in the background
-            with httpx.stream("POST", proxy.base_url + "/chat/completions", timeout=10, json={
-                    "model": "m", "stream": True, "messages": [{"role": "user", "content": "task"}]}) as response:
-                b"".join(response.iter_bytes())
-            # two calls later that reply is an older one: it carries the summary; the latest keeps its reasoning;
-            # a reasoning the proxy never saw complete is summarised when first needed
-            history = [{"role": "user", "content": "task"},
-                       {"role": "assistant", "content": "", "reasoning_content": long, "tool_calls": _tool_call(1)},
-                       {"role": "tool", "content": "out1", "tool_call_id": "c1"},
-                       {"role": "assistant", "content": "", "reasoning_content": long + " Again.",
-                        "tool_calls": _tool_call(2)},
-                       {"role": "tool", "content": "out2", "tool_call_id": "c2"},
-                       {"role": "assistant", "content": "", "reasoning_content": "short", "tool_calls": _tool_call(3)},
-                       {"role": "tool", "content": "out3", "tool_call_id": "c3"}]
-            httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": history}, timeout=30)
-    finally:
-        server.stop()
-    chats = [r["body"] for r in server.requests]
-    summary_asks = [b for b in chats if "<reasoning>" in b["messages"][0]["content"]]
-    assert len(summary_asks) == 2  # once per distinct reasoning, the first while the harness had not asked yet
-    ask = summary_asks[0]
-    assert ask["model"] == "served" and ask["chat_template_kwargs"] == {"reasoning_effort": "low"}
-    assert ask["stream"] is False and "return_token_ids" not in ask and long in ask["messages"][0]["content"]
-    assert ask["messages"][0]["content"].startswith("Condense the reasoning below to at most 100 characters.")
-    sent = next(b for b in chats if len(b["messages"]) == len(history))["messages"]
-    summary = "I read the grid and decided to request demonstrations."
-    assert sent[1]["reasoning_content"] == summary and sent[3]["reasoning_content"] == summary
-    assert sent[5]["reasoning_content"] == "short"  # the latest reply
-    lines = [json.loads(line) for line in log.read_text().splitlines()]
-    assert [x["status"] for x in lines] == ["made", "made"] and all(x["chars_out"] == len(summary) for x in lines)
-
-
-def test_shortened_reasoning_can_go_under_its_own_key_after_a_marker():
-    long = "Thinking it over at length. " * 10 + "So I will submit the grid."
-    history = [{"role": "user", "content": "task"},
-               {"role": "assistant", "content": "", "reasoning": long, "tool_calls": _tool_call(1)},
-               {"role": "tool", "content": "out1", "tool_call_id": "c1"},
-               {"role": "assistant", "content": "", "reasoning_content": "latest", "tool_calls": _tool_call(2)},
-               {"role": "tool", "content": "out2", "tool_call_id": "c2"}]
-    server = FakeUpstream().start()
-    try:
-        with LLMProxy(server.base_url, thinking_field="reasoning_content", keep_reasoning="call", reasoning_tail=40,
-                      shortened_key="think_faster", shortened_prefix="(condensed) ") as proxy:
-            httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": history}, timeout=10)
-    finally:
-        server.stop()
-    sent = server.requests[-1]["body"]["messages"]
-    # K2 Horizon's template shows it as a low-effort reply's; the latest reply's stays as it came
-    assert sent[1] == {"role": "assistant", "content": "", "tool_calls": _tool_call(1),
-                       "think_faster": "(condensed) So I will submit the grid."}
-    assert sent[3]["reasoning_content"] == "latest" and "think_faster" not in sent[3]
-
-
-def test_a_summary_is_what_follows_a_leaked_closing_tag_and_one_far_over_budget_is_not_used(tmp_path):
-    long = "Thinking it over at length. " * 10 + "So I will submit the grid."
-    history = [{"role": "user", "content": "task"},
-               {"role": "assistant", "content": "", "reasoning_content": long, "tool_calls": _tool_call(1)},
-               {"role": "tool", "content": "out1", "tool_call_id": "c1"},
-               {"role": "assistant", "content": "", "reasoning_content": "latest", "tool_calls": _tool_call(2)},
-               {"role": "tool", "content": "out2", "tool_call_id": "c2"}]
-    sent = []
-    for reply in ("some thinking the server did not split</ifm|think>I will submit the grid.", "x" * 61):
-        server = FakeUpstream(reply=reply).start()
-        try:
-            with LLMProxy(server.base_url, thinking_field="reasoning_content", keep_reasoning="call",
-                          reasoning_summary=40, summary_log=tmp_path / "s.jsonl") as proxy:
-                httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": history}, timeout=30)
-        finally:
-            server.stop()
-        sent.append(server.requests[-1]["body"]["messages"][1]["reasoning_content"])
-    assert sent == ["I will submit the grid.", reasoning_tail(long, 40)]  # 61 > 1.5 x 40: the tail
-    assert [json.loads(x)["status"] for x in (tmp_path / "s.jsonl").read_text().splitlines()] == ["made", "too long (61)"]
-
-
-def test_a_summary_not_made_falls_back_to_the_tail(tmp_path):
-    long = "Thinking it over at length. " * 10 + "So I will submit the grid."
-    server = FakeUpstream(reply="", reasoning=long).start()  # the served model writes nothing
-    try:
-        with LLMProxy(server.base_url, thinking_field="reasoning_content", keep_reasoning="call",
-                      reasoning_summary=40, summary_log=tmp_path / "s.jsonl") as proxy:
-            history = [{"role": "user", "content": "task"},
-                       {"role": "assistant", "content": "", "reasoning_content": long, "tool_calls": _tool_call(1)},
-                       {"role": "tool", "content": "out1", "tool_call_id": "c1"},
-                       {"role": "assistant", "content": "", "reasoning_content": "latest", "tool_calls": _tool_call(2)},
-                       {"role": "tool", "content": "out2", "tool_call_id": "c2"}]
-            httpx.post(proxy.base_url + "/chat/completions", json={"model": "m", "messages": history}, timeout=30)
-    finally:
-        server.stop()
-    sent = server.requests[-1]["body"]["messages"]
-    assert sent[1]["reasoning_content"] == reasoning_tail(long, 40) == "So I will submit the grid."
-    assert json.loads((tmp_path / "s.jsonl").read_text())["status"] == "empty (stop)"
-    with pytest.raises(ValueError):
-        LLMProxy(server.base_url, reasoning_tail=100, reasoning_summary=100)
 
 
 def test_out_of_credit_upstream_is_waited_out_not_failed():
@@ -644,7 +457,7 @@ def test_a_served_reply_answers_the_system_without_the_upstream_as_json_or_as_a_
 def test_a_long_serve_keeps_the_tracker_touched(upstream, monkeypatch):
     """A call the proxy answers itself can take minutes: its tracker is touched every KEEPALIVE_S
     meanwhile, so that an adapter's idle watchdog, which reads the tracker's last activity, does not take it for a hung
-    system (28 Sep: served calls reached 535 s against prime-agent's 600-second idle timeout)."""
+    system: a served call can come near prime-agent's 600-second idle timeout."""
     import time as _time
 
     import continual_arc_baselines.proxy as proxy_module

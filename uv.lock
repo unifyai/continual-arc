@@ -6,6 +6,7 @@ requires-python = ">=3.12, <3.14"
 members = [
     "continual-arc",
     "continual-arc-baselines",
+    "continual-arc-training",
 ]
 
 [[package]]
@@ -105,6 +106,35 @@ dev = [
 requires-dist = [
     { name = "agent-client-protocol", specifier = "==0.12.1" },
     { name = "continual-arc", extras = ["plots"], editable = "." },
+    { name = "httpx", specifier = ">=0.27" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
+[[package]]
+name = "continual-arc-training"
+version = "0.1.0"
+source = { editable = "training" }
+dependencies = [
+    { name = "continual-arc" },
+    { name = "continual-arc-baselines" },
+    { name = "httpx" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "continual-arc", editable = "." },
+    { name = "continual-arc-baselines", editable = "baselines" },
     { name = "httpx", specifier = ">=0.27" },
 ]
 

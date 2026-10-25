@@ -5,13 +5,11 @@ system keeps between instances lives under a private ``HERMES_HOME``: its
 memories (``MEMORY.md``, ``USER.md``), skills, sessions and caches. That
 directory is the continual-learning method under test.
 
-Two rows of the paper map onto one switch. hermes-agent's own self-improvement
-is a post-turn background review that rewrites memory and skills (the same
-machinery its ``/refine`` command triggers by hand). ``self_improve=False``
-turns it off (row H0: the harness keeps what it writes during turns and nothing
-more); ``self_improve=True`` leaves it on (row H1: the harness evolves itself).
-The ACP server does not dispatch ``/refine`` (unknown slash commands go to the
-model as text), so ``refine_every`` has no effect here and is recorded as such.
+hermes-agent improves itself through a post-turn background review that
+rewrites its memory and skills, the machinery its ``/refine`` command triggers
+by hand, left at its shipped default (on). The ACP server does not dispatch
+``/refine`` (an unknown slash command goes to the model as text), so
+``refine_every`` has no effect here and is recorded as 0.
 
 The system starts as a blank slate: the ``.no-bundled-skills`` marker stops hermes
 seeding its bundled skill library into ``HERMES_HOME``, so the skills directory
@@ -32,9 +30,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from continual_arc_baselines.systems.acp import KEY_VARIABLE, ACPSystemLearner
+from continual_arc_baselines.systems.acp import ACPSystemLearner
 from continual_arc_baselines.systems.base import SystemUnavailable
-from continual_arc_baselines.systems.sandbox import python_runtime_root
+from continual_arc_baselines.systems.sandbox import KEY_VARIABLE, python_runtime_root
 
 CHECKOUT = Path.home() / "hermes-agent"
 
@@ -44,8 +42,7 @@ class HermesAgentLearner(ACPSystemLearner):
 
     def __init__(self, model: str = "IFM/K2-Horizon-7B", **kwargs: Any):
         super().__init__(model=model, **kwargs)
-        if self.refine_every:
-            self.refine_every = 0  # not applicable; see the module docstring
+        self.refine_every = 0  # not applicable; see the module docstring
 
     def default_command(self) -> list[str]:
         local = CHECKOUT / ".venv" / "bin" / "hermes-acp"
@@ -69,8 +66,8 @@ class HermesAgentLearner(ACPSystemLearner):
     def ask(self, message: str, *, reprompt: bool = False) -> str:
         reply = super().ask(message, reprompt=reprompt)
         if self.DEAD_REPLY in reply:
-            # hermes latches this after five calls with no response (a credit lapse held by the
-            # proxy did it on 22 Sep) and refuses every call thereafter; only a new session
+            # hermes latches this after five calls with no response (a credit lapse the proxy
+            # waits out does it) and refuses every call thereafter; only a new session
             # clears it. The system is down, not answering: restart it, state intact.
             raise SystemUnavailable("hermes latched its provider as unresponsive")
         return reply
@@ -127,10 +124,3 @@ class HermesAgentLearner(ACPSystemLearner):
             except (OSError, subprocess.TimeoutExpired):
                 self._version = "unknown"
         return self._version
-
-    def refine(self) -> None:
-        self.note("refine requested but hermes-agent evolves through its background review "
-                  "(self_improve); nothing to trigger")
-
-    def describe(self) -> dict[str, Any]:
-        return super().describe()

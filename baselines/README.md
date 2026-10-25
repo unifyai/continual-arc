@@ -17,40 +17,40 @@
 # continual-arc-baselines
 
 The learners that the paper [*Continual-ARC: Measuring Skill Acquisition over a Working Lifetime*](https://unify.ai/blog/why-we-built-continual-arc)
-evaluates on the [Continual-ARC](https://github.com/unifyai/continual-arc) benchmark, and the harness around them: the
+evaluates on the [Continual-ARC](https://github.com/unifyai/continual-arc) benchmark, and what runs them: the
 adapters that drive three agent harnesses through the benchmark's protocol, the learner that serves a team of users at
-once, the sandbox they run in, the local proxy through which every model call passes, and the scripts that launch the
-runs. This folder is the package `continual-arc-baselines` inside the benchmark's repository, whose root is the
-benchmark; the trained rows' code is beside it in [`training/`](../training). The records of the paper's GPT-6 Luna runs
-are plain JSON in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the
-benchmark's [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0).
+once, the sandbox the harnesses run in, the local proxy through which every model call passes, the frozen tests after a
+stream, and the scripts that launch the paper's runs. This folder is the package `continual-arc-baselines` inside the
+benchmark's repository, whose root is the benchmark; the training of the trained rows is beside it in
+[`training/`](../training), which drives the learners here. The records of the paper's GPT-6 Luna runs are plain JSON
+in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the benchmark's
+[v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0).
 
 ## What is here
 
 | path | contents |
 |---|---|
-| `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), the demo-cache floor at several users (`BareSharedDemoCacheLearner` over one `SharedDemoCache` for the team) and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) |
-| `src/continual_arc_baselines/systems/prime_agent.py`, `hermes_agent.py`, `openclaw.py` | the harness adapters of row H: prime-agent over its RPC mode, hermes-agent and openclaw over the Agent Client Protocol (`acp.py`). Row H0 is `stateless=True`, row HA `ask_to_store=True` and row HPL `program_library=True`. `opencode.py` drives a harness that is not in the grid, since it has no mechanism that writes memory or skills |
-| `src/continual_arc_baselines/collective.py` | `CollectiveHarnessLearner`: one system per user, every user's instance of a round served at once, each user behind a proxy of their own, with the hooks a trained row learns from (every instance's turns and model calls, captured whole) and `snapshot_state` / `restore_state` for a user's state |
-| `src/continual_arc_baselines/systems/protocol.py`, `base.py` | the messages a learner is shown, the lenient parser that reads an action from a reply, and the adapter base class with its budgets, restarts and wipes |
+| `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), the demo-cache floor at several users (`BareSharedDemoCacheLearner` over one `SharedDemoCache` for the team), and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) with the sandboxed runner of its programs |
+| `src/continual_arc_baselines/systems/prime_agent.py`, `hermes_agent.py`, `openclaw.py` | the harness adapters of row H: prime-agent over its RPC mode, hermes-agent and openclaw over the Agent Client Protocol (`acp.py`). Row H0 is `stateless=True`, row HA `ask_to_store=True` and row HPL `program_library=True` |
+| `src/continual_arc_baselines/systems/base.py`, `protocol.py` | `SystemLearner`, the adapter base class, with its budgets, restarts, wipes and frozen resets; the messages a learner is shown and the lenient parser that reads an action from a reply |
 | `src/continual_arc_baselines/systems/sandbox.py` | the sandbox each harness runs in: bubblewrap on Linux, Seatbelt on macOS |
-| `src/continual_arc_baselines/proxy.py`, `tracking.py`, `routing.py` | the OpenAI-compatible reverse proxy that records every model call, the per-instance counters it feeds (`llm_*` in every record), and the sticky routing of each user to one replica of a vLLM server |
-| `src/continual_arc_baselines/cli.py` | `arc-baselines run`: builds a schedule, runs a learner over it with the benchmark's runner and writes the run directory; `arc-baselines test` and `test-collective`: a frozen test after a stream; `arc-baselines fork`: a run taken up again from any round; `arc-baselines install-submission`: a submitted learner's environment |
-| `src/continual_arc_baselines/frozen.py` | a harness's two frozen tests, as a submitter plays them: each played one instance at a time, every instance from the state the stream left, put back where it was |
-| `src/continual_arc_baselines/statelog.py`, `fork.py`, `frozen_collective.py` | a system's state committed to git at the end of every round, a run forked from any round's commit, and the frozen tests played as one round of users, each forked from the stream's last commit |
 | `src/continual_arc_baselines/systems/hosted.py`, `learner_host.py` | a submitted Python learner run whole inside the sandbox, for verified runs, and the host that serves it there |
-| `src/continual_arc_baselines/evidence.py`, `src/continual_workbench/` | the attempt directory, event log and cost journal each run writes. `continual_workbench` holds the three modules of our experiment workbench that the baselines use |
-| `src/continual_arc_baselines/learners/` | the prompting learners and the program checker that `bare.py` uses |
+| `src/continual_arc_baselines/collective.py` | `CollectiveHarnessLearner`: one system per user, every user's instance of a round served at once, each user behind a proxy of their own, with the hooks a trained row learns from (every instance's turns and model calls, captured whole) and `snapshot_state` / `restore_state` for a user's state |
+| `src/continual_arc_baselines/proxy.py`, `tracking.py` | the OpenAI-compatible reverse proxy that records every model call, and the per-instance counters it feeds (`llm_*` in every record) |
+| `src/continual_arc_baselines/cli.py` | `arc-baselines`: `run` a learner over a schedule, `test` a harness's stream, `fork` a run from any round, `install-submission` |
+| `src/continual_arc_baselines/frozen.py` | the frozen tests after a stream, played one instance at a time from the stream's state put back, or as one round of users forked from the stream's last commit |
+| `src/continual_arc_baselines/statelog.py`, `fork.py` | a system's state committed to git at the end of every round, and a run forked from any round's commit |
+| `src/continual_arc_baselines/attempt.py`, `costs.py` | the attempt directory each run writes beside its run directory (manifest, event log, metrics, artifacts) and its cost journal |
 | `scripts/launch-cell.sh` | launches one cell: one row at one preset, configuration, order and seed |
-| `scripts/paper-grid.sh`, `scripts/paper-grid.txt` | every cell of the September grid, one line each |
+| `scripts/paper-grid.sh`, `scripts/paper-grid.txt` | every cell of the paper's GPT-6 Luna grid, one line each |
 | `scripts/arc-leaderboard.py` | reads the ARC Prize leaderboard's published data, from which every model in the grid was chosen |
 
 ## The paper's rows and the learners behind them
 
 | rows | learner | how they ran |
 |---|---|---|
-| the open models' rows: on Qwen3.5-9B, F, PL, H, HPL, the rows in which the teacher writes the notes (HG, HGPL, HPLG) and the trained rows (DAgger, OPSD, PG), each beside its wiped twin; on GLM-5.3 Flash, F and PL | `CollectiveHarnessLearner`, one system per user: `PrimeAgentLearner` for every harness row, `BareModelLearner` and `BareDemoCacheLearner` (`BareSharedDemoCacheLearner` at several users) for the floors, `BareProgramLibraryLearner` for the program library | driven round by round from [`training/`](../training), which serves the model, trains the adapters and lets the teacher write; every user's state committed at the end of every round, and the frozen tests played as one round of users forked from the stream's end (`frozen_collective.py`) |
-| GPT-6 Luna's rows, at low, medium and high effort: F, M, M0, and H, H0, HA, HPL and HPL0 in each of prime-agent, hermes-agent and openclaw | `BareModelLearner`, `BareDemoCacheLearner`, `BareProgramLibraryLearner`, `PrimeAgentLearner`, `HermesAgentLearner`, `OpenClawLearner` | one `arc-baselines run` a cell, its state committed at the end of every round; its frozen tests played with `arc-baselines test-collective`, a hundred users of the cell's own system at once |
+| GPT-6 Luna's rows, at low, medium and high effort: F, PL and PL0, and H, H0, HA, HPL and HPL0 in each of prime-agent, hermes-agent and openclaw | `BareModelLearner` and `BareDemoCacheLearner` (F), `BareProgramLibraryLearner` (PL, PL0), `PrimeAgentLearner`, `HermesAgentLearner` and `OpenClawLearner` (the H rows) | one `arc-baselines run` a cell (`scripts/launch-cell.sh`), its stream alone; its frozen tests as one round of a hundred users of the cell's own system, each forked from the commit of the stream's end (`arc-baselines test --collective`) |
+| the open models' rows: on Qwen3.5-9B, F, PL, H, HPL, the rows in which the teacher writes the notes (HG, HGPL, HPLG) and the trained rows (DAgger, OPSD, PG), each beside its wiped twin; on GLM-5.3 Flash, F and PL | `CollectiveHarnessLearner`, one system per user: `PrimeAgentLearner` for every harness row, `BareModelLearner` and `BareDemoCacheLearner` (`BareSharedDemoCacheLearner` at several users) for the floors, `BareProgramLibraryLearner` for the program library | driven round by round from [`training/`](../training), which serves the model, trains the adapters and lets the teacher write; every user's state committed at the end of every round, and the frozen tests played as one round of users forked from the stream's end (`frozen.seed`) |
 
 ## Install
 
@@ -94,9 +94,13 @@ export OPENROUTER_API_KEY=...
 bash scripts/launch-cell.sh floors luna6-low workstreams 0 arc1-small
 ```
 
-A run directory holds `records.jsonl` (one line per instance), `summary.json`, `schedule.json`, `config.json` and
-`meta.json`, the files of every run in the run records; `uv run continual-arc report <run directory>` prints its
-scores. `arc-baselines run` starts the tracking proxy for the run and exports its address as `OPENAI_BASE_URL`,
+A run directory (`--out`) holds `records.jsonl` (one line per instance), `summary.json`, `schedule.json`,
+`config.json` and `meta.json`, the files of every run in the run records, and `launches.jsonl`, the command line and
+the system's description of every launch; `uv run continual-arc report <run directory>` prints its scores. Beside it,
+under `.workbench/runs/` in the folder the run was launched from, the run's attempt holds its event log, its cost
+journal and the system's own folder, its state and logs (`attempt.json` in the run directory names it).
+
+`arc-baselines run` starts the tracking proxy for the run and exports its address as `OPENAI_BASE_URL`,
 `OPENROUTER_BASE_URL` and `ARC_LLM_BASE_URL` with a placeholder key, so any system pointed at it is measured without
 knowing it; the real key stays in the proxy. The proxy forwards each request unchanged except that it asks the
 provider to report usage and adds the run's defaults (`--llm-defaults`) where the system set none.
@@ -104,19 +108,27 @@ provider to report usage and adds the run's defaults (`--llm-defaults`) where th
 To run your own system, subclass `SystemLearner` (`systems/base.py`), which speaks the benchmark's protocol and leaves
 an adapter only `start`, `stop`, `ask`, `new_session` and `wipe_state`, and keep everything the system persists under
 `self.state_dir`, which its frozen tests put back before every instance; or write any learner against the benchmark's
-four-method interface that builds its client from `OPENAI_BASE_URL`.
+four-method interface that builds its client from `OPENAI_BASE_URL`. Every instance of a `SystemLearner` begins in a
+conversation of its own (`new_session`), the first after any start included, and a stateless one (`stateless=True`) is
+wiped before every instance, the first included.
 
 `--stream-only` plays a schedule's stream and stops before its epilogue, a literal prefix of the schedule, for a
 `--schedule` as for a `--config`; `--no-epilogue` builds the stream alone from `--config`.
 
-## Play the frozen tests
+## Test a harness
 
 After its stream a learner plays two frozen tests, the held-out test and the seen test, every instance from its state
 at the end of the stream, so that nothing learnt on one test instance reaches another (the benchmark's
-[two frozen tests](https://github.com/unifyai/continual-arc#the-two-frozen-tests)). A harness keeps one conversation,
-so it plays each test one instance at a time, and before every instance `arc-baselines test` stops it and puts its
-state directory back as the stream left it, at the same path. Every path the harness wrote into its own files, its
-databases included, still names its own state, so nothing is rewritten, whatever the harness.
+[two frozen tests](https://github.com/unifyai/continual-arc#the-two-frozen-tests)). `arc-baselines test` plays a test
+of a harness's stream, with the harness the stream's first launch built (`launches.jsonl`), so run it from the same
+folder, with the key in the environment and, for an adapter of your own, the same `PYTHONPATH`. The test's records go
+to `RUN/frozen/<the test>/play` (or `--out`), with the stream's `alias-salt`, so that the harness meets its tasks under
+the names it learnt them by, and `frozen.json`, what the test was played from.
+
+**One instance at a time**, the default and what a submission's harness plays. A harness keeps one conversation, so it
+plays a test made with `--width 1`, and before every instance `arc-baselines test` stops it and puts its state
+directory back as the stream left it, at the same path: every path the harness wrote into its own files, its databases
+included, still names its own state, so nothing is rewritten, whatever the harness.
 
 ```bash
 export OPENROUTER_API_KEY=...
@@ -145,38 +157,43 @@ uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-d
 uv run continual-arc learned runs/arc1/openclaw-ws0 runs/arc1/openclaw-ws0-reset
 ```
 
-`arc-baselines test` takes the run directory of a stream played whole with `--out` and nothing after it
-(`--no-epilogue`, or a `--schedule` made with `--no-epilogue`), and a test made one instance at a time (`--width 1`). It
-builds the harness as the stream's first launch did (`launches.jsonl`), so run it from the same folder, with the key
-in the environment and, for an adapter of your own, the same `PYTHONPATH`. For the test the stream's own state
-directory is set aside, renamed `system/stream-end-<instances played>` in the stream's attempt, and a copy of it is put
-in its place before every instance. When the test ends, or is stopped with Ctrl-C, `kill` or a hangup, the copy is
-deleted and the stream's directory renamed back. A test stopped harder, by `kill -9` or the machine going down, leaves
-it aside, and the next test, or the stream taken up again with `--resume`, puts it back first. The test's records go
-to `RUN/frozen/<the test>/play` (or `--out`), with the stream's `alias-salt`, so the harness meets its tasks under the
-names it learnt them by, and `frozen.json`, the stream end it was played from; its logs and model-call journal go to an
-attempt of its own. A test launched again goes on from where it stopped, unless the stream has gone on since, which is
-refused.
+The run must be a stream played whole with `--out` and nothing after it (`--no-epilogue`, or a `--schedule` made with
+`--no-epilogue`), and the test must be of its configuration and seed. For the test the stream's own state directory is
+set aside, renamed `system/stream-end-<instances played>` in the stream's attempt, and a copy of it is put in its place
+before every instance. When the test ends, or is stopped with Ctrl-C, `kill` or a hangup, the copy is deleted and the
+stream's directory renamed back. A test stopped harder, by `kill -9` or the machine going down, leaves it aside, and
+the next test, or the stream taken up again with `--resume`, puts it back first. The test's logs and model-call journal
+go to an attempt of its own. A test launched again goes on from where it stopped, unless the stream has gone on since,
+which is refused. One process at a time plays a run, its stream or a test of it, so the two tests play one after the
+other, each about half as long as the stream. The references need nothing of the stream's, so they can play beside
+them, each in a run directory of its own.
 
-One process at a time plays a run, its stream or a test of it, so the two tests play one after the other, a second
-refused while one plays. Each takes as long as its 100 instances played in turn, about half as long as the stream. The
-references need nothing of the stream's, so they can play beside them, each in a run directory of its own: the harness
-reset before every instance of each test and of the stream, as above. The bare model, `BareModelLearner` on the tests'
-schedules, is no reference: its runs are shown beside T, which is flagged if the reset plays below them. A test puts
-back the state directory alone, so an adapter of your own keeps everything its harness persists under `self.state_dir`
-and its own logs outside it; on macOS the sandbox also lets a harness write the user's temporary and cache folders,
-which nothing puts back, in a test as in its stream. A learner that keeps what it learns in memory, as the demo-cache
-floor does, has no frozen tests here, and a Python learner plays them from a copy of itself (the benchmark's README),
-or after its stream in the same process with `arc-baselines run --test TEST.json`, one test a launch.
+The bare model, `BareModelLearner` on the tests' schedules, is no reference: its runs are shown beside T, which is
+flagged if the reset plays below them. A test puts back the state directory alone, so an adapter of your own keeps
+everything its harness persists under `self.state_dir` and its own logs outside it; on macOS the sandbox also lets a
+harness write the user's temporary and cache folders, which nothing puts back, in a test as in its stream. A learner
+that keeps what it learns in memory, as the demo-cache floor does, has no tests here: a Python learner plays them from
+a copy of itself (the benchmark's README), or after its stream in the same process with `arc-baselines run --test
+TEST.json`, one test a launch.
 
-## Logged state, forks and collective tests
+**As one round of users** (`--collective`), as the paper played its tests: every instance of a test made at its full
+width is a user of its own, a hundred played at once on one machine, each forked from the commit of the stream's last
+round. It needs a run that logged its state (below). Test user i starts from the run's user i mod U (a run of one
+user: its one system), its state the stream's last commit with every absolute path that named the run's own system
+folder renamed to the user's (in text files, links and SQLite databases); the users' objects share one store that reads
+the run's. A run with no stream starts every user from nothing, in `RUN/frozen/<the test>-reference/play`.
+
+```bash
+uv run continual-arc schedule make --config arc1-small --seed 0 --test held-out --out arc1-held-out0.json
+uv run arc-baselines test runs/arc1/openclaw-ws0-logged --schedule arc1-held-out0.json --collective
+```
+
+## Logged state and forks
 
 `arc-baselines run --log-state` commits a `SystemLearner`'s whole state directory at the end of every round, into
 `system/state.git` beside it, each round's commit listed in `system/state-log.jsonl`; git keeps a file once however
 many rounds it lasts, so a run's every state costs about what its last one does. `CollectiveHarnessLearner` logs every
-user's state this way, `users/uNNN/system/`. A learner whose state is logged may be made anew on a folder an earlier
-process wrote, so its first instance begins as every later one does: a stateless system is wiped before it, and any
-other has a conversation opened for it before its first message.
+user's state this way, in `users/uNNN/system/`.
 
 ```bash
 # the stream alone, its state committed at the end of every round
@@ -185,57 +202,47 @@ uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-d
 
 # taken up again from the end of round 99, with the state its learner had then: prints the command that plays on
 uv run arc-baselines fork runs/arc1/openclaw-ws0-logged --round 99 --out runs/arc1/openclaw-ws0-from-99
-
-# a frozen test as one round, every instance a user of its own forked from the stream's last commit
-uv run continual-arc schedule make --config arc1-small --seed 0 --test held-out --out arc1-held-out0.json
-uv run arc-baselines test-collective runs/arc1/openclaw-ws0-logged --schedule arc1-held-out0.json
 ```
 
-`arc-baselines test-collective` is how the paper's tests of its GPT-6 Luna cells and of its open-model rows were
-played: test user i starts from the run's user i mod U, its state the stream's last commit with every absolute path
-that named the run's own system folder renamed to the user's (in text files, links and SQLite databases), so a hundred
-users play at once on one machine; their objects share one store that reads the run's. A run with no stream starts
-every user from nothing, in `RUN/frozen/<the test>-reference/play`. It needs a run that logged its state; a harness's
-tests from a stream that did not are `arc-baselines test`'s.
+## Submit a result
 
-## Verified runs of a submitted learner
+The benchmark's README says how to [submit a result](https://github.com/unifyai/continual-arc#submitting-a-result):
+the stream, the two tests and the references above, copied into its `results/`. A harness adapter on `SystemLearner`
+depends on this package alone, which brings the benchmark with it.
 
-`HostedLearner` (`systems/hosted.py`) runs a submitted learner whole inside the sandbox, with the submission's own
-interpreter, behind the tracking proxy, so the learner never holds a key and reads nothing of the benchmark's private
-rules. `arc-baselines install-submission --repo URL --commit SHA --venv DIR [--checkout DIR]` installs it into a new
-virtual environment, under the sandbox too, since installing runs the package's build code. A hosted learner that keeps
-everything as files (`state_in_files`, as a harness on `SystemLearner` does) plays `arc-baselines run --test` one
-instance at a time, its files put back before each; any other plays the test in one round.
+For a verified run we rerun the submission's code on held-out rules with `HostedLearner` (`systems/hosted.py`), which
+runs a submitted learner whole inside the sandbox, with the submission's own interpreter, behind the tracking proxy, so
+the learner never holds a key and reads nothing of the held-out rules. `arc-baselines install-submission --repo URL
+--commit SHA --venv DIR [--checkout DIR]` installs it into a new virtual environment, under the sandbox too, since
+installing runs the package's build code. A hosted learner that keeps everything as files (`state_in_files`, as a
+harness on `SystemLearner` does) plays `arc-baselines run --test` one instance at a time, its files put back before
+each; any other plays the test in one round.
 
 ## Reproduce the paper's runs
 
-`bash scripts/paper-grid.sh` launches every cell the paper reports, on its stream alone: 198 runs on the ARC-AGI-1
-track, GPT-6 Luna at low, medium and high effort. Each writes `runs/<track>/<cell>/`, under the name its record carries
-in the run records.
-Every cell is detached and long-lived, so launch a part at a time (`bash scripts/paper-grid.sh luna6-low`), and
-`DRY_RUN=1` shows each cell's command first. The paper's 198 runs made about 1,500 USD of model calls through
-OpenRouter, by the cost the proxy recorded on each
-instance. The models are sampled through provider APIs, so a rerun differs from the paper's by about the spread the
-paper reports. A cell plays its stream alone (`--no-epilogue`), so a harness cell's frozen tests can follow it with
-`arc-baselines test`; the paper's cells also played a learning-on epilogue, which no measure reads since the frozen tests
-replaced it.
+`bash scripts/paper-grid.sh` launches every cell of the GPT-6 Luna grid on its stream alone: 198 runs on the ARC-AGI-1
+track, at low, medium and high effort. Each writes `runs/<track>/<cell>/`, under the name its record carries in the run
+records. Every cell is detached and long-lived, so launch a part at a time (`bash scripts/paper-grid.sh luna6-low`),
+and `DRY_RUN=1` shows each cell's command first. The paper's 198 runs made about 1,500 USD of model calls through
+OpenRouter, by the cost the proxy recorded on each instance. The models are sampled through provider APIs, so a rerun
+differs from the paper's by about the spread the paper reports. A cell plays its stream alone (`--no-epilogue`), so a
+harness cell's frozen tests can follow it with `arc-baselines test`, one instance at a time; `--collective`, as the
+paper played them, needs the stream launched with `--log-state`. The paper's cells also played a learning-on epilogue,
+which no measure reads since the frozen tests replaced it.
 
 The paper's cells were launched between 27 and 29 September 2026, each row from the code of its launch day. The
-learners here are that code as it stood once the last row was launched. Since then the rules a learner reads say that
-an instance it does not solve costs the whole budget, as the benchmark has charged it since 20 October 2026, the proxy
-limits the upstream connections it keeps open (`max_connections`), and a harness can put back a saved state when
-reset, which only its frozen tests use. The cells launched before 17:11 UTC on 28 September ran under the earlier rule
-for empty replies, and `paper-grid.txt` launches them under it.
+learners here are that code as it stood once the last row was launched, with four differences: the rules a learner
+reads say that an instance it does not solve costs the whole budget, as the benchmark charges it; the proxy limits the
+upstream connections it keeps open (`max_connections`); a harness can put back a saved state when reset, which only its
+frozen tests use; and the first instance after any start opens a conversation of its own, and a stateless row's is
+wiped first, as every later instance's is, where the cells' streams did neither on the first instance of a launch, so
+their records count no session there (and a stateless row no wipe). The cells launched before 17:11 UTC on 28
+September ran under the earlier rule for empty replies (`empty_reply="restart"`), and `paper-grid.txt` launches them
+under it.
 
 The open-model rows are driven from [`training/`](../training), which builds each row's `CollectiveHarnessLearner`.
 
 ## Licence
 
-Apache-2.0, like the benchmark.
-
-## About
-
-The baselines are part of [Continual-ARC](https://github.com/unifyai/continual-arc), made by
-[unify](https://unify.ai). unify is building continual learning for the agents companies have already built, training
-the model to drive their own harness, so the agent gets faster and cheaper the more it runs, on a model they own. We
-publish the research behind it.
+Apache-2.0, like the benchmark. The baselines are part of [Continual-ARC](https://github.com/unifyai/continual-arc),
+made by [unify](https://unify.ai).

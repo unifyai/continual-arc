@@ -4,21 +4,21 @@ from pathlib import Path
 from continual_arc.learner import BaseLearner
 from continual_arc.schedule import stream_schedule
 from continual_arc.testing import FakeSource
-from continual_workbench.context import create_context
 
+from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.cli import main
 
 
-def test_run_inside_workbench_attempt(tmp_path, monkeypatch, capsys):
+def test_run_inside_a_drivers_attempt(tmp_path, monkeypatch, capsys):
     source = FakeSource(n_tasks=6)
     sched_path = tmp_path / "sched.json"
     stream_schedule(source.task_ids(), 20, seed=2, source=source.name).save(sched_path)
-    context = create_context(tmp_path / "wb", "cli-run", {"experiment_id": "t", "project_key": "t"})
+    context = Attempt.create("cli run", root=tmp_path / "wb")
     monkeypatch.setenv("WORKBENCH_RUN_DIR", str(context.directory))
 
     code = main(["run", "--learner", "continual_arc.testing:ShiftMemoryLearner",
                  "--schedule", str(sched_path), "--no-proxy",
-                 "--registry", "continual_arc_baselines.testing:fake_registry", "--quiet"])
+                 "--registry", "tests.fixtures:fake_registry", "--quiet"])
     assert code == 0
     outcome = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert outcome["inside_workbench"] is True
@@ -28,7 +28,7 @@ def test_run_inside_workbench_attempt(tmp_path, monkeypatch, capsys):
     events = [json.loads(line) for line in (context.directory / "events.jsonl").read_text().splitlines()]
     assert {"parameters", "metric", "artifact", "continual_arc_summary"} <= {e["kind"] for e in events}
     params = next(e["payload"]["values"] for e in events if e["kind"] == "parameters")
-    # Keys the workbench exports to MLflow must be present and scalar.
+    # the keys by which runs are compared, present and scalar
     assert params["method"] == "continual_arc.testing:ShiftMemoryLearner"
     assert params["protocol"] == "workstreams/workstreams" and params["seed"] == 2
     assert params["benchmark"] == "continual-arc" and params["model"] is None
@@ -50,7 +50,7 @@ def test_plain_learner_gets_proxy_counters_for_free(tmp_path, monkeypatch, capsy
         monkeypatch.chdir(tmp_path)
         code = main(["run", "--learner", "tests.test_cli:EnvClientLearner",
                      "--schedule", str(sched_path), "--upstream", upstream.base_url,
-                     "--registry", "continual_arc_baselines.testing:fake_registry", "--quiet"])
+                     "--registry", "tests.fixtures:fake_registry", "--quiet"])
         assert code == 0
         outcome = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
         assert outcome["inside_workbench"] is False and outcome["llm"]["llm_requests"] == 6
@@ -90,9 +90,9 @@ def test_resume_continues_in_the_same_attempt(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     out = tmp_path / "wb" / "stage1" / "cell"
     common = ["run", "--schedule", str(sched_path), "--no-proxy", "--registry",
-              "continual_arc_baselines.testing:fake_registry", "--quiet", "--out", str(out), "--events"]
+              "tests.fixtures:fake_registry", "--quiet", "--out", str(out), "--events"]
     with pytest.raises(RuntimeError, match="interrupted"):
-        main(common + ["--learner", "continual_arc_baselines.testing:CrashAfterLearner", "--learner-kwargs", '{"n": 5}'])
+        main(common + ["--learner", "tests.fixtures:CrashAfterLearner", "--learner-kwargs", '{"n": 5}'])
     assert len((out / "records.jsonl").read_text().splitlines()) == 5
     attempt = json.loads((out / "attempt.json").read_text())["attempt_dir"]
     code = main(common + ["--learner", "continual_arc.testing:ShiftMemoryLearner", "--resume"])
@@ -148,7 +148,7 @@ def test_a_test_after_the_stream_is_played_by_the_same_learner_from_the_state_it
     monkeypatch.chdir(tmp_path)
     out = tmp_path / "run"
     code = main(["run", "--learner", "continual_arc.testing:ShiftMemoryLearner", "--schedule", str(sched),
-                 "--test", str(test), "--no-proxy", "--registry", "continual_arc_baselines.testing:fake_registry",
+                 "--test", str(test), "--no-proxy", "--registry", "tests.fixtures:fake_registry",
                  "--quiet", "--out", str(out)])
     assert code == 0
     outcome = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -168,7 +168,7 @@ def test_a_test_that_is_not_one_round_is_refused_before_anything_plays(tmp_path,
     monkeypatch.chdir(tmp_path)
     out = tmp_path / "run"
     common = ["run", "--learner", "continual_arc.testing:ShiftMemoryLearner", "--schedule", str(sched), "--no-proxy",
-              "--registry", "continual_arc_baselines.testing:fake_registry", "--quiet", "--out", str(out)]
+              "--registry", "tests.fixtures:fake_registry", "--quiet", "--out", str(out)]
     with pytest.raises(SystemExit, match="not one round"):
         main(common + ["--test", str(test)])
     with pytest.raises(SystemExit, match="names no test"):
@@ -188,7 +188,7 @@ def test_log_state_is_for_a_system_learner_and_a_harness_plays_no_test_after_its
     sched, test = _stream_and_test(tmp_path, FakeSource(n_tasks=6), users=3)
     monkeypatch.chdir(tmp_path)
     common = ["run", "--schedule", str(sched), "--no-proxy", "--registry",
-              "continual_arc_baselines.testing:fake_registry", "--quiet"]
+              "tests.fixtures:fake_registry", "--quiet"]
     with pytest.raises(SystemExit, match="no SystemLearner"):
         main(common + ["--learner", "continual_arc.testing:ShiftMemoryLearner", "--log-state",
                        "--out", str(tmp_path / "logged")])

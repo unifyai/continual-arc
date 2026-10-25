@@ -8,16 +8,17 @@
 #
 #   bash scripts/launch-cell.sh floors <preset> <mode> <seed> [config]           row F: the bare model, stateless and
 #                                                                                 with its demonstration cache (two cells)
-#   bash scripts/launch-cell.sh method <preset> <mode> <seed> [config]           row M: the bare program library
+#   bash scripts/launch-cell.sh method <preset> <mode> <seed> [config]           row PL (its cells named M): the bare
+#                                                                                 program library
 #   bash scripts/launch-cell.sh harness <preset> <config> <mode> <seed>          row H: prime-agent, every learning
 #                                                                                 mechanism it ships switched on
 #   bash scripts/launch-cell.sh acp <mode> <seed> [config] [preset] [hermes|openclaw]   row H: hermes-agent and openclaw
 #
 # A prefix on the verb gives the other rows: stateless-harness and stateless-acp (row H0, persistence switched off:
-# stopped, wiped and restarted before every instance), stateless-method (row M0), ask-harness and ask-acp (row HA,
-# asked to store after every verdict), pl-harness and pl-acp (row HPL, told to keep a program library as row M does),
-# stateless-pl-harness and stateless-pl-acp (row HPL0). Modes are workstreams, sequential, random and fresh (the
-# transfer reference); configuration arc1-small.
+# stopped, wiped and restarted before every instance), stateless-method (row PL0, its cells named M0), ask-harness and
+# ask-acp (row HA, asked to store after every verdict), pl-harness and pl-acp (row HPL, told to keep a program library
+# as row PL does), stateless-pl-harness and stateless-pl-acp (row HPL0). Modes are workstreams, sequential, random and
+# fresh (the transfer reference); configuration arc1-small.
 #
 # An empty reply is re-prompted like any unusable reply, and a system is restarted only when its process is dead or
 # silent. EMPTY_REPLY=restart gives the earlier rule, under which an empty reply restarted the system: the paper's
@@ -43,7 +44,7 @@ ROW="H$suffix$zero"
 [ "$ROW" = HA0 ] && { echo "a stateless row is never asked to store (ask_to_store): no HA0"; exit 1; }
 case $kind in floors|method) [ -n "$suffix" ] && { echo "ask- and pl- are harness rows: not for $kind"; exit 1; };; esac
 [ "$kind" = floors ] && [ -n "$zero" ] && { echo "the floors need no stateless- (BareModelLearner is the stateless floor)"; exit 1; }
-export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$HOME/.openclaw/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
 cd "$(dirname "$0")/.."
 RUNS=${RUNS:-runs}
 modeabbr() { case $1 in workstreams) echo ws;; sequential) echo seq;; random) echo rnd;; fresh) echo fresh;; *) echo "${1:0:3}";; esac; }
@@ -110,10 +111,10 @@ floors)
             "{\"reasoning\": {\"effort\": \"$effort\"}}" "$cfg" "$mode" "$seed"
     done ;;
 method)
-    # Row M: the program library, the bare demo-cache floor with a program for every submission (systems/bare.py,
+    # Row PL: the program library, the bare demo-cache floor with a program for every submission (systems/bare.py,
     # BareProgramLibraryLearner): each program is checked free on the task's pairs, and the last one that reproduces
-    # all of them is kept and run first when the task returns. Row M0 (stateless-method) wipes the kept programs and
-    # the demonstration cache before every instance.
+    # all of them is kept and run first when the task returns. Row PL0 (stateless-method) wipes the kept programs and
+    # the demonstration cache before every instance. Their cells are named M and M0, as the run records name them.
     preset=$1; mode=$2; seed=$3; cfg=${4:-arc1-small}; m=$(modeabbr "$mode")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"

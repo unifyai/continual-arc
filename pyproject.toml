@@ -50,6 +50,7 @@ ignore = ["E501"]
 [tool.hatch.version]
 path = "src/continual_arc/_version.py"
 
-# The learners the paper evaluates (baselines/) are a package of their own, run against the benchmark beside them.
+# The learners the paper evaluates (baselines/) and the training of its trained rows (training/) are packages of their
+# own, run against the benchmark beside them.
 [tool.uv.workspace]
-members = ["baselines"]
+members = ["baselines", "training"]

@@ -103,10 +103,10 @@ def test_the_program_librarys_memory_reaches_the_commit_and_comes_back(tmp_path)
 
 
 def test_a_stateless_librarys_memory_reaches_the_commit_and_is_wiped_before_a_new_learners_first_instance(tmp_path):
-    """Row M0, the program library wiped before every instance: what it kept in a round is in the round's commit, and a
-    logged learner made anew on its folder (a run forked from a round, a collective test's user, a driver that plays
-    each round in a learner of its own) wipes it before its first instance as before every other, so the model answers the task and the
-    program kept for it is never run."""
+    """Row PL0, the program library wiped before every instance: what it kept in a round is in the round's commit, and a
+    learner made anew on its folder (a run forked from a round, a collective test's user, a driver that plays each
+    round in a learner of its own) wipes it before its first instance as before every other, so the model answers the
+    task and the program kept for it is never run."""
     library = BareProgramLibraryLearner("vendor/model", stateless=True)
     library.attach(tmp_path / "system", {}, log_state=True)
     library.library["t1"] = "def transform(grid):\n    return grid\n"

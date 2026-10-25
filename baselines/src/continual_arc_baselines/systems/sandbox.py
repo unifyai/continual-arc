@@ -2,9 +2,9 @@
 
 Systems execute model-written code. Left alone, that code can read the benchmark
 source, import the Re-ARC generators and verifiers from the very environment that
-launched it, or reach the internet. A run under prime-agent did
-exactly that on 2026-09-17: it located ``continual_arc`` in the baselines venv and
-called the task verifier to compute ground truth before submitting.
+launched it, or reach the internet: a harness unconfined can locate ``continual_arc``
+in the baselines' environment and call the task's verifier to compute the ground
+truth before submitting.
 
 The rule is therefore: a system sees only what it needs, and the tracking proxy is
 its only way out.
@@ -17,11 +17,12 @@ its only way out.
 * nothing else. In particular no other file under the user's home directory, so
   neither the repositories nor the virtual environments are reachable.
 
-Backends: ``seatbelt`` (macOS ``sandbox-exec``) is implemented; it wraps the
-command in place and applies to every descendant process. On other platforms a
-backend has to be added (bubblewrap on Linux, or a container per system) before
-results can be trusted, so :func:`resolve_backend` refuses to fall back silently:
-``sandbox="none"`` has to be spelled out and is recorded in the run parameters.
+Backends: ``bwrap`` (bubblewrap on Linux, :func:`bwrap_command`), which also gives
+the system private network and pid namespaces, and ``seatbelt`` (macOS
+``sandbox-exec``, :func:`seatbelt_profile`); each wraps the command in place and
+applies to every descendant process. :func:`resolve_backend` never falls back to
+no sandbox silently: ``sandbox="none"`` has to be spelled out and is recorded in
+the run parameters.
 """
 
 from __future__ import annotations
@@ -37,6 +38,14 @@ from pathlib import Path
 
 SEATBELT = "/usr/bin/sandbox-exec"
 BACKENDS = ("auto", "seatbelt", "bwrap", "none")
+
+# A confined harness's environment is an allowlist: of the host's, these, its locale (``LC_*``) and the variables an
+# adapter is told to pass through; with a proxy, the proxy's address and placeholder key (PROXY_ENV); and its own key
+# variable (KEY_VARIABLE), which its provider entry reads, holding the placeholder.
+INHERITED_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
+PROXY_ENV = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENAI_API_KEY", "OPENROUTER_BASE_URL",
+             "OPENROUTER_API_KEY", "ARC_LLM_BASE_URL")
+KEY_VARIABLE = "ARC_LLM_API_KEY"
 
 # Operating-system paths any process needs; nothing under /Users or /home.
 _SYSTEM_READ = (
@@ -111,17 +120,16 @@ def resolve_backend(requested: str = "auto") -> str:
 
 
 def default_mask_paths() -> list[Path]:
-    """What a system must not be able to read on a Linux node: the benchmark and
-    baselines source, the pinned data (generators and verifiers), and every
-    virtual environment that has the benchmark installed."""
+    """What a system must not be able to read on a Linux node, even under a folder bound back for it: this repository
+    (the benchmark, the baselines, their virtual environments and every run's attempt under them), the pinned data
+    (generators and verifiers), and a separate checkout of the baselines, its source, environments and runs. A harness
+    that walks the whole tree searching for its task id would otherwise find other runs' state, transcripts, records
+    and schedules; a run's own state is bound back in by :func:`bwrap_command`."""
     home = Path.home()
     candidates = [
-        home / "continual-arc", home / "continual-arc-baselines" / "src",
-        home / "continual-arc-baselines" / "envs", home / "continual-arc-baselines" / ".venv",
-        home / ".cache" / "continual-arc", home / "prime-rl",
-        # every other cell's state, transcripts, records and schedules (23 Sep: a harness walked
-        # the whole tree searching for its task id); a cell's own state is bound back in below
-        home / "continual-arc-baselines" / ".workbench",
+        home / "continual-arc", home / ".cache" / "continual-arc", home / "prime-rl",
+        home / "continual-arc-baselines" / "src", home / "continual-arc-baselines" / "envs",
+        home / "continual-arc-baselines" / ".venv", home / "continual-arc-baselines" / ".workbench",
     ]
     return [p for p in candidates if p.exists()]
 
@@ -240,11 +248,10 @@ def start_bridge(argv: list[str], port: int | None, sock_path: Path, script_path
     binds that file in as it starts. With no loopback proxy there is nothing to bridge.
 
     A socket file left at ``sock_path`` by an earlier bridge is removed first: a bridge that is ended leaves its file,
-    and an adapter may start a bridge for every session in the same private directory. The wait found that file
-    at once, so bubblewrap started while the new bridge was removing it and binding its own, and failed with "Can't bind
-    mount .../proxy.sock ... No such file or directory" or "Unable to find .../proxy.sock (deleted) in mount table"
-    (27-28 Sep 2026: 12 of 1,722 sessions in one harness's persistent cells, none in its stateless cells, whose directory
-    is new for every instance)."""
+    and an adapter may start a bridge for every session in the same private directory. The wait would find that file
+    at once, so bubblewrap would start while the new bridge was removing it and binding its own, and fail with "Can't
+    bind mount .../proxy.sock ... No such file or directory" or "Unable to find .../proxy.sock (deleted) in mount
+    table", in a persistent row about one session in a hundred."""
     if port is None:
         return list(argv), None
     script_path.write_text(NETBRIDGE)
@@ -285,8 +292,8 @@ def _links_to(path: str | Path) -> tuple[list[tuple[str, Path]], Path]:
     """The symlinks a lookup of ``path`` passes through, as ``(target as written, link path)`` in the order it meets
     them, and the real path it ends at. Recreated inside the sandbox as links, they keep what a program learns about
     itself through them as it is on the host: a launcher in ``~/.local/bin`` that finds its release through
-    ``/proc/self/exe``, a venv interpreter that finds its runtime (25 Sep: bound in place of its link, prime-agent
-    looked for its package.json in ``~/.local/bin`` and would not start)."""
+    ``/proc/self/exe``, a venv interpreter that finds its runtime (bound in place of its link, prime-agent looks for
+    its package.json in ``~/.local/bin`` and does not start)."""
     links: list[tuple[str, Path]] = []
     pending = list(Path(os.path.abspath(Path(path).expanduser())).parts[1:])
     current = Path("/")
@@ -313,8 +320,8 @@ def bwrap_command(argv: list[str], spec: SandboxSpec, share_net: bool = False) -
     maintenance commands that must reach a gateway it runs, and for installing a submission, whose build reaches the
     package index and the repository host (never for a model-driven turn).
 
-    25 Sep 2026: this was the whole filesystem with a list of benchmark trees hidden, and a harness under it read
-    other runs' transcripts in ``~/runs``, which the list did not name; the host's ``.env`` was readable too."""
+    An allowlist rather than the whole filesystem with a list of benchmark trees hidden: under such a list a harness
+    reads whatever it does not name, other runs' transcripts and the host's ``.env`` among them."""
     raw = spec
     spec = spec.normalised()
     hidden = hidden_roots()

@@ -1,6 +1,6 @@
-"""Row M since 28 Sep (systems/bare.py, BareProgramLibraryLearner): the bare demo-cache floor with a program for every
-submission, checked at no cost on the task's pairs, kept, and run first when the task returns. The model is scripted
-(``ask`` answers from a list); programs run unsandboxed here, as in test_floors.py."""
+"""Row PL, the program library (systems/bare.py, BareProgramLibraryLearner): the bare demo-cache floor with a program
+for every submission, checked at no cost on the task's pairs, kept, and run first when the task returns. The model is
+scripted (``ask`` answers from a list); programs run unsandboxed here."""
 
 from continual_arc.env import (
     DemosFeedback,
@@ -111,7 +111,7 @@ def test_the_library_and_the_cache_are_wiped_with_the_state(tmp_path):
 
 
 def test_the_stateless_library_keeps_nothing_and_does_not_say_it_keeps(tmp_path):
-    """Row M0 (stateless=True, 29 Sep): every submission a program, checked as in M; before every instance the kept
+    """Row PL0 (stateless=True): every submission a program, checked as in PL; before every instance the kept
     programs and the demo cache are wiped, so a returning task gets no kept program and no cached pairs, and the rules
     drop the sentence about keeping."""
     from continual_arc_baselines.systems.bare import PROGRAM_NOTE_STATELESS
@@ -135,4 +135,4 @@ def test_the_stateless_library_keeps_nothing_and_does_not_say_it_keeps(tmp_path)
     m = Scripted([FLIP])
     m.attach(tmp_path / "m", {})
     m.act(obs(0))
-    assert PROGRAM_NOTE in m.sent[0]   # row M's rules are unchanged
+    assert PROGRAM_NOTE in m.sent[0]   # row PL's rules are unchanged

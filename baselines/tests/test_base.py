@@ -59,11 +59,12 @@ class Resuming(Stub):
         self.opened.append(self.starts)
 
 
-def test_a_logged_instance_waits_for_its_conversation_through_a_restart(tmp_path):
-    """A logged system's instance sends its first message to a conversation opened for it: a new session that fails is
-    opened again once the system has restarted, and only then is the instance sent."""
+def test_an_instance_waits_for_its_conversation_through_a_restart(tmp_path):
+    """An instance sends its first message to a conversation opened for it, the first instance a learner plays
+    included: a new session that fails is opened again once the system has restarted, and only then is the instance
+    sent."""
     stub = Resuming(['{"action": "request_demos"}'], max_restarts=2)
-    stub.attach(tmp_path / "system", {}, log_state=True)
+    stub.attach(tmp_path / "system", {})
     first = LearnerObservation(step=0, task_id="t1", input=[[0]], attempts_used=0, demo_requests_used=0,
                                attempt_cap=8, demo_cap=8)
     assert isinstance(stub.act(first), RequestDemos)

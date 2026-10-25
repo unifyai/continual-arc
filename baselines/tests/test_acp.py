@@ -132,7 +132,7 @@ def test_openclaw_blocks_bundled_skills_and_channels(tmp_path, unchecked_opencla
 
 
 def test_openclaw_memory_search_is_set_only_when_asked(tmp_path, unchecked_openclaw):
-    """Off (the grid cells of 27 and 28 Sep), memory search stays unset; on, it is keyword-only over the memory files
+    """Off (rows H and H0), memory search stays unset; on, it is keyword-only over the memory files
     and the session transcripts, and the run record says which."""
     from continual_arc_baselines.systems.openclaw import OpenClawLearner
     for on in (False, True):
@@ -244,30 +244,20 @@ def _alive(pid):
     return True
 
 
-def test_opencode_starts_without_plugins_or_external_skills(tmp_path):
-    from continual_arc_baselines.systems.opencode import OpenCodeLearner
-    s = OpenCodeLearner(model="m", sandbox="none")
-    s.attach(tmp_path / "system", {})
-    s.prepare()
-    env = s.extra_env()
-    assert env["OPENCODE_DISABLE_DEFAULT_PLUGINS"] == "1"
-    # Both discovery switches stay off: enabling either makes opencode write into its read-only
-    # install tree at start. Its private global config directory is what persists.
-    assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == "1" and env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
-
-
-def test_stateless_row_wipes_everything_between_instances(tmp_path):
-    """Row H0 on an ACP system: a correct submission ends the instance; the next fresh
-    observation stops the agent, deletes its state and starts it again, so the second
-    instance's first prompt is prompt-1 again and carries the rules, and nothing the first
-    instance wrote survives."""
+def test_stateless_row_wipes_everything_before_every_instance_the_first_included(tmp_path):
+    """Row H0 on an ACP system: before every instance, the first a learner plays included, the agent is stopped, its
+    state deleted and it is started again, so each instance's first prompt is prompt-1 and carries the rules, and
+    nothing an earlier instance wrote survives, whichever process played it."""
     from continual_arc.env import SubmitFeedback
 
     s = FakeSystem(model="fake-model", sandbox="none", startup_timeout_s=60, timeout_s=60, stateless=True)
+    state = tmp_path / "system" / "state"
+    (state / "agent").mkdir(parents=True)
+    (state / "agent" / "memory.md").write_text("what an earlier process's instance learned")
     s.attach(tmp_path / "system", {})
     try:
-        state = tmp_path / "system" / "state"
         first = s.act(obs(step=0))
+        assert not (state / "agent" / "memory.md").exists()
         (state / "agent" / "memory.md").write_text("what the system learned")   # something it persisted
         s.observe(obs(step=0), first, SubmitFeedback(correct=True, valid=True, attempts_used=0, failed=False))
         assert s._session_pending
@@ -277,27 +267,6 @@ def test_stateless_row_wipes_everything_between_instances(tmp_path):
         assert not (state / "agent" / "prompt-2.txt").exists()
         assert (state / "agent" / "prompt-1.txt").read_text().startswith("You are being evaluated")
         assert (state / "config.json").exists()   # the adapter's configuration, rewritten by prepare()
-        usage = s.resources()
-        assert usage["system_wipes"] == 1.0 and usage["system_resets"] == 1.0 and usage["system_sessions"] == 1.0
-    finally:
-        s.close()
-
-
-def test_stateless_logged_acp_system_is_wiped_before_its_first_instance_too(tmp_path):
-    """Row H0 with its state logged: the first instance is wiped as every later one is, so what an instance played by
-    an earlier process left (a collective test's user, a run forked from a round) is gone."""
-    from continual_arc.env import SubmitFeedback
-
-    s = FakeSystem(model="fake-model", sandbox="none", startup_timeout_s=60, timeout_s=60, stateless=True)
-    state = tmp_path / "system" / "state"
-    (state / "agent").mkdir(parents=True)
-    (state / "agent" / "memory.md").write_text("what an earlier process's instance learned")
-    s.attach(tmp_path / "system", {}, log_state=True)
-    try:
-        first = s.act(obs(step=0))
-        assert not (state / "agent" / "memory.md").exists()
-        s.observe(obs(step=0), first, SubmitFeedback(correct=True, valid=True, attempts_used=0, failed=False))
-        s.act(obs(step=1))
         usage = s.resources()
         assert usage["system_wipes"] == 2.0 and usage["system_resets"] == 2.0 and usage["system_sessions"] == 2.0
     finally:
@@ -317,11 +286,10 @@ class KeptConversation(FakeSystem):
         return json.loads((self.state_dir / "agent" / "conversation.json").read_text())
 
 
-def test_every_instance_of_a_logged_stateful_system_has_a_conversation_of_its_own(tmp_path):
-    """A logged learner made anew on a folder an earlier process wrote (a collective test's user forked from the
-    stream's last round, a run forked from a round) plays its first instance in a new conversation, as it plays every
-    later one, and not in the last conversation the harness's state holds, which openclaw's bridge takes up again at
-    every start."""
+def test_every_instance_of_a_stateful_system_has_a_conversation_of_its_own(tmp_path):
+    """A learner made anew on a state an earlier process left (a run resumed, a test user forked from the stream's
+    last commit) plays its first instance in a new conversation, as it plays every later one, and not in the last
+    conversation the harness's state holds, which openclaw's bridge takes up again at every start."""
     from continual_arc.env import SubmitFeedback
 
     solved = SubmitFeedback(correct=True, valid=True, attempts_used=0, failed=False)
@@ -332,15 +300,48 @@ def test_every_instance_of_a_logged_stateful_system_has_a_conversation_of_its_ow
     finally:
         stream.close()
     assert len(stream.conversation()) == 2   # the stream's last instance and its closing turn, kept in the state
-    test = KeptConversation(model="m", sandbox="none", startup_timeout_s=60, timeout_s=60)
-    test.attach(tmp_path / "system", {}, log_state=True)
+    for log_state in (False, True):
+        again = KeptConversation(model="m", sandbox="none", startup_timeout_s=60, timeout_s=60)
+        again.attach(tmp_path / "system", {}, log_state=log_state)
+        try:
+            for step in (1, 2):
+                action = again.act(obs(step=step))
+                conversation = again.conversation()
+                assert len(conversation) == 1 and conversation[0].startswith("You are being evaluated")
+                again.observe(obs(step=step), action, solved)
+            assert again.resources()["system_sessions"] == 2.0
+        finally:
+            again.close()
+
+
+def test_every_instance_of_a_frozen_test_has_a_conversation_of_its_own(tmp_path):
+    """A frozen test played one instance at a time (arc-baselines test): before every instance the stream's state is
+    put back, its last conversation with it, and the harness restarted on it; every instance, the first included,
+    still opens a conversation of its own, and every record counts its new session."""
+    from continual_arc.env import SubmitFeedback
+
+    solved = SubmitFeedback(correct=True, valid=True, attempts_used=0, failed=False)
+    stream = KeptConversation(model="m", sandbox="none", startup_timeout_s=60, timeout_s=60)
+    stream.attach(tmp_path / "stream", {})
     try:
-        for step in (1, 2):
+        stream.observe(obs(step=0), stream.act(obs(step=0)), solved)
+    finally:
+        stream.close()
+    saved = tmp_path / "stream" / "stream-end-1"
+    (tmp_path / "stream" / "state").rename(saved)
+    assert len(json.loads((saved / "agent" / "conversation.json").read_text())) == 2
+    test = KeptConversation(model="m", sandbox="none", startup_timeout_s=60, timeout_s=60)
+    test.attach(tmp_path / "test", {}, state_dir=tmp_path / "stream" / "state")
+    try:
+        test.freeze(saved)
+        for step in range(3):
+            test.reset()   # the runner's, before every instance of a test made with --width 1
+            sessions = test.resources()["system_sessions"]
             action = test.act(obs(step=step))
             conversation = test.conversation()
             assert len(conversation) == 1 and conversation[0].startswith("You are being evaluated")
             test.observe(obs(step=step), action, solved)
-        assert test.resources()["system_sessions"] == 2.0
+            assert test.resources()["system_sessions"] == sessions + 1
     finally:
         test.close()
 

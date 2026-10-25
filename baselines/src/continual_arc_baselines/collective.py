@@ -17,10 +17,9 @@ turn it belongs to: the material a trained row learns from. After every round th
 receives the round (every user's instance: its outcome, its turns, its model calls, and where the
 user's harness state was before and is after) and may return new fields for every proxy to force,
 such as the name of the adapter it has just trained and loaded. So that a trained row can do its
-update's work on an instance while the rest of the round still plays, ``begin_hook`` is told when a
-round begins (before any user acts) and ``instance_hook`` receives each instance as soon as it has
-ended, its closing message and storage step done and every model call made for it reported by the
-proxy (from that user's thread: it must not block). ``call_hook`` receives each of an instance's
+update's work on an instance while the rest of the round still plays, ``instance_hook`` receives each
+instance as soon as it has ended, its closing turn done and every model call made for it reported by
+the proxy (from that user's thread: it must not block). ``call_hook`` receives each of an instance's
 model calls as it ends, so that a driver can keep every call on disk as it is made and resume a
 round cut short from its last call rather than from its start.
 
@@ -28,8 +27,8 @@ Every user's harness adapter is attached with its state logged (``SystemLearner.
 the end of every round each user's harness state is committed to that user's own history,
 ``users/uNNN/system/state.git`` and its ``state-log.jsonl`` (``SystemLearner.end_round``,
 :mod:`continual_arc_baselines.statelog`): ``git diff HEAD~1 HEAD`` there is what the user's harness
-wrote in the round, and a run's frozen tests fork every user's commit at the end of the stream
-(:mod:`continual_arc_baselines.frozen_collective`).
+wrote in the round, and a run's frozen tests can fork every user's commit at the end of the stream
+(:func:`continual_arc_baselines.frozen.seed`).
 
 The users' harnesses are started lazily, on each user's first action, and serve concurrently
 (``concurrent_users``): the runner calls :meth:`act` and :meth:`observe` for different users from
@@ -57,20 +56,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from continual_arc.env import (
-    Action,
-    DemosFeedback,
-    Feedback,
-    GiveUpFeedback,
-    LearnerObservation,
-    SubmitFeedback,
-)
+from continual_arc.env import Action, DemosFeedback, Feedback, LearnerObservation, SubmitFeedback
 from continual_arc.learner import BaseLearner
 from continual_arc.schedule import Schedule
 
 from continual_arc_baselines.proxy import LLMProxy
 from continual_arc_baselines.systems.base import SystemLearner
-from continual_arc_baselines.tracking import LLMCall, Tracker
+from continual_arc_baselines.tracking import LLMCall, Tracker, instance_ended
 
 log = logging.getLogger(__name__)
 
@@ -85,9 +77,9 @@ SNAPSHOT_MAX_FILE_BYTES = 2_000_000
 @dataclass
 class CapturedCall:
     """One model call a user's harness made, as that user's proxy saw it. ``phase`` is ``turn``
-    (while the harness answered an observation), ``after`` (the instance's closing message and
-    the harness's storage step, once the verdict was in) or ``idle`` (between instances: a
-    harness's own background work). ``request`` is the body the server received and ``response``
+    (while the harness answered an observation), ``after`` (the turns that follow the verdict:
+    a closing message, a storage turn or the finish protocol's verdict turn) or ``idle`` (between
+    instances: a harness's own background work). ``request`` is the body the server received and ``response``
     the reply (assembled from the stream when streamed), both present only when captured."""
 
     call_id: str
@@ -157,11 +149,6 @@ def _jsonable(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_jsonable(v) for v in obj]
     return obj
-
-
-def _ended(feedback: Feedback) -> bool:
-    return isinstance(feedback, GiveUpFeedback) or (
-        isinstance(feedback, SubmitFeedback) and (feedback.correct or feedback.failed))
 
 
 def snapshot_state(src: Path, dst: Path, *, exclude: tuple[str, ...] = SNAPSHOT_EXCLUDE,
@@ -295,7 +282,7 @@ class _User:
         """Wait, until ``deadline`` (``time.monotonic()``) at the latest, for the proxy to report the end of every
         call the harness started for ``trace``, then fix its calls: the hooks get these, and a call reported later
         is only logged. The proxy reports a call once it has written the reply, so the harness can have taken the
-        reply and moved on first (CI, 25 Sep: the round hook saw an instance without its last call)."""
+        reply and moved on first."""
         with self.lock:
             if trace.slot in self._settled:
                 return
@@ -327,18 +314,13 @@ class CollectiveHarnessLearner(BaseLearner):
     ``make_system(user)`` builds a user's harness adapter (a
     :class:`continual_arc_baselines.systems.base.SystemLearner`), not yet attached. ``schedule`` is the one the
     runner serves, read for the traces' slot bookkeeping alone. Each user's
-    proxy forwards to ``upstream`` (with ``api_key``), sets ``body_defaults`` where the harness
-    left a field out, forces ``body_overrides``, removes ``body_drop``, renames message roles by
-    ``role_map``, gives a history's assistant turn without reasoning an empty ``thinking_field`` and
-    keeps the reasoning of the past turns ``keep_reasoning`` names (``proxy.KEEP_REASONING``), the others' cut
-    to their last ``reasoning_tail`` characters or replaced by a summary of at most ``reasoning_summary`` the
-    served model writes (asked with ``summary_overrides``; each logged to the user's ``summaries.jsonl``);
-    with ``capture`` every
-    call's request and reply are kept for the round hook (a trained row), otherwise only usage.
+    proxy (:class:`~continual_arc_baselines.proxy.LLMProxy`) forwards to ``upstream`` (with ``api_key``), sets
+    ``body_defaults`` where the harness left a field out, forces ``body_overrides``, removes ``body_drop``, renames
+    message roles by ``role_map`` and gives every past assistant turn its reasoning under ``thinking_field``; with
+    ``capture`` every call's request and reply are kept for the hooks (a trained row), otherwise only usage.
     ``snapshot`` copies every user's harness state at the start of each round, for a writer to
-    see what the user's memory held when their instance began. ``begin_hook(n_instances)`` runs when
-    a round begins, after the snapshots, ``call_hook(trace, call)`` as each of an instance's calls
-    ends (from the proxy's thread: it must not block), and ``instance_hook(trace)`` as each instance
+    see what the user's memory held when their instance began. ``call_hook(trace, call)`` runs as each of an
+    instance's calls ends (from the proxy's thread: it must not block), and ``instance_hook(trace)`` as each instance
     ends. As the round ends, the ``end_round`` of every system that has one (a harness adapter's
     commits its state) runs for each user who played it, in user order, before ``round_hook``. An
     instance reaches the instance and round hooks once the proxy has reported the end of
@@ -356,14 +338,11 @@ class CollectiveHarnessLearner(BaseLearner):
                  api_key: str | None = None, body_defaults: dict[str, Any] | None = None,
                  body_overrides: dict[str, Any] | None = None, body_drop: tuple[str, ...] = (),
                  role_map: dict[str, str] | None = None, thinking_field: str | None = None,
-                 keep_reasoning: str = "all", reasoning_tail: int = 0, reasoning_summary: int = 0,
-                 summary_overrides: dict[str, Any] | None = None, shortened_key: str | None = None,
-                 shortened_prefix: str = "", router: Any = None, declared_context_length: int | None = None, capture: bool = False,
-                 snapshot: bool = False, round_hook: RoundHook | None = None,
-                 reset_hook: Callable[[], None] | None = None,
-                 begin_hook: Callable[[int], None] | None = None, call_hook: CallHook | None = None,
-                 instance_hook: InstanceHook | None = None, calls_wait_s: float = 600.0, serve: Any = None,
-                 proxy: type[LLMProxy] = LLMProxy, ports: dict[int, int] | None = None) -> None:
+                 declared_context_length: int | None = None, capture: bool = False, snapshot: bool = False,
+                 round_hook: RoundHook | None = None, reset_hook: Callable[[], None] | None = None,
+                 call_hook: CallHook | None = None, instance_hook: InstanceHook | None = None,
+                 calls_wait_s: float = 600.0, serve: Any = None, proxy: type[LLMProxy] = LLMProxy,
+                 ports: dict[int, int] | None = None) -> None:
         self.make_system = make_system
         self.serve = serve   # every user's proxy answers chat completions with it when set (LLMProxy's serve)
         self.proxy, self.ports = proxy, dict(ports or {})
@@ -377,14 +356,10 @@ class CollectiveHarnessLearner(BaseLearner):
         self.body_drop = tuple(body_drop)
         self.role_map = dict(role_map or {})
         self.thinking_field = thinking_field
-        self.keep_reasoning, self.reasoning_tail = keep_reasoning, reasoning_tail
-        self.reasoning_summary, self.summary_overrides = reasoning_summary, dict(summary_overrides or {})
-        self.shortened_key, self.shortened_prefix = shortened_key, shortened_prefix
-        self.router = router  # routing.ReplicaRouter shared by every user's proxy, or None (the server routes)
         self.declared_context_length = declared_context_length
         self.capture, self.snapshot = capture, snapshot
         self.round_hook, self.reset_hook = round_hook, reset_hook
-        self.begin_hook, self.call_hook, self.instance_hook = begin_hook, call_hook, instance_hook
+        self.call_hook, self.instance_hook = call_hook, instance_hook
         # a call normally ends within milliseconds of the harness taking its reply; one the harness started and
         # left running (a compaction, a housekeeping call) can take minutes, and one it abandoned ends when the
         # proxy next writes to it, or when the upstream finishes
@@ -410,11 +385,7 @@ class CollectiveHarnessLearner(BaseLearner):
             tracker = Tracker()
             settings = dict(api_key=self.api_key, tracker=tracker, body_defaults=self.body_defaults,
                             body_overrides=self.body_overrides, body_drop=self.body_drop, role_map=self.role_map,
-                            thinking_field=self.thinking_field, keep_reasoning=self.keep_reasoning,
-                            reasoning_tail=self.reasoning_tail, reasoning_summary=self.reasoning_summary,
-                            summary_overrides=self.summary_overrides, summary_log=workdir / "summaries.jsonl",
-                            shortened_key=self.shortened_key, shortened_prefix=self.shortened_prefix,
-                            router=self.router, route_key=f"u{user}", capture_content=self.capture, serve=self.serve,
+                            thinking_field=self.thinking_field, capture_content=self.capture, serve=self.serve,
                             declared_context_length=self.declared_context_length)
             port = self.ports.get(user, 0)
             proxy = self.proxy(self.upstream, port=port, **settings)
@@ -468,8 +439,6 @@ class CollectiveHarnessLearner(BaseLearner):
             users = self._known_users()
             with ThreadPoolExecutor(max_workers=16) as pool:
                 list(pool.map(lambda u: snapshot_state(self.state_dir(u), self.user_dir(u) / "state-before"), users))
-        if self.begin_hook is not None:
-            self.begin_hook(n_instances)
 
     def act(self, obs: LearnerObservation) -> Action:
         u = self._user(obs.user)
@@ -497,7 +466,7 @@ class CollectiveHarnessLearner(BaseLearner):
     def observe(self, obs: LearnerObservation, action: Action, feedback: Feedback) -> None:
         u = self._user(obs.user)
         trace = u.trace
-        ended = _ended(feedback)
+        ended = instance_ended(feedback)
         with u.lock:
             if trace.turns:
                 trace.turns[-1]["feedback"] = _jsonable(
@@ -509,11 +478,9 @@ class CollectiveHarnessLearner(BaseLearner):
                 trace.accepted_grid = getattr(action, "grid", None)
             if ended:
                 trace.ended = True
-                u.context = (obs.step, len(trace.turns) - 1, "after")  # the closing message and the storage step
+                u.context = (obs.step, len(trace.turns) - 1, "after")  # the instance's closing turns
         u.system.observe(obs, action, feedback)
         if ended:
-            if self.router is not None:  # the closing message and storage step are done: no longer active
-                self.router.release(f"u{obs.user}")
             with u.lock:
                 trace.seconds = time.time() - trace.started
                 u.context = (obs.step, None, "idle")
@@ -575,10 +542,7 @@ class CollectiveHarnessLearner(BaseLearner):
         system = first.system.describe() if first is not None and hasattr(first.system, "describe") else {}
         return {"learner": "collective-harness", "system": system, "users_started": len(self._users),
                 "capture": self.capture, "snapshot": self.snapshot, "body_overrides": self.body_overrides,
-                "body_drop": list(self.body_drop), "keep_reasoning": self.keep_reasoning,
-                "reasoning_tail": self.reasoning_tail, "reasoning_summary": self.reasoning_summary,
-                "shortened_key": self.shortened_key, "shortened_prefix": self.shortened_prefix,
-                "router": self.router.describe() if self.router is not None else None}
+                "body_drop": list(self.body_drop)}
 
     def close(self) -> None:
         with self._users_lock:

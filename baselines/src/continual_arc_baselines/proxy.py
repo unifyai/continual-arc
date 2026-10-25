@@ -1,39 +1,32 @@
 """A local OpenAI-compatible reverse proxy: the one hook every system can use.
 
-Point any agent system at :attr:`LLMProxy.base_url` with the placeholder
-:attr:`LLMProxy.api_key` and every physical model request is observed, journaled
-and counted, without the system knowing. The real upstream credential lives only
-in this process, so it never enters the system's config files or logs.
+Point any agent system at :attr:`LLMProxy.base_url` with the placeholder :attr:`LLMProxy.api_key` and every physical
+model request is observed, journaled and counted, without the system knowing. The real upstream credential lives only
+in this process, so it never enters the system's configuration files or logs.
 
-The proxy is transparent: no retries, no caching, no fallback models. Streaming
-responses are passed through byte for byte while the server-sent events are
-parsed on the side for the usage block. The only edits to a request are
-``usage.include`` / ``stream_options.include_usage`` (so the provider reports
-tokens and charge) and any :attr:`body_defaults` the run wants to force, which
-are applied with ``setdefault`` so the system's own choices win.
+The proxy is transparent: no caching and no fallback models. Streaming responses are passed through byte for byte while
+the server-sent events are parsed on the side for the usage block. A request is changed only as follows, in
+chat completions alone:
 
-A run that serves its own model (a vLLM server with the adapters it trains) also
-sets :attr:`body_overrides`, fields that replace the system's (the model name of the
-adapter currently served, ``return_token_ids`` so the exact tokens of every call
-are captured for training, the chat-template switches), and :attr:`body_drop`,
-fields the server would reject or ignore (OpenRouter's reasoning and usage fields),
-and :attr:`role_map`, message roles the server does not know renamed to ones it does
-(a harness's ``developer`` system prompt as ``system``: prime-rl's router refuses the
-role outright, 24 Sep), and :attr:`thinking_field`, the key under which an assistant turn
-of the history that carries no reasoning gets an empty one, for a chat template that
-refuses such a turn (K2 Horizon, 25 Sep), and :attr:`keep_reasoning`, which of the history's
-assistant turns keep their reasoning (K2 Horizon's template shows every past turn's, which made
-most of prime-agent's context; 25 Sep), the others' cut to a tail (:attr:`reasoning_tail`) or
-replaced by a summary the served model writes of it (:attr:`reasoning_summary`). All five apply
-to chat completions only; the overrides can
-change between calls (:meth:`LLMProxy.set_overrides`); the captured request is what
-the server received.
+* ``usage.include`` and ``stream_options.include_usage``, so that the provider reports tokens and charge;
+* :attr:`~LLMProxy.body_defaults`, the run's request fields, set only where the system set none;
+* for an Anthropic model, a cache breakpoint when the system set none, and prime-agent's per-session log path in its
+  system prompt replaced by a constant, so that the prompt's prefix is cached across instances;
+* for a run that serves its own model on vLLM: :attr:`~LLMProxy.body_overrides`, fields that replace the system's
+  (the name of the adapter being served, ``return_token_ids``, the chat template's switches), which can change between
+  calls (:meth:`LLMProxy.set_overrides`); :attr:`~LLMProxy.body_drop`, fields the server would refuse or ignore;
+  :attr:`~LLMProxy.role_map`, message roles the server does not know renamed to ones it does; and
+  :attr:`~LLMProxy.thinking_field`, the one key every past assistant turn carries its reasoning under, an empty one
+  where it had none, for a chat template that refuses such a turn.
+
+A throttled or failing upstream is retried with backoff before anything reaches the system (429, 5xx, and a 403 that
+OpenRouter relays from the provider behind it), and an account out of credit (402) is waited out rather than failed.
+``serve`` lets a run answer some chat completions itself. The captured request is what the upstream received.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import json
 import logging
 import os
@@ -41,10 +34,8 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import Future, ThreadPoolExecutor
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -56,19 +47,11 @@ PLACEHOLDER_KEY = "arc-proxy"
 PLACEHOLDERS = (PLACEHOLDER_KEY, "ARC_LLM_API_KEY")
 RETRY_STATUSES = {429, 500, 502, 503, 529}
 WAIT_STATUSES = {402}  # the account is out of credit: wait for a top-up rather than hand the system a failure
-# A 403 that OpenRouter relays from the provider behind it, retried like a 5xx: OpenRouter's own 403s (moderation, key
-# limits) carry no such marker and pass straight through. 25 Sep 2026: Alibaba, the one provider of a hosted model in the capability probe, refused
-# half of all calls at random ("AccessDenied.Unpurchased"), a coin flip per request.
+# A 403 that OpenRouter relays from the provider behind it, retried like a 5xx: a provider may refuse calls at random,
+# one request at a time. OpenRouter's own 403s (moderation, key limits) carry no such marker and pass straight through.
 PROVIDER_REFUSAL = b"Provider returned error"
-# The keys chat templates read an assistant turn's reasoning from (K2 Horizon's reads all five, in this order).
+# The keys chat templates read an assistant turn's reasoning from, in the order a template that reads them all does.
 THINKING_KEYS = ("think", "think_fast", "think_faster", "reasoning_content", "reasoning")
-# Which of a request's past assistant turns keep their reasoning (LLMProxy.keep_reasoning): all of them; those of the
-# current turn, the replies since the latest user message (the tool loop under way; Qwen's chat templates keep these
-# and drop the rest); or only the latest reply, when it is in the current turn. A turn that loses its reasoning is
-# sent without it, or with an empty thinking_field where the template needs one, unless LLMProxy.reasoning_tail keeps
-# its end: K2 Horizon shown a history of empty reasoning stops reasoning itself (25 Sep: 74% of its calls inside a
-# turn with only the latest reply's kept, against 9% with all kept).
-KEEP_REASONING = ("all", "turn", "call")
 # A proxy's settings for a model served by vLLM (body_drop, role_map, thinking_field), as the open-model rows set them.
 # The fields a harness may send that vLLM would refuse or ignore: OpenRouter's reasoning settings (vLLM validates
 # reasoning_effort against its own few levels, and thinking is the chat template's switch, set for every call), its
@@ -81,20 +64,6 @@ VLLM_ROLES = {"developer": "system"}
 # The key a past assistant turn carries its thinking under for the open models' chat templates, which refuse a turn
 # with none.
 THINKING_FIELD = "reasoning_content"
-# What the served model is asked when a reply's reasoning is to be replaced by a summary (LLMProxy.reasoning_summary):
-# zero-shot, the reasoning alone, nothing about the task. The instruction comes before and after the reasoning, and the
-# task is said to be out of view: K2 Horizon otherwise took the reasoning for the task and went on with it (25 Sep).
-SUMMARY_PROMPT = (
-    "Condense the reasoning below to at most {chars} characters.\n\n"
-    "It is your own reasoning from an earlier step of a task you are working on. The task itself is not shown here: "
-    "do not continue it, answer it or ask about it. Your condensed version will replace the original in your context, "
-    "so keep what you will need later: the facts you established, with their exact values; the hypotheses you tested "
-    "and whether they held; your conclusions; and what you decided to do next, and why. Drop restatements, self-talk "
-    "and dead ends that taught nothing. Write it in the first person, as your own reasoning.\n\n"
-    "<reasoning>\n{reasoning}\n</reasoning>\n\n"
-    "Now write the condensed reasoning, at most {chars} characters, and nothing else.")
-# A closing reasoning tag the server failed to split on (K2 Horizon closes with </ifm|think> at every effort)
-_CLOSING_THINK = re.compile(r"</[^<>]*think[^<>]*>")
 HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
     "transfer-encoding", "upgrade", "host", "content-length", "accept-encoding",
@@ -268,23 +237,8 @@ class LLMProxy:
         body_drop: tuple[str, ...] | list[str] | None = None,
         role_map: dict[str, str] | None = None,
         thinking_field: str | None = None,
-        keep_reasoning: str = "all",
-        reasoning_tail: int = 0,
-        reasoning_summary: int = 0,
-        summary_overrides: dict[str, Any] | None = None,
-        summary_log: str | Path | None = None,
-        summary_wait_s: float = 180.0,
-        summary_max_tokens: int = 16_384,
-        shortened_key: str | None = None,
-        shortened_prefix: str = "",
-        router: Any = None,
-        route_key: str = "",
         serve: Any = None,
     ):
-        if keep_reasoning not in KEEP_REASONING:
-            raise ValueError(f"keep_reasoning must be one of {KEEP_REASONING}, not {keep_reasoning!r}")
-        if reasoning_tail and reasoning_summary:
-            raise ValueError("reasoning_tail and reasoning_summary are alternatives (a summary falls back to a tail)")
         self.upstream = upstream.rstrip("/")
         self.api_key = api_key
         self.tracker = tracker or Tracker()
@@ -309,24 +263,6 @@ class LLMProxy:
         self.body_drop: tuple[str, ...] = tuple(body_drop or ())
         self.role_map: dict[str, str] = dict(role_map or {})
         self.thinking_field = thinking_field
-        self.keep_reasoning = keep_reasoning
-        self.reasoning_tail = reasoning_tail
-        # a summary: at most this many characters, asked of the served model with its body_overrides and then
-        # summary_overrides (the chat template's lowest effort, say) as soon as a reply is complete; a request that
-        # needs one not yet made waits up to summary_wait_s, then takes the tail; each is logged to summary_log
-        self.reasoning_summary = reasoning_summary
-        self.summary_overrides: dict[str, Any] = dict(summary_overrides or {})
-        self.summary_log = Path(summary_log) if summary_log else None
-        self.summary_wait_s, self.summary_max_tokens = summary_wait_s, summary_max_tokens
-        self._summaries: _Summaries | None = None
-        self._summary_log_lock = threading.Lock()
-        # a reply whose reasoning keep_reasoning cut or replaced: the key it goes under instead of thinking_field (K2
-        # Horizon's think_faster shows it as a low-effort reply's, while the reply being written reasons at high), and
-        # words put before it (that it is condensed)
-        self.shortened_key, self.shortened_prefix = shortened_key, shortened_prefix
-        # a vLLM server's data-parallel replica for each call (routing.ReplicaRouter), named in the X-data-parallel-rank
-        # header: the user's home replica, where their conversation is cached
-        self.router, self.route_key = router, route_key
         # a chat completion answered here instead of by the upstream: serve(parsed body, call id) -> a response body, or
         # None to forward the call as it is; sent to the harness
         # as JSON, or as one streamed message when the call asked for a stream, and captured and counted as any other
@@ -347,8 +283,6 @@ class LLMProxy:
         self._client = httpx.Client(timeout=httpx.Timeout(connect=30.0, read=self.timeout,
                                                           write=60.0, pool=30.0),
                                     limits=httpx.Limits(max_connections=self.max_connections, max_keepalive_connections=20))
-        if self.reasoning_summary and self.keep_reasoning != "all":
-            self._summaries = _Summaries(self)
         proxy = self
 
         class Handler(_Handler):
@@ -366,9 +300,6 @@ class LLMProxy:
             self._server.shutdown()
             self._server.server_close()
             self._server = None
-        if self._summaries is not None:
-            self._summaries.close()
-            self._summaries = None
         if self._client is not None:
             self._client.close()
             self._client = None
@@ -376,13 +307,6 @@ class LLMProxy:
     def set_overrides(self, **fields: Any) -> None:
         """Replace some of :attr:`body_overrides` for every later call (a new adapter each round)."""
         self.body_overrides = {**self.body_overrides, **fields}
-
-    def log_summary(self, record: dict[str, Any]) -> None:
-        """One line of :attr:`summary_log`: a summary made (or not), its sizes, tokens and seconds."""
-        if self.summary_log is None:
-            return
-        with self._summary_log_lock, self.summary_log.open("a") as fp:
-            fp.write(json.dumps({"t": round(time.time(), 1), **record}) + "\n")
 
     def __enter__(self) -> LLMProxy:
         return self.start()
@@ -441,8 +365,6 @@ class LLMProxy:
             except ValueError:
                 parsed = None
         if isinstance(parsed, dict) and path.rstrip("/").endswith("/chat/completions"):
-            if self.router is not None:
-                out["X-data-parallel-rank"] = str(self.router.pick(self.route_key))
             for key, value in self.body_defaults.items():
                 parsed.setdefault(key, value)
             parsed.update(self.body_overrides)
@@ -450,37 +372,21 @@ class LLMProxy:
                 for message in parsed.get("messages") or []:
                     if isinstance(message, dict) and message.get("role") in self.role_map:
                         message["role"] = self.role_map[message["role"]]
-            if self.keep_reasoning != "all":
-                shorten = None
-                if self._summaries is not None:
-                    summaries, model = self._summaries, parsed.get("model")
-                    shorten = lambda text: summaries.get(text, model)  # noqa: E731
-                elif self.reasoning_tail > 0:
-                    shorten = lambda text: reasoning_tail(text, self.reasoning_tail)  # noqa: E731
-                shortened = _prune_reasoning(parsed.get("messages") or [], self.keep_reasoning, shorten,
-                                             self.shortened_prefix)
-            else:
-                shortened = set()
-            if self.thinking_field or self.shortened_key:
-                # every past reply's reasoning under the one key the template renders with the tag of the effort it
-                # was made at (K2 Horizon: think_fast at medium), and an empty one for a reply with none, which the
-                # template requires; a shortened one under shortened_key when there is one
+            if self.thinking_field:
+                # every past reply's reasoning under the one key the chat template renders, and an empty one for a
+                # reply with none, which the template requires
                 for message in parsed.get("messages") or []:
-                    if not (isinstance(message, dict) and message.get("role") == "assistant"):
-                        continue
-                    key = self.shortened_key if (self.shortened_key and id(message) in shortened) else self.thinking_field
-                    if not key:
-                        continue
-                    text = next((message[k] for k in THINKING_KEYS if isinstance(message.get(k), str)), "")
-                    for k in THINKING_KEYS:
-                        message.pop(k, None)
-                    message[key] = text
+                    if isinstance(message, dict) and message.get("role") == "assistant":
+                        text = next((message[k] for k in THINKING_KEYS if isinstance(message.get(k), str)), "")
+                        for k in THINKING_KEYS:
+                            message.pop(k, None)
+                        message[self.thinking_field] = text
             # Anthropic models are cached only when the request asks for it: OpenRouter
             # honours a top-level ``cache_control`` by placing the breakpoint on the last
             # cacheable block and moving it forward as the conversation grows. Systems
-            # speak plain OpenAI format and never set it, which cost the Sonnet runs every
-            # cache read (38M input tokens, 0 cached, 19-20 Sep). Other providers cache on
-            # their own. A system that sets its own breakpoints is left alone.
+            # speak plain OpenAI format and never set it, so without this no call would read
+            # the cache. Other providers cache on their own. A system that sets its own
+            # breakpoints is left alone.
             model = str(parsed.get("model") or "")
             if model.startswith("anthropic/"):
                 if "cache_control" not in parsed and not _has_block_cache_control(parsed):
@@ -502,131 +408,15 @@ class LLMProxy:
         return out, body, parsed if isinstance(parsed, dict) else None
 
 
-def _prune_reasoning(messages: list, keep: str, shorten: Any = None, prefix: str = "") -> set[int]:
-    """Replace the reasoning of every assistant turn in ``messages`` outside what ``keep`` names (``turn``: the
-    replies since the latest user message; ``call``: the latest of those) by ``prefix + shorten(reasoning)``, or
-    remove it. Returns the ids of the turns it changed."""
-    turns = [m for m in messages if isinstance(m, dict)]
-    last_user = max((i for i, m in enumerate(turns) if m.get("role") == "user"), default=-1)
-    current = [m for m in turns[last_user + 1:] if m.get("role") == "assistant"]
-    kept = {id(m) for m in (current if keep == "turn" else current[-1:])}
-    changed: set[int] = set()
-    for message in turns:
-        if message.get("role") == "assistant" and id(message) not in kept:
-            key = next((k for k in THINKING_KEYS if isinstance(message.get(k), str)), None)
-            text = message.get(key) if key else None
-            for k in THINKING_KEYS:
-                message.pop(k, None)
-            if shorten is not None and text:
-                message[key] = prefix + shorten(text)
-            changed.add(id(message))
-    return changed
-
-
-def reasoning_tail(text: str, chars: int) -> str:
-    """The end of a reasoning, at most ``chars`` characters, from the first line or sentence that starts in it (so it
-    reads as a short reasoning, not a cut one): where a reply decided what to do."""
-    if len(text) <= chars:
-        return text
-    cut = text[-chars:]
-    starts = [i + 1 for i in (cut.find("\n"),) if 0 <= i < len(cut) // 2]
-    starts += [m.end() for m in re.finditer(r"[.!?]\s+", cut[: len(cut) // 2])][:1]
-    return (cut[min(starts):] if starts else cut).lstrip()
-
-
-def _within(text: str, chars: int) -> str:
-    """``text`` in at most ``chars`` characters, ending at a sentence or line end when one is in its second half."""
-    if len(text) <= chars:
-        return text
-    cut = text[:chars]
-    end = max(cut.rfind(". "), cut.rfind(".\n"), cut.rfind("\n"))
-    return cut[:end + 1].rstrip() if end > chars // 2 else cut
-
-
-def _reply_reasoning(payload: dict) -> str:
-    message = ((payload.get("choices") or [{}])[0] or {}).get("message") or {}
-    return next((message[k] for k in ("reasoning_content", "reasoning") if isinstance(message.get(k), str)), "")
-
-
-class _Summaries:
-    """Replies' reasoning condensed by the served model itself (``LLMProxy.reasoning_summary``): asked for in the
-    background as soon as a reply is complete, once per distinct reasoning, and found by its text when a later
-    request carries that reply. One not made in time, or not made at all, is replaced by the reasoning's tail."""
-
-    def __init__(self, owner: LLMProxy) -> None:
-        self.owner, self.chars = owner, owner.reasoning_summary
-        self._pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="reasoning-summary")
-        self._jobs: dict[str, Future] = {}
-        self._lock = threading.Lock()
-
-    def close(self) -> None:
-        self._pool.shutdown(wait=False, cancel_futures=True)
-
-    def submit(self, text: str, model: Any) -> Future | None:
-        if not text or len(text) <= self.chars:
-            return None
-        key = hashlib.sha1(text.strip().encode()).hexdigest()
-        with self._lock:
-            job = self._jobs.get(key)
-            if job is None:
-                job = self._jobs[key] = self._pool.submit(self._make, key, text, model)
-        return job
-
-    def get(self, text: str, model: Any) -> str:
-        job = self.submit(text, model)  # made now if its reply was never seen complete (a restarted proxy)
-        if job is None:
-            return text
-        try:
-            summary = job.result(timeout=self.owner.summary_wait_s)
-        except Exception as error:  # not made in time, or the pool is closed
-            self.owner.log_summary({"key": hashlib.sha1(text.strip().encode()).hexdigest()[:12],
-                                    "status": f"tail ({type(error).__name__})", "chars_in": len(text)})
-            summary = None
-        return summary or reasoning_tail(text, self.chars)
-
-    def _make(self, key: str, text: str, model: Any) -> str | None:
-        owner = self.owner
-        assert owner._client is not None
-        body = {k: v for k, v in owner.body_overrides.items() if k != "return_token_ids"}
-        body.setdefault("model", model)
-        body.update(owner.summary_overrides)
-        body.update({"messages": [{"role": "user", "content": SUMMARY_PROMPT.format(chars=self.chars, reasoning=text)}],
-                     "max_tokens": owner.summary_max_tokens, "stream": False})
-        headers = {"Content-Type": "application/json"}
-        if owner.api_key:
-            headers["Authorization"] = f"Bearer {owner.api_key}"
-        record: dict[str, Any] = {"key": key[:12], "chars_in": len(text)}
-        started = time.monotonic()
-        summary = ""
-        try:
-            response = owner._client.post(owner.upstream_url("/v1/chat/completions"), json=body, headers=headers)
-            payload = response.json() if response.status_code < 400 else {}
-            choice = (payload.get("choices") or [{}])[0] or {}
-            # what follows the last closing reasoning tag, when the server left one in the reply
-            written = _CLOSING_THINK.split((choice.get("message") or {}).get("content") or "")[-1].strip()
-            # far over the budget is not a condensed reasoning: the tail stands in
-            summary = _within(written, self.chars) if len(written) <= 1.5 * self.chars else ""
-            status = "made" if summary else (f"too long ({len(written)})" if written else
-                                             f"empty ({choice.get('finish_reason')})" if payload else
-                                             f"HTTP {response.status_code}")
-            record.update(status=status, chars_out=len(summary), tokens=_usage_tokens(payload.get("usage") or {}))
-        except (httpx.HTTPError, ValueError) as error:
-            record["status"] = type(error).__name__
-        record["seconds"] = round(time.monotonic() - started, 1)
-        owner.log_summary(record)
-        return summary or None
-
-
 _SESSION_PATH = re.compile(r"(sessions/)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(\.jsonl)")
 
 
 def _canonicalise_volatile_prefix(payload: dict) -> None:
     """A cache hit needs an identical prefix. prime-agent names its per-session
     conversation log (a fresh UUID per instance) inside its developer prompt, a few
-    thousand characters in, so every new instance re-wrote the whole prompt to the
-    cache (20 Sep: 2 percent of Sonnet input tokens read from cache). The path is
-    informational to the model; it is replaced by a constant in system and developer
-    messages only, before the request leaves for the provider."""
+    thousand characters in, so every new instance would write the whole prompt to the
+    cache again. The path is informational to the model; it is replaced by a constant in
+    system and developer messages only, before the request leaves for the provider."""
     for message in payload.get("messages") or []:
         if not isinstance(message, dict) or message.get("role") not in ("system", "developer"):
             continue
@@ -747,8 +537,8 @@ class _Handler(BaseHTTPRequestHandler):
         started = time.monotonic()
         if owner.serve is not None and parsed is not None and self.path.rstrip("/").endswith("/chat/completions"):
             # the proxy is busy on the call, not hung: its tracker is touched every KEEPALIVE_S while serve runs, as bytes
-            # moving would touch it, so that an adapter's idle watchdog does not take a long serve for a dead system
-            # (28 Sep: served calls reached 535 s, prime-agent's idle timeout being 600)
+            # moving would touch it, so that an adapter's idle watchdog does not take a long serve (minutes, near
+            # prime-agent's idle timeout) for a dead system
             done = threading.Event()
 
             def keepalive() -> None:
@@ -832,7 +622,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self.send_header("Transfer-Encoding", "chunked")
                     self.end_headers()
                     parser = _SSEParser()
-                    assembler = _StreamAssembler() if owner.capture_content or owner._summaries else None
+                    assembler = _StreamAssembler() if owner.capture_content else None
                     for chunk in response.iter_bytes():
                         owner.tracker.touch()
                         for event in parser.feed(chunk):
@@ -845,10 +635,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b"0\r\n\r\n")
                     self.wfile.flush()
                     if assembler is not None and response.status_code < 400:
-                        if owner.capture_content:
-                            call.response_body = assembler.body()
-                        if owner._summaries is not None:  # its summary, ready before a later request needs it
-                            owner._summaries.submit("".join(assembler.reasoning), call.requested_model)
+                        call.response_body = assembler.body()
                 else:
                     data = response.read()
                     try:
@@ -871,8 +658,6 @@ class _Handler(BaseHTTPRequestHandler):
                         _absorb(call, payload)
                         if owner.capture_content:
                             call.response_body = payload
-                        if owner._summaries is not None:
-                            owner._summaries.submit(_reply_reasoning(payload), call.requested_model)
                 call.latency_ms = (time.monotonic() - started) * 1000
                 call.status = "completed" if response.status_code < 400 else "failed"
                 if call.status == "failed":

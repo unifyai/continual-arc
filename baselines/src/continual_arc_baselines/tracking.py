@@ -1,20 +1,15 @@
-"""Model-call tracking as hooks, so it can be attached to any system.
+"""Model-call tracking at the HTTP boundary, as hooks any subscriber can attach to.
 
-The benchmark tests *systems* (prime-agent, opencode, hermes-agent, ...), not
-models, and a system calls its model however it likes. The only assumption we
-make is OpenAI/OpenRouter compatibility at the HTTP boundary. Tracking therefore
-lives at that boundary: :mod:`continual_arc_baselines.proxy` observes every
-physical request and reports it here as an :class:`LLMCall`; anything can
-subscribe to those calls through a :class:`Tracker`.
+The benchmark measures systems, not models, and a system calls its model however it likes; the one assumption is an
+OpenAI-compatible endpoint. :mod:`continual_arc_baselines.proxy` observes every physical request and reports it here as
+an :class:`LLMCall`, and a :class:`Tracker` hands each to its subscribers:
 
-Two subscribers ship with the package:
+* :class:`Usage` keeps the cumulative counters a learner's ``resources()`` reports (``llm_*``), so every record carries
+  its instance's tokens and dollars without the system counting anything;
+* :class:`JournalSink` writes each call into the attempt's event log and cost journal.
 
-* :class:`Usage` keeps cumulative counters shaped for
-  :meth:`continual_arc.learner.Learner.resources`, so per-instance tokens and
-  dollars land in the run records without the system counting anything.
-* :class:`JournalSink` writes each call into the workbench's cost journal and
-  event log in the same shape as the workbench's own OpenRouter client, so
-  ``workbench costs`` and MLflow sync work unchanged.
+:class:`TrackedLearner` wraps a learner so that its ``resources()`` include those counters, read once every call an
+instance made has ended.
 """
 
 from __future__ import annotations
@@ -29,9 +24,9 @@ from typing import Any
 
 from continual_arc.env import GiveUpFeedback, SubmitFeedback
 
-log = logging.getLogger(__name__)
+from continual_arc_baselines.costs import TOKEN_FIELDS, CostJournal
 
-TOKEN_FIELDS = ("input", "output", "cache_read", "cache_write", "reasoning")
+log = logging.getLogger(__name__)
 
 
 def instance_ended(feedback: Any) -> bool:
@@ -126,8 +121,8 @@ class Tracker:
     :attr:`credit_s` is the seconds the proxy's calls spent on work that is not the
     model's reply (a call it answers itself through ``LLMProxy.serve``), which an
     adapter leaves out of a turn's time budget, less the model time its calls stand
-    for without having spent it (a reply replayed from a recording, served at once,
-    takes its recorded generation's seconds off the turn's budget) (:meth:`credit`).
+    for without having spent it: a reply replayed from a recording, served at once,
+    takes its recorded generation's seconds off the turn's budget (:meth:`credit`).
     """
 
     def __init__(self) -> None:
@@ -190,25 +185,19 @@ class Tracker:
 
 
 class JournalSink:
-    """Mirror calls into a workbench :class:`RunContext` and its cost journal.
+    """Every call into an attempt's event log and cost journal (:class:`~continual_arc_baselines.attempt.Attempt`): a
+    ``request_started`` observation as it is forwarded, then a ``response`` or ``transport_error`` one under the same
+    ``request_attempt_id``, so that the journal resolves each physical request to one entity. ``capture_content``
+    also logs every request and reply body (``llm_content`` events)."""
 
-    Records follow the workbench's OpenRouter client: a ``request_started``
-    observation at dispatch, then a ``response`` (or ``transport_error``)
-    observation under the same ``request_attempt_id``, so the journal's summary
-    resolves each physical request to one entity.
-    """
-
-    def __init__(self, context: Any, provider: str = "openrouter", journal: Any = None,
-                 capture_content: bool = False):
-        from continual_workbench.accounting import CostJournal
-
-        self.context = context
+    def __init__(self, attempt: Any, provider: str = "openrouter", capture_content: bool = False):
+        self.attempt = attempt
         self.provider = provider
-        self.journal = journal or CostJournal(context.directory)
+        self.journal = CostJournal(attempt.directory)
         self.capture_content = capture_content
 
     def __call__(self, call: LLMCall) -> None:
-        identity = {"run_id": self.context.run_id, "attempt_id": self.context.attempt_id,
+        identity = {"run_id": self.attempt.run_id, "attempt_id": self.attempt.attempt_id,
                     "call_id": call.call_id, "request_attempt_id": call.call_id}
         base = {"provider": self.provider, "currency": "USD", "unit": "openrouter_credits",
                 "upstream_unit": "USD", "requested_model": call.requested_model,
@@ -217,9 +206,9 @@ class JournalSink:
             record = self.journal.record({**identity, **base, "origin": "request_started",
                                           "measurement": "unknown", "status": "started",
                                           "tokens": dict.fromkeys(TOKEN_FIELDS)})
-            self.context.emit("llm_request", record)
+            self.attempt.emit("llm_request", record)
             if self.capture_content and call.request_body is not None:
-                self.context.emit("llm_content", {**identity, "direction": "request",
+                self.attempt.emit("llm_content", {**identity, "direction": "request",
                                                   "body": call.request_body})
             return
         completed = call.status == "completed"
@@ -235,14 +224,14 @@ class JournalSink:
             "upstream_inference_cost": None,
             "request_id": call.response_headers.get("x-request-id"),
         })
-        self.context.emit("llm_usage" if completed else "llm_request", record)
+        self.attempt.emit("llm_usage" if completed else "llm_request", record)
         if self.capture_content and call.response_body is not None:
-            self.context.emit("llm_content", {**identity, "direction": "response",
+            self.attempt.emit("llm_content", {**identity, "direction": "response",
                                               "body": call.response_body})
 
 
 class PilotStop(Exception):
-    """The pilot gate's stop: ``stop_after`` instances are done and the next one has not begun (TrackedLearner)."""
+    """``stop_after`` instances are done and the next one has not begun (:class:`TrackedLearner`)."""
 
     def __init__(self, done: int):
         super().__init__(f"stopped after {done} instances for the pilot gate")
@@ -271,9 +260,9 @@ class TrackedLearner:
                  stop_after: int | None = None, done: int = 0):
         self.learner = learner
         self.tracker = tracker
-        # The pilot gate (CLI --stop-after): once ``stop_after`` instances are done (``done`` of them before a resume),
-        # the next instance's first action raises PilotStop, after the runner has written the last record and before
-        # the new instance has taken any action, so a resume replays nothing.
+        # ``arc-baselines run --stop-after``: once ``stop_after`` instances are done (``done`` of them before a
+        # resume), the next instance's first action raises PilotStop, after the runner has written the last record and
+        # before the new instance has taken any action, so a resume replays nothing.
         self.stop_after = stop_after
         self._done = done
         # as the collective learner waits: a call normally ends within milliseconds of the

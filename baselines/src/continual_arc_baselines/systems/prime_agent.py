@@ -63,9 +63,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from continual_arc_baselines.systems.base import SystemLearner, SystemUnavailable
+from continual_arc_baselines.proxy import OPENROUTER
+from continual_arc_baselines.systems.base import SystemLearner, SystemUnavailable, remove
 from continual_arc_baselines.systems.protocol import BUDGET_NOTICE
 from continual_arc_baselines.systems.sandbox import (
+    INHERITED_ENV,
+    KEY_VARIABLE,
+    PROXY_ENV,
     SandboxSpec,
     darwin_user_dirs,
     default_mask_paths,
@@ -80,8 +84,6 @@ from continual_arc_baselines.systems.sandbox import (
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "IFM/K2-Horizon-7B"
-OPENROUTER = "https://openrouter.ai/api/v1"
-KEY_VARIABLE = "ARC_LLM_API_KEY"
 REFINE_PROMPT = (
     "This piece of work is finished. Run `await refine.run(global_=True)` in your Python REPL now, "
     "so that whatever you learned here that will help with future work is refined into your global "
@@ -96,9 +98,6 @@ REFINE_INSTRUCTIONS = (
 )
 PRESERVED = ("models.json", "settings.json", "kernel-venv")  # survive a state wipe
 INTEGRATION_SKILLS = ("linear", "notion", "prime-intellect")  # MCP integrations; off
-INHERITED_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
-PROXY_ENV = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENAI_API_KEY", "OPENROUTER_BASE_URL",
-             "OPENROUTER_API_KEY", "ARC_LLM_BASE_URL")
 ACTIVITY = ("agent_start", "turn_start", "message_start")  # a new run or turn is underway
 
 
@@ -115,13 +114,6 @@ def _text_of(message: dict) -> str:
         return "".join(part.get("text", "") for part in content
                        if isinstance(part, dict) and part.get("type") == "text")
     return ""
-
-
-def _remove(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
 
 
 class PrimeAgentLearner(SystemLearner):
@@ -175,13 +167,12 @@ class PrimeAgentLearner(SystemLearner):
         self.compact_at = compact_at
         # what a compaction keeps word for word (keepRecentTokens, prime-agent's default 20,000): with the system prompt
         # and the summary it must stay well under compact_at, or prime-agent compacts after nearly every tool call
-        # (25 Sep: at 32k with the default, 230 compactions in the first 21 minutes of 50 instances)
+        # (at 32k with the default, hundreds of compactions within minutes)
         self.compact_keep = compact_keep
         # How the refinement after an instance (refine_every) is started. "agent": a closing turn with the verdict, then
-        # a turn asking the model to run refine.run(global_=True) in its Python REPL (the harness rows since 22 Sep).
-        # "rpc": the adapter starts it itself, with prime-agent 0.9.5's RPC refine command (global), the verdict as its
-        # instructions, so the only model call is the refinement's own (the team rows since 26 Sep: the storage the
-        # update grades is the refinement, not the turns around it). refine_timeout_s bounds the wait for its answer.
+        # a turn asking the model to run refine.run(global_=True) in its Python REPL. "rpc": the adapter starts it
+        # itself, with prime-agent 0.9.5's RPC refine command (global), the verdict as its instructions, so that the
+        # only model call is the refinement's own. refine_timeout_s bounds the wait for its answer.
         if refine_via not in ("agent", "rpc"):
             raise ValueError(f"refine_via must be 'agent' or 'rpc', not {refine_via!r}")
         self.refine_via = refine_via
@@ -258,7 +249,7 @@ class PrimeAgentLearner(SystemLearner):
         """``~/.prime/agent`` is a link to this adapter's agent directory. prime-agent's own docs (its skill-creator
         skill) put a personal skill in ``~/.prime/agent/skills/``, its default agent directory, but the adapter gives it a
         private one (``PRIME_AGENT_CODING_AGENT_DIR``) and a private HOME, and 0.9.5 loads personal skills from the agent
-        directory's ``skills/`` (read from its binary, 26 Sep), so a skill written where its docs say was never loaded.
+        directory's ``skills/`` (read from its binary), so a skill written where its docs say would never be loaded.
         A relative link, so it holds wherever the sandbox mounts the state directory. A directory already there (a skill
         written there before the link) has its skills moved into the agent directory's and the rest kept aside."""
         link = self.home_dir / ".prime" / "agent"
@@ -296,8 +287,8 @@ class PrimeAgentLearner(SystemLearner):
             "baseUrl": self._base_url(), "api": "openai-completions", "apiKey": KEY_VARIABLE,
             # thinkingLevelMap: prime-agent's model layer (pi-ai) offers xhigh and max only for a
             # model whose declaration maps them, and clamps a higher request down to high; without
-            # this line the xhigh and max cells ran at high (found 23 Sep from reasoning tokens per
-            # call, flat above medium while the floors' rose eightfold).
+            # this line a run at xhigh or max runs at high (its reasoning tokens per call flat above
+            # medium while the floors' rise eightfold).
             "models": [{"id": self.model, "reasoning": True, "contextWindow": self.context_window,
                         "maxTokens": self.max_tokens,
                         "thinkingLevelMap": {"xhigh": "xhigh", "max": "max"}}],
@@ -345,7 +336,7 @@ class PrimeAgentLearner(SystemLearner):
 
     def _argv(self) -> list[str]:
         # the executable by its absolute path: behind the proxy bridge it is looked up inside the sandbox, where
-        # every PATH entry under a home directory is hidden (25 Sep)
+        # every PATH entry under a home directory is hidden
         exe = shutil.which(self.command[0]) or self.command[0]
         argv = [
             exe, *self.command[1:], "--mode", "rpc", "--provider", self.provider_name, "--model", self.model,
@@ -370,7 +361,7 @@ class PrimeAgentLearner(SystemLearner):
             if runtime:
                 reads.append(runtime)
         reads += [Path(p) for p in self.sandbox_read_paths]
-        reads.append(self.workdir / "netbridge.py")  # the sandbox half of the proxy bridge, inside the masked workbench
+        reads.append(self.workdir / "netbridge.py")  # the sandbox half of the proxy bridge, inside the masked attempt
         parsed = urlparse(self._base_url())
         ports = [parsed.port] if parsed.hostname in ("127.0.0.1", "localhost", "::1") and parsed.port else []
         temp_dirs = darwin_user_dirs()
@@ -694,8 +685,8 @@ class PrimeAgentLearner(SystemLearner):
             if "already processing" not in str(error):
                 raise
             # prime-agent compacts after a turn whose context passed its threshold, and refuses a prompt until it is
-            # done: wait for it, then send the prompt again. (25 Sep: taken for a dead system, the harness was
-            # restarted, lost its place, and most instances that compacted were given up.)
+            # done: wait for it, then send the prompt again. Taken for a dead system, the harness would be restarted
+            # and lose its place, and most instances that compact would be given up.
             self.stats["busy_waits"] = self.stats.get("busy_waits", 0) + 1
             self._note("prime-agent is busy (compacting); waiting for it to finish before the prompt")
             self._wait_idle(self.timeout_s)
@@ -823,7 +814,7 @@ class PrimeAgentLearner(SystemLearner):
             text, errored = self._finish_turn(event)
             if ended_on_tool and not errored and self._resumes_after_compaction(deadline=hard):
                 # prime-agent ends a run whose context passed its compaction threshold after a tool result, compacts,
-                # and continues it (25 Sep, compaction at 32k: taken for an empty reply, the harness was restarted)
+                # and continues it: not an empty reply, for which the harness would be restarted
                 self._note("the run stopped after a tool result to compact; prime-agent resumed it")
                 last_rpc = time.monotonic()
                 final, seen_final, seen_error = None, None, False
@@ -930,9 +921,9 @@ class PrimeAgentLearner(SystemLearner):
                 for inner in child.iterdir():
                     if inner.name in PRESERVED:
                         continue
-                    _remove(inner)
+                    remove(inner)
             else:
-                _remove(child)
+                remove(child)
 
     def _close_instance(self, obs: Any) -> None:
         """With ``refine_via="rpc"``, a refinement to follow and no storage turn, the verdict is kept for the refinement's

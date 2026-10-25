@@ -52,10 +52,10 @@ over guessing blindly; solving at any cost is cheaper than not solving.
 """
 
 
-# The rules under the finish protocol (a system's end="finish", every harness row since 27 Sep): facts only. The
+# The rules under the finish protocol (a system's end="finish", every harness row of the paper's grid): facts only. The
 # stream's recurrence and the conversation per instance are stated, with no advice on what to remember or when to ask for
 # demonstrations, and the harness ends each instance itself with finish, refused until the instance is over, so that no
-# message of ours tells it what to do after the verdict ("the harnesses should be free to do what they want").
+# message of ours tells it what to do after the verdict: the harness is free to do what it wants.
 RULES_FINISH = """\
 You are being evaluated on Continual-ARC, a lifelong stream of ARC-style grid puzzles.
 Each puzzle instance has a task id and a test input grid. Tasks recur across the
@@ -79,7 +79,6 @@ many submissions and demo requests it used. Feedback on a submission is only
 correct/incorrect. There is no way to abandon an instance, and finish is refused until
 the instance is over. Each instance is scored on its own, and lower cost is better.
 """
-
 
 
 def rules(finish: bool, demo_cost: float, max_cost: float) -> str:
@@ -108,19 +107,20 @@ def render_grid(grid: Grid) -> str:
     return "\n".join(" ".join(str(c) for c in row) for row in grid)
 
 
-def _shape(grid: Grid) -> str:
+def shape(grid: Grid) -> str:
+    """A grid's height and width, as the messages give them: ``3x4``."""
     return f"{len(grid)}x{len(grid[0]) if grid else 0}"
 
 
 def render_pairs(pairs: list[Any], start: int = 1) -> str:
-    """Demonstration pairs numbered from ``start``; a padded pair says what it is first (26 Sep)."""
+    """Demonstration pairs numbered from ``start``; a padded pair says what it is first."""
     parts = []
     for k, pair in enumerate(pairs, start):
         note = getattr(pair, "note", None)
         parts.append(
             (f"Demo pair {k} is {note}.\n" if note else "")
-            + f"Demo pair {k} input ({_shape(pair.input)}):\n{render_grid(pair.input)}\n"
-            f"Demo pair {k} output ({_shape(pair.output)}):\n{render_grid(pair.output)}"
+            + f"Demo pair {k} input ({shape(pair.input)}):\n{render_grid(pair.input)}\n"
+            f"Demo pair {k} output ({shape(pair.output)}):\n{render_grid(pair.output)}"
         )
     return "\n\n".join(parts)
 
@@ -135,7 +135,7 @@ def render_feedback(action: Action, feedback: Feedback) -> str:
     if isinstance(feedback, DemosFeedback):
         if feedback.refused:
             return "Demo request REFUSED: the demo cap for this instance is reached."
-        # pairs are numbered across the instance's requests (one pair per request since 26 Sep)
+        # pairs are numbered across the instance's requests, one pair per request
         start = (feedback.demo_requests_used - 1) * len(feedback.pairs) + 1
         return (f"Demos received (request {feedback.demo_requests_used}):\n\n"
                 f"{render_pairs(feedback.pairs, start=max(1, start))}")
@@ -147,7 +147,7 @@ def render_feedback(action: Action, feedback: Feedback) -> str:
 def render_observation(obs: LearnerObservation, *, pending: list[str], demo_cost: float, max_cost: float,
                        first_in_session: bool, finish: bool = False, rules_note: str = "", preface: str = "") -> str:
     """``preface`` is what a row puts before the instance in the first message of its conversation: nothing, but for
-    the demo-cache floor's cached pairs (systems/bare.py, 28 Sep)."""
+    the demo-cache floor's cached pairs (systems/bare.py)."""
     lines: list[str] = []
     if first_in_session:
         lines.append(rules(finish, demo_cost, max_cost))
@@ -163,10 +163,10 @@ def render_observation(obs: LearnerObservation, *, pending: list[str], demo_cost
         lines.append("")
     fresh = obs.attempts_used == 0 and obs.demo_requests_used == 0
     # The learner is told the task's name for the run and the instance's own counters, nothing
-    # about the stream: no position, no length, no phase, no exposure count (20 Sep). Whether it
+    # about the stream: no position, no length, no phase, no exposure count. Whether it
     # has met this task before is for its own memory to say, as for a worker in an office.
     lines.append(f"{'New instance' if fresh else 'Same instance'}. Task id: {obs.task_id}")
-    lines.append(f"Test input ({_shape(obs.input)}):")
+    lines.append(f"Test input ({shape(obs.input)}):")
     lines.append(render_grid(obs.input))
     lines.append(f"Wrong attempts used: {obs.attempts_used}/{obs.attempt_cap}. "
                  f"Demo requests used: {obs.demo_requests_used}/{obs.demo_cap}.")
@@ -519,7 +519,7 @@ def _action_from(obj: Any, depth: int = 0, unknown: list[str] | None = None, fin
     return None
 
 
-def _objects_from_end(text: str, open_ch: str = "{", close_ch: str = "}") -> list[str]:
+def objects_from_end(text: str, open_ch: str = "{", close_ch: str = "}") -> list[str]:
     """Candidate substrings, last first, one per closing bracket by matching, so an object nested
     inside another is a candidate of its own (the outer one may not be valid JSON: a runtime that
     pastes the action between quotes without escaping it, or a model that adds a stray brace)."""
@@ -565,8 +565,8 @@ def _rows_from_text(text: str) -> list[list[int]] | None:
 def parse_action(text: str, _depth: int = 0, *, finish: bool = False) -> Action:
     """Find the action in a reply. Raises :class:`ParseError` if there is none.
 
-    Systems are not being tested on JSON discipline (23 Sep: a tenth of low-effort instances were
-    lost to replies that carried a correct action in a shape the first parser refused), so this
+    Systems are not being tested on JSON discipline (a strict parser loses instances to replies that
+    carry a correct action in a shape it refuses), so this
     reads, in order: a bare demo request on the last line; every brace-matched JSON object, last
     first and nested ones included, parsed leniently (trailing commas, single quotes, escaped
     quotes, missing or stray brackets), with the action name under any usual key and the grid
@@ -603,7 +603,7 @@ def parse_action(text: str, _depth: int = 0, *, finish: bool = False) -> Action:
         candidates: list[str] = []
         for fm in reversed(list(_FENCE.finditer(text))):
             candidates.append(fm.group(1))
-        candidates += _objects_from_end(text)
+        candidates += objects_from_end(text)
         if text[0] in "{[":
             candidates.append(text)
         seen: set[str] = set()
@@ -623,7 +623,7 @@ def parse_action(text: str, _depth: int = 0, *, finish: bool = False) -> Action:
             if g:
                 return Submit(g)
         # 4. a bare list of rows anywhere, last first
-        for cand in _objects_from_end(text, "[", "]"):
+        for cand in objects_from_end(text, "[", "]"):
             obj = _loads(cand)
             g = _to_grid(obj) if obj is not None else None
             if g and len(g) >= 2:
@@ -653,8 +653,8 @@ CLOSING = (
 def render_closing(pending: list[str]) -> str:
     """The message that closes an instance: the verdict on its final submission, which would
     otherwise reach the system only at the top of the next instance's first message, after its
-    storage step has run (found 23 Sep: a harness's review wrote 'the submitted result received
-    no correctness feedback, so it adds no verified knowledge')."""
+    storage step has run, so that a harness's review would find that the submitted result received
+    no correctness feedback."""
     return CLOSING.format(verdict="\n".join(pending) if pending else "The instance is over.")
 
 
@@ -666,10 +666,10 @@ STORAGE = (
 
 
 def render_storage(pending: list[str], *, conversation_ends: bool, note: str = "") -> str:
-    """The message that closes an instance with a turn of its own for storage (a system's ``storage_turn``): the verdict,
-    then the agent may save what will help later with whatever tools its harness has, and the reply is not read (26
-    Sep: a harness's storage functions are called at will, and the verdict comes only after the turn that submitted,
-    so without this turn nothing could be stored knowing the outcome). ``note``: what the harness keeps, in its terms."""
+    """The message that closes an instance with a turn of its own for storage (a system's ``end="storage"``): the
+    verdict, then the agent may save what will help later with whatever tools its harness has, and the reply is not
+    read. A harness's storage functions are called at will, and the verdict comes only after the turn that submitted,
+    so without this turn nothing could be stored knowing the outcome. ``note``: what the harness keeps, in its terms."""
     return STORAGE.format(verdict="\n".join(pending) if pending else "The instance is over.",
                           ends=" This conversation ends with it; only what you save outlasts it." if conversation_ends else "",
                           note=f" {note}" if note else "")
@@ -692,7 +692,7 @@ OVER_REPROMPT = (
     "line."
 )
 
-# The ablation row HA (a system's ask_to_store, 29 Sep): the finish protocol and its facts-only rules, with this ask
+# The ablation row HA (a system's ask_to_store): the finish protocol and its facts-only rules, with this ask
 # after the verdict, as liberal as we could make it, so that the row shows the most that asking a harness to store can
 # give ("only demonstrations and wrong attempts are scored" is the fact that makes "no risk" true).
 # {note}: what the harness keeps, in its own terms (storage_note; prime-agent's global_=True).
@@ -703,11 +703,11 @@ ASK_TO_STORE = (
     '{{"action": "finish"}}.'
 )
 
-# The ablation row HPL, a harness-driven program library (a system's program_library, 29 Sep: the model instructed
-# exactly how to behave, in the manner of the program library): the finish protocol's facts-only rules, then
-# row M's method as a procedure the harness carries out itself with its own tools (M's scaffold writes, checks, keeps and
-# replays the program; here the harness does). {programs}: the library's folder, in the harness's workspace, which only a
-# stateless row wipes.
+# The ablation row HPL, a harness-driven program library (a system's program_library: the model instructed exactly
+# how to behave, in the manner of the program library): the finish protocol's facts-only rules, then
+# row PL's method as a procedure the harness carries out itself with its own tools (PL's scaffold writes, checks, keeps
+# and replays the program; here the harness does). {programs}: the library's folder, in the harness's workspace, which
+# only a stateless row wipes.
 PROGRAM_LIBRARY_RULES = (
     "How to work, in every instance (follow this exactly): keep a program library in the folder {programs}, one Python "
     "file per task, named for its task id ({programs}/<task id>.py), defining transform(grid), which takes an input grid "

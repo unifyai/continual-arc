@@ -53,7 +53,7 @@ from continual_arc.env import (
 )
 from continual_arc.learner import BaseLearner
 
-from continual_arc_baselines.frozen import delete, put_back
+from continual_arc_baselines.frozen import HELD, delete, put_back
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
 from continual_arc_baselines.systems.sandbox import (
     SandboxSpec,
@@ -80,9 +80,8 @@ KEY_VARIABLES = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ARC_LLM_API_KEY")
 FEEDBACK_TYPES = (SubmitFeedback, DemosFeedback, GiveUpFeedback)
 WRITABLE = ("state", "home")
 """What the learner can write that outlasts its host, under the attempt's system folder: everything a frozen test puts
-back (its temporary directory is new each time the host starts)."""
-HELD = "stream-end"
-"""Where a frozen learner's files wait as its stream left them, beside them (:meth:`HostedLearner.freeze`)."""
+back (its temporary directory is new each time the host starts). A frozen learner's own wait in ``HELD`` beside them
+(:meth:`HostedLearner.freeze`)."""
 
 
 class HostedLearnerError(RuntimeError):

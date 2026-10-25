@@ -1,5 +1,5 @@
-"""The bare model as a system: the harness protocol with no harness (25 Sep 2026: each candidate model with and
-without prime-agent, the model alone having only the two actions, request demonstrations or submit).
+"""The bare model as a system: the harness protocol with no harness, the model alone with only the two actions,
+request a demonstration or submit.
 
 Each observation, rendered exactly as every harness receives it (:mod:`continual_arc_baselines.systems.base`), goes to
 the model as the next user message of one conversation per instance, and its reply is parsed for the action as a
@@ -11,17 +11,22 @@ Calls go to the run's proxy (``ARC_LLM_BASE_URL``), streamed, so a reply that re
 long enough to meet the proxy's read timeout. Earlier replies stay in the conversation as their text, without their
 reasoning, as chat templates render a past turn.
 
-Since 28 Sep the two floors of row F are built on it (the stateless floor is the model itself, allowed to choose
-whatever actions it wants, not a policy of ours that buys all eight pairs): :class:`BareModelLearner` is the
-stateless floor, and :class:`BareDemoCacheLearner` the demo-cache floor, the same model with a cache of the pairs it
-bought for each task, shown again at no cost when the task returns. Both take ``end="finish"`` in the grid, so their
-rules are the harness rows' (protocol.RULES_FINISH); the verdict is still not sent.
+The two floors of row F are built on it: :class:`BareModelLearner`, the stateless floor, is the model itself, choosing
+whatever actions it wants rather than following a policy of ours, and :class:`BareDemoCacheLearner`, the demo-cache
+floor, is the same model with a cache of the pairs it bought for each task, shown again at no cost when the task
+returns (:class:`BareSharedDemoCacheLearner`: one cache for a team of users). :class:`BareProgramLibraryLearner` is the
+program library, row PL (named M in the run records). All of them take ``end="finish"`` in the grid, so their rules are
+the harness rows' (protocol.RULES_FINISH); the verdict is still not sent.
 """
 
 from __future__ import annotations
 
 import json
+import re
+import subprocess
+import sys
 import tempfile
+import textwrap
 import threading
 from pathlib import Path
 from typing import Any
@@ -36,13 +41,20 @@ from continual_arc.env import (
     Submit,
     SubmitFeedback,
 )
+from continual_arc.grids import InvalidGrid, normalize_grid
 from continual_arc.tasks import Pair
 
-from continual_arc_baselines.learners.prompting import _PY_FENCE, extract_program, run_transform
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
 from continual_arc_baselines.systems import protocol
 from continual_arc_baselines.systems.base import SystemLearner, SystemUnavailable
-from continual_arc_baselines.systems.protocol import _shape, render_grid
+from continual_arc_baselines.systems.protocol import objects_from_end, render_grid, shape
+from continual_arc_baselines.systems.sandbox import (
+    SandboxSpec,
+    darwin_user_dirs,
+    python_runtime_root,
+    resolve_backend,
+    wrap_command,
+)
 
 
 class BareModelLearner(SystemLearner):
@@ -135,7 +147,7 @@ class BareModelLearner(SystemLearner):
 
 
 class BareDemoCacheLearner(BareModelLearner):
-    """The demo-cache floor (28 Sep): the bare model, plus a cache of the demonstration pairs it has bought for each
+    """The demo-cache floor: the bare model, plus a cache of the demonstration pairs it has bought for each
     task, up to ``cache_cap`` a task (the per-instance demo cap). When a task returns, the first message of the
     instance shows its cached pairs again at no cost, before the instance; the model may still request more, and they
     join the cache. Nothing else is kept: no answers, no verdicts, no conversation."""
@@ -163,8 +175,8 @@ class BareDemoCacheLearner(BareModelLearner):
         pairs = self.cached_pairs(obs.task_id)
         if not pairs:
             return ""
-        shown = "\n\n".join(f"Earlier pair {k} input ({_shape(p.input)}):\n{render_grid(p.input)}\n"
-                             f"Earlier pair {k} output ({_shape(p.output)}):\n{render_grid(p.output)}"
+        shown = "\n\n".join(f"Earlier pair {k} input ({shape(p.input)}):\n{render_grid(p.input)}\n"
+                             f"Earlier pair {k} output ({shape(p.output)}):\n{render_grid(p.output)}"
                              for k, p in enumerate(pairs, 1))
         return f"Demonstration pairs of task {obs.task_id} that you received before, shown again at no cost:\n\n{shown}"
 
@@ -298,18 +310,72 @@ after 3 failed checks in an instance, a program's output is submitted without a 
 the pairs you have is kept for the task: when the task returns, it is run on the new test input first and its output
 is submitted."""
 
-# Row M0, a stateless program library (29 Sep): every submission a program, checked as in M, with the demo cache and
-# the kept programs wiped before every instance (stateless=True), so its rules drop the one sentence about keeping.
+# Row PL0, a stateless program library (M0 in the run records): every submission a program, checked as in PL, with the
+# demo cache and the kept programs wiped before every instance (stateless=True), so its rules drop the one sentence
+# about keeping.
 PROGRAM_NOTE_STATELESS = PROGRAM_NOTE[:PROGRAM_NOTE.index(" A program that reproduces all")]
 
 PROGRAM_REPROMPT = ('I could not find a valid action in your reply ({reason}). Reply with your program in one '
                     '```python block and {{"action": "submit"}} on the last line, or with {{"action": "request_demos"}}.')
 
+_JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+_PY_FENCE = re.compile(r"```python\s*(.*?)```", re.DOTALL)
+
+
+def extract_program(text: str) -> str | None:
+    """The program in a reply: the ``program`` string of the last JSON object, else the last fenced Python block, else
+    the whole text when it defines ``transform``."""
+    for candidate in [m.group(1) for m in reversed(list(_JSON_FENCE.finditer(text)))] + objects_from_end(text):
+        try:
+            obj = json.loads(candidate)
+        except ValueError:
+            continue
+        if isinstance(obj, dict) and isinstance(obj.get("program"), str) and "def transform" in obj["program"]:
+            return obj["program"]
+    m = _PY_FENCE.search(text)
+    if m:
+        return m.group(1)
+    return text if "def transform" in text else None
+
+
+def run_transform(code: str, grid, *, sandbox: str, timeout_s: float, workdir: Path) -> tuple[Any, str | None]:
+    """Run a model-written ``transform(grid)`` on one grid in a subprocess under the harnesses' sandbox, with no network
+    and no access to the benchmark. Returns (grid, None), or (None, what went wrong)."""
+    script = workdir / "program.py"
+    script.write_text(code + textwrap.dedent('''
+
+        if __name__ == "__main__":
+            import json, sys
+            _g = json.loads(sys.stdin.read())
+            print(json.dumps(transform(_g)))
+    '''))
+    backend = resolve_backend(sandbox)
+    python = Path(sys.executable)
+    reads = [python.parent.parent]
+    runtime = python_runtime_root(python)
+    if runtime:
+        reads.append(runtime)
+    spec = SandboxSpec(read_paths=reads + [workdir], write_paths=[workdir, *darwin_user_dirs()],
+                       tmp_dir=workdir, home=workdir)
+    argv = wrap_command(backend, [str(python), "-I", "-S", str(script)], spec, workdir / "sandbox.sb")
+    try:
+        out = subprocess.run(argv, input=json.dumps(grid), capture_output=True, text=True,
+                             timeout=timeout_s, check=False, cwd=workdir,
+                             env={"HOME": str(workdir), "PATH": "/usr/bin:/bin"})
+    except subprocess.TimeoutExpired:
+        return None, "timeout"
+    if out.returncode != 0:
+        return None, (out.stderr or "").strip()[-400:] or f"exit {out.returncode}"
+    try:
+        return normalize_grid(json.loads(out.stdout.strip().splitlines()[-1])), None
+    except (ValueError, IndexError, InvalidGrid) as error:
+        return None, f"bad output: {error}"
+
 
 class BareProgramLibraryLearner(BareDemoCacheLearner):
-    """Row M since 28 Sep (the program library as the demo-cache floor, but the model must create one program for each
-    task; the model decides every demonstration request). The bare demo-cache floor, with one requirement: every
-    submission is a program. The model writes ``transform(grid)`` in a Python block and ends with the submit action; the
+    """The program library, row PL (M in the run records): the bare demo-cache floor, with one requirement, that every
+    submission is a program, one for each task; the model decides every demonstration request. The model writes
+    ``transform(grid)`` in a Python block and ends with the submit action; the
     program runs on the test input in the harnesses' sandbox and its output is submitted, and a grid alone is re-prompted.
     Before that, the program is checked at no cost on every pair the model has for the task (the cached pairs shown at
     the start of the instance, then the pairs bought in it), and a failure goes back to it; after ``max_checks`` failed
@@ -348,8 +414,8 @@ class BareProgramLibraryLearner(BareDemoCacheLearner):
     def instance_preface(self, obs: LearnerObservation) -> str:
         parts = []
         if self._earlier:
-            shown = "\n\n".join(f"Earlier pair {k} input ({_shape(p.input)}):\n{render_grid(p.input)}\n"
-                                 f"Earlier pair {k} output ({_shape(p.output)}):\n{render_grid(p.output)}"
+            shown = "\n\n".join(f"Earlier pair {k} input ({shape(p.input)}):\n{render_grid(p.input)}\n"
+                                 f"Earlier pair {k} output ({shape(p.output)}):\n{render_grid(p.output)}"
                                  for k, p in enumerate(self._earlier, 1))
             parts.append(f"Demonstration pairs of task {obs.task_id} that you received before, shown again at no cost:\n\n"
                          f"{shown}")
@@ -414,7 +480,7 @@ class BareProgramLibraryLearner(BareDemoCacheLearner):
     # -- the loop ---------------------------------------------------------------
 
     def act(self, obs: LearnerObservation) -> Action:
-        self._begin_instance(obs)   # row M0's kept programs and demo cache are wiped here, before every instance
+        self._begin_instance(obs)   # row PL0's kept programs and demo cache are wiped here, before every instance
         if self._instance != (obs.task_id, obs.step):
             self._instance, self._checks, self._kept_run, self._bought = (obs.task_id, obs.step), 0, None, []
             self._earlier = list(self.cache.get(obs.task_id, []))

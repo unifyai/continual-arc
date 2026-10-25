@@ -55,8 +55,7 @@ def test_every_user_runs_a_harness_of_their_own_and_the_hook_sees_the_round(tmp_
 
     learner = CollectiveHarnessLearner(FakeHarness, tmp_path / "run", schedule=sched, upstream=server.base_url,
                                        capture=True, snapshot=True, body_overrides={"model": "base", "return_token_ids": True},
-                                       body_drop=("reasoning_effort",), round_hook=hook,
-                                       begin_hook=lambda n: events.append(("begin", n)), instance_hook=ended)
+                                       body_drop=("reasoning_effort",), round_hook=hook, instance_hook=ended)
     try:
         result = run(learner, sched, out_dir=tmp_path / "run", registry=registry)
     finally:
@@ -97,12 +96,12 @@ def test_every_user_runs_a_harness_of_their_own_and_the_hook_sees_the_round(tmp_
     assert sum(r.resources["llm_requests"] for r in recs) == len(sent)
     log = (tmp_path / "run" / "users" / "u000" / "calls.jsonl").read_text().splitlines()
     assert json.loads(log[0])["reply_token_ids"] == 2 and "request" not in json.loads(log[0])
-    # every round: the begin hook before any instance, each instance once as it ended, then the round hook
+    # every round: each instance once as it ended, then the round hook
     for r in range(6):
-        begin, *mine, closing = events[5 * r: 5 * (r + 1)]
-        assert begin == ("begin", 3) and closing == ("round", r)
+        *mine, closing = events[4 * r: 4 * (r + 1)]
+        assert closing == ("round", r)
         assert sorted(e[1] for e in mine) == [3 * r, 3 * r + 1, 3 * r + 2] and all(e[0] == "ended" and e[2] for e in mine)
-    assert len(events) == 30
+    assert len(events) == 24
 
 
 class CommittingHarness(FakeHarness):
@@ -180,8 +179,8 @@ def run_team(tmp_path, users: int, per_user: int, **learner_args) -> tuple[dict,
 
 
 def test_the_hooks_get_every_call_of_an_instance_though_the_proxy_reports_it_after_the_reply(tmp_path, monkeypatch):
-    # the proxy reports a call's end once it has written the reply, so the harness can act on the reply first
-    # (CI, 25 Sep: the round hook got an instance without its last call); here every report comes 0.2 s late
+    # the proxy reports a call's end once it has written the reply, so the harness can act on the reply first and the
+    # round hook could get an instance without its last call; here every report comes 0.2 s late
     late_reports(monkeypatch, 0.2)
     ended, closed, logged = run_team(tmp_path, users=2, per_user=2)
     assert len(logged) == 4 and all(any(phase == "after" for _, phase in calls) for calls in logged.values())
@@ -226,21 +225,22 @@ def test_a_resumed_run_snapshots_every_users_state_when_its_first_round_begins(t
         first.close()
     for u in range(2):   # what each harness kept after round 1 began: the snapshot taken then lacks it
         (run_dir / "users" / f"u{u:03d}" / "system" / "state" / "kept-in-round-1.md").write_text("a note")
-    before: list = []
+    before: dict[int, dict[int, list[str]]] = {}
+    lock = threading.Lock()
 
-    def began(n):
-        before.append(sorted(sorted(p.name for p in (run_dir / "users" / f"u{u:03d}" / "state-before").iterdir())
-                             for u in range(2)))
+    def ended(trace):
+        with lock:
+            before.setdefault(trace.round, {})[trace.user] = sorted(p.name for p in trace.state_before.iterdir())
 
     second = CollectiveHarnessLearner(FakeHarness, run_dir, schedule=sched, upstream=server.base_url, snapshot=True,
-                                      begin_hook=began)
+                                      instance_hook=ended)
     try:
         result = run(second, sched, out_dir=run_dir, registry=registry, resume=True)
     finally:
         second.close()
         server.stop()
-    assert len(result.records) == 8 and len(before) == 2   # rounds 2 and 3, played by the second launch
-    assert all("kept-in-round-1.md" in names and "memory.json" in names for names in before[0])
+    assert len(result.records) == 8 and sorted(before) == [2, 3]   # rounds 2 and 3, played by the second launch
+    assert all("kept-in-round-1.md" in names and "memory.json" in names for names in before[2].values())
 
 
 def test_every_users_state_is_committed_at_the_end_of_every_round_one_user_at_a_time(tmp_path):
@@ -347,11 +347,11 @@ def test_each_users_proxy_is_the_learners_proxy_class(tmp_path):
 
     class Counting(LLMProxy):
         def __init__(self, *args, **kwargs):
-            made.append(kwargs["route_key"])
+            made.append(kwargs["tracker"])
             super().__init__(*args, **kwargs)
 
     run_team(tmp_path, users=2, per_user=1, proxy=Counting)
-    assert sorted(made) == ["u0", "u1"]
+    assert len(made) == 2 and made[0] is not made[1]   # one proxy a user, each with the user's own tracker
 
 
 def test_a_complete_snapshot_restores_the_state_as_it_was(tmp_path):
@@ -432,14 +432,14 @@ def test_a_user_is_given_the_port_asked_for_and_any_other_when_it_is_taken(tmp_p
     class Port(LLMProxy):
         def start(self):
             out = super().start()
-            seen[self.route_key] = self.port
+            seen[self._port] = self.port   # the port asked for, and the one listened on
             return out
 
     try:
         run_team(tmp_path, users=2, per_user=1, proxy=Port, ports={0: wanted, 1: held})
     finally:
         taken.close()
-    assert seen["u0"] == wanted and seen["u1"] not in (0, held)
+    assert set(seen) == {wanted, 0} and seen[wanted] == wanted and seen[0] != held
 
 
 def test_a_copy_to_read_is_as_it_was_and_a_copy_to_restore_from_has_every_directory(tmp_path):

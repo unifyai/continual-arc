@@ -1,105 +1,71 @@
-# What each file does
+# The code
 
-Every script starts with a comment (or a docstring) that explains it in full. This page is the short map. The shell
-scripts and the Python they call run on the GPU node, but for the launchers (`frozen-launch.sh`, `refs-launch.sh`,
-`scratch-launch.sh`) and `paper_backup.sh`, which run on another machine and reach the node over ssh, and the
-reference rows' scripts, which run on a CPU machine. See [How a run works](how-a-run-works.md).
+What each module and script does. Every module is run as `python -m continual_arc_training.MODULE` where it has a
+command line; [how a run works](how-a-run-works.md) says how they fit together.
 
-## The trained rows
+## The package (`src/continual_arc_training/`)
 
-| File | What it does |
+### Playing
+
+| Module | What it does |
 | --- | --- |
-| `realtime.sh` | One trained row, DAgger, OPSD or PG (`ROW`), on one node: starts the oracle's relay (DAgger and OPSD) and the model server and keeps `realtime.py`'s three loops running, each restarted when it dies, until the run is done. Its `started:` line in the run's `progress` records every setting. |
-| `realtime.py` | The three loops: the **player** (round r on phase r-1-LAG's adapter, waited for and checked, `served.json` recording it), the **labeller** (`forward.py points`/`label` as games land, under the oracle's working rules, then `label-set` and `split --hold-every`) and the **trainer**, whose `train` process holds the model on the GPUs the node's pool gives the run (`gpupool.py`). Phase k trains on rounds 0..k through `train.fit` from one configuration (`train_args`), with the row's own update; `--dose` picks what a phase trains on (`aggregate`, `recent`, `replay`). |
-| `train.py` | Training. `fit` runs a phase for every row alike: every pass planned before the first step (`plan`), whole chains of a game's calls cut to fit each GPU, the held-out loss every `--eval-steps` steps, the best adapter kept, the patience stop, the step checkpoints, `phase.json` and `DONE`. Only the update is the row's: `Imitation` (DAgger, `--objective sft`), `SelfDistillation` (OPSD) and `PolicyGradient` (PG, `--objective pg`: `pg_items`, REINFORCE on the won games). It also holds `--objective opd` (per-token distillation from a teacher's scores, not a row of the paper) and the earlier experiments' context distillation. `--lora-targets` names the projections the adapter trains (the default trains the attention and MLP projections, none of the Gated DeltaNet layers'). |
-| `checkpoint.py` | A phase's step checkpoints: one on SIGTERM and one every `EVERY` (25) steps, each synced whole before `state.json` names it, so a phase cut short goes on from the last one on the same batches in the same order. |
-| `gpupool.py` | The trainer GPUs runs on one node share: runs given the same `TRAIN_GPUS` share them as one pool, split evenly over the runs with a phase to train, under an flock in `RUNS/gpupool/<gpus>.json`; lists that overlap without being the same are refused. |
-| `fleet.py` | Where real-time runs' GPUs go: `profile` reads a run's rounds from its files, `simulate` plays the lag-1 pipeline over them, `plan` lays out a set of runs on 8-GPU nodes from the fastest plan to the cheapest and picks one by `--deadline` or `--budget` (`--launch` prints each run's `realtime.sh` line), `bench-serve` and `bench-train` time a model server and a trainer. |
-| `kernel_stack.py` | Writes `kernels.json` into each training folder (the package versions, the GPU, and which kernels train Qwen3.5's linear-attention layers), and stops training on a stack known to give wrong gradients ([fla-hopper-gradients.md](fla-hopper-gradients.md)). |
-| `serve.sh` | The model server on port 8101 (vLLM 0.30, Qwen3.5-9B with its chat template and MTP speculative decoding), adapters loaded into it by name; a healthy server is kept only when it was launched as asked. |
-| `vllm-serve.sh` | Starts a vLLM server from an environment of its own (`VLLM_VENV`), installing it on first use; `serve.sh`, `frozen.sh` and `grid-vals.sh` start every server through it. |
-| `qwen35_prefill.jinja` | Qwen3.5's chat template, with a `reasoning_prefill` that lets text open the model's own reasoning. |
+| `play` | The player: a row's rounds through the benchmark's runner on the node's model server, one round a call, with the settings every row plays under (the harness, the action budget, the sampling, the window). The schedule and its cuts (`full_schedule`, `schedule_cut`, `epilogue_cut`, `wide_epilogue_cut`); each game saved as it ends under its round's `captured/` (`save_instance_hook`); H0's wipe before every round. Command line: one round of a row (`paper.sh`). |
+| `references` | The reference rows with the model on OpenRouter: the two players, the harness rows (H, H0, HPL, HG, HA, HPL0, HPLG, HGPL; `hand_storage` gives a storer the turn after each verdict) and the bare-model rows (DC, F, M, M0; `keep_library` carries row M's memory between rounds). Command line: every round not yet played (`reference.sh`). |
+| `memory` | A round's memory-use counters: each user's harness state snapshotted and diffed against the round before by area (programs, skills, the harness's store, notes, scratch), the reads of each area in the round's calls, and whether a game reused a saved program or solved without a demo; written to the round's `memory.json`. Command line: a round's summary line (`paper.sh`). |
+| `frozen` | The two frozen tests: each test user seeded from its stream user's end-of-stream state (forked from a state log by the baselines' seeding, or copied with every path renamed, SQLite rows included), a trained run's test played on its server, a reference row's through its own player, a reference from nothing, a run's weights alone; the summary. Command line: `model`, `play`, `summary` (`frozen.sh`, `ref-tests.sh`). |
 
-## Play
+### The model calls and the server
 
-| File | What it does |
+| Module | What it does |
 | --- | --- |
-| `loop.py` | The plays every row shares: schedules, prime-agent's play of a served model with every call captured, the harness settings (`HARNESS`, `HARNESS_BUDGETS`: `default` is prime-agent's own budget, `block` the 40-call cap with the seconds raised close to the 1,800 s ceiling), the replay of recorded games (`replay_proxy`, for a round taken up from its last call), Qwen3.5's adapter-serving fix (`served_adapter`, `vllm-adapter`), and the paired comparison of two plays. |
-| `paper.py` | One round of a row through the benchmark's runner (`play_round`, over `schedule_cut`, every instance captured under the round's own folder), the served-adapter check (`check-served`), the schedules (`full_schedule`, `served`, the epilogue's cuts), the rows' settings, and the resume from a round's last call (`Resume`, off: `RESUME_CALLS = False`). |
-| `paper.sh` | The synchronous driver of one row on the node (H0, H, the bare model or PG): serve, check, play round r and, for PG, train it, every stage marked. |
-| `memory.py` | Per-round memory-use counters for every row: a user's harness state diffed against the round before, by area (`programs/`, skills, the harness's notes, the rest), and a round's games scanned for a read of what was kept; `round_report` writes `rounds/rNNNN/memory.json`. |
-| `render.py` | A play made readable (every game in full, a sample, and counts); its parsing of calls and actions is what the rows' code reads games with. |
+| `calls` | A play's model calls as training reads them (`Call`: the request, the prompt's ids as the server tokenised them, the reply's ids as it sampled them), read back from a play's captured games with each instance's outcome and cost (`load_calls`); the agent's own calls told apart from prime-agent's internal ones; a prompt rendered locally exactly as vLLM 0.30 renders it (`render_prompt_ids`); more replies drawn at a call's prompt (`resample`). |
+| `server` | The model server as the rows talk to it: the client, with retries and an adapter loaded again after a restart (`Server`); the copy of an adapter under the checkpoint's names that vLLM loads (`served_adapter`); the check that a served name answers from its adapter's weights (`check_served_adapter`). Command line: `vllm-adapter`, the folder vLLM should load an adapter from (`lib.sh`). |
 
-## Labels
+### Labelling
 
-| File | What it does |
+| Module | What it does |
 | --- | --- |
-| `forward.py` | Labelling every call of a play: `points` (every student call as a labelling point), `label` (the oracle's reply at each, with its working rules at the end of the latest message and its reasoning required, asked again with a note saying what went wrong), `label-set` (each label as the student writes it), `split` (one game in `--hold-every` held out, `held_game`), `spent` and `game-measures`. |
-| `dagger.py` | DAgger's data: a point's id (`point_id`, so a label is never read for another game's call), the student's target from the oracle's reply (`student_message`, `makes_move`), the replay dose (`replay_plan`), and the earlier experiments' training sets and reports. |
-| `expert.py` | The oracle's client (`Expert`), which `forward.py label` asks through the relay; in the earlier experiments it also played the student's call right after each failure, inside the student's own game (DAgger's takeover). |
-| `expert_relay.py` | The oracle's endpoint for the labeller: a proxy on the same machine that forwards to OpenRouter with the key it alone holds, pinned to one model and its hosts. |
-| `oracle_hint.py` | `oracle_rules` and `library_rules`, the working rules the trained rows' oracle labels under (c1 and the program library's procedure, or c1 alone); and the earlier experiments' hinted plays. |
-| `rules/c1.md`, `rules/c1e.md` | The playing rules. `c1` is what the trained rows' oracle reads; `c1e` replaces c1's first two rules with facts about the harness's limits and is not used by the paper's rows. |
+| `oracle` | The oracle: its relay to OpenRouter, which alone holds the key and pins every request to one model and its hosts (`relay`); its client (`Oracle`); its working rules (`oracle_rules`); one point's label, asked again with a note when the reply names the rules, has no reasoning or makes no move (`ask_label`). Command line: `relay` (`realtime.sh`). |
+| `labeller` | DAgger's and OPSD's labels: every call the student made as the agent as a point (`points`), the oracle's reply at each under the working rules and the round's budget (`label`), the label set rendered as the student writes each label (`label_set`, `student_message`, `render_reply`), and its split into a training side and a held-out side (`split`, `held_game`). |
+| `rules/c1.md` | The playing rules the oracle labels under. |
 
-## The frozen tests and the references
+### Training
 
-| File | What it does |
+| Module | What it does |
 | --- | --- |
-| `frozen.py` | The two frozen tests after a run's stream: `seed` (each test user from stream user i mod U's end-of-stream memory, its paths renamed, forked from its state log where the run keeps one), `play` (one round of 100 users through `paper.play_round`; `--player` for a reference row on OpenRouter, `--reference` and `--row` from an empty state, `--no-memory` for the weights alone), `model` and `summary`. |
-| `frozen.sh` | A trained run's two tests on its own node once its stream has ended: two model servers on half of the GPUs each, the run's last phase loaded into both, both tests played side by side, then `summary.json`. `ROW` plays a reference from nothing; `ADAPTER`/`SERVED` another adapter; `MEMORY=none` the weights alone. |
-| `frozen-launch.sh` | Copies the tools to a node and starts `frozen.sh` there, from another machine. |
-| `refs.sh`, `refs-launch.sh` | The trained rows' references on the same stack, rows h0 and bare from nothing on both tests, played on a trained run's node once its tests are done, on a copy of the current code. |
-| `reference.py` | The reference rows on OpenRouter, played as `paper.play_round` plays a row: `play` for the harness rows (h, h0, hpl, hg, ha, hpl0, hplg, hgpl) and `bare` for the bare-model rows (dc, f, m, m0), each for GLM-5.3 Flash or Qwen3.5-9B. |
-| `reference.sh` | Keeps one reference row going on a reference machine, restarting `reference.py` when it stops. |
-| `ref-tests.sh` | Every reference row's two frozen tests, on a worker that copies each row's memory from its machine, plays the tests with the row's own player and copies them back. |
-| `schedules/` | The paper's two test schedules (`arc1-small` at seed 0, as the benchmark's `configs.test_schedule` makes them), and the 100 validation puzzles of the earlier experiments with their aliases (`validation/`). |
+| `realtime` | The real-time driver of the trained rows: the player loop (each round on phase r-1-LAG's adapter, served and checked), the labeller loop, and the trainer loop, which runs each phase in a `train` process on the GPUs the node's pool gives the run; the dose, the held-out games, PG's behaviour log-probabilities, pruning. Command line: `player`, `labeller`, `trainer`, `train` (`realtime.sh`). |
+| `phase` | A training phase, the same for every trained row but for its update: its steps planned before the first (`plan`), the held-out stop, the step checkpoints and the phase's record on disk (`fit`); the trainer it runs on (`make_trainer`). |
+| `updates` | The three updates: `Imitation` (DAgger), `SelfDistillation` (OPSD, with the student it publishes after every step, `LiveAdapter`, and its fresh replies, `draw`) and `PolicyGradient` (PG); the items each trains on (`sft_items`, `distill_items`, `pg_items`) and PG's behaviour log-probabilities (`behaviour_logps`, `attach_behaviour`). |
+| `chains` | A game's calls as chains: calls whose prompts each extend the last, read in one pass with each reply a branch at its prompt's end (`TokenItem`, `ChainItem`, `find_chains`); pieces that fit the window (`chain_pieces`, `distill_pieces`); a pass's steps built from whole chains (`chain_batches`). |
+| `trainer` | The LoRA trainer: its training passes over chains (`sft_chains`, `distill_chains`, `policy_gradient_chains`), their forward-only scores (`nll_chains`, `distill_scores_chains`, `policy_gradient_scores_chains`), the behaviour log-probabilities (`behaviour_logps_chains`), the optimizer step, and the adapter saved and loaded with its optimizer's moments. |
+| `branching` | A chain through the model in one pass: its packed sequence and attention mask (`pack`, `block_mask`), and the Gated DeltaNet layers made branch-aware, each branch read from the trunk's memory at its point (`install`, `active`, `branch_forward`). |
+| `kernels` | The trainer's two departures from the model's own code on a GPU: attention under a chain's block mask (`chain_attention`) and the adapter's matmuls in bfloat16 (`bf16_lora`). |
+| `parallel` | Data parallelism: a trainer as one rank of a group (`DataParallelRank`, which `Trainer` inherits: the deal by cost, the gathering, the gradient sum, the check that every rank holds the same adapter) and the trainer's methods over several GPUs from one process (`DataParallelTrainer`, with one worker process per other GPU). |
+| `checkpoints` | A phase's step checkpoints: written on SIGTERM and every 25 steps, committed on a thread of their own, the best and the newest kept; a phase resumes only from its own (`fingerprint`) and on batches that replay as recorded. |
+| `gpupool` | The trainer GPUs real-time runs on one node share: an even split among the runs with a phase to train, agreed through one state file under an flock. |
+| `stack` | The kernels Qwen3.5's linear-attention layers train through on a machine, written to a run's `train/kernels.json`, and a stop before training on a stack known to compute wrong gradients. Command line: this machine's stack. |
+| `scratch` | Training once at the end: a DAgger run's phase K trained again from the base model, and the summary comparing both adapters' held-out loss and frozen tests. Command line: `train`, `summary` (`scratch.sh`). |
+| `schedules/` | The two frozen tests' schedules for `arc1-small` at seed 0, the benchmark's own. |
 
-## At the stream's end
+## The scripts (`scripts/`)
 
-| File | What it does |
+| Script | What it does |
 | --- | --- |
-| `scratch.py` | The from-scratch retrain: DAgger's phase K trained from the base model on the run's own label sets, through the run's own `realtime.py` and `train.py`, and `summary` comparing it with the continual student. |
-| `scratch.sh` | On a DAgger run's node once its runs and tests are done: the weights-alone tests, the retrain, both adapters on the validation puzzles, the fresh adapter's frozen tests, the summary; each stage marked. |
-| `scratch-launch.sh` | Copies the tools and the continual student's phase-K adapter (from the run's backup in a bucket) to the node and starts `scratch.sh`. |
-| `grid-vals.sh` | Several adapters' plays of the validation puzzles at once on one node, a server each, then their per-game measures. |
+| `lib.sh` | What the node scripts share: the folders (`PRIME_RL`, `VLLM_VENV`, `RUNS`, `BASELINES`), the model and its server's arguments, the server's health check and stop, the adapter folder vLLM loads. |
+| `realtime.sh` | One trained row on one node: the relay and the server kept up, the driver's loops run side by side and restarted when they die. |
+| `serve.sh` | The stream's model server on :8101, started as asked unless it already serves so, and adapters loaded into it. |
+| `vllm-serve.sh` | A vLLM server from its own environment (installed on first use), up when it answers `/health`. |
+| `frozen.sh` | A run's two frozen tests on its node once its stream has ended, each on a server of its own; or a reference from nothing (`ROW`), or the weights alone (`MEMORY=none`). |
+| `refs.sh` | The trained rows' references from nothing (rows h0 and bare) once a run's own tests are done. |
+| `paper.sh` | Row H0 or the bare model round by round on the node's own vLLM. |
+| `reference.sh` | One reference row kept going until its stream is played. |
+| `ref-tests.sh` | Every finished reference row's frozen tests, a few rows at once. |
+| `scratch.sh` | Training once at the end of a DAgger run, with its weights-alone tests. |
 
-## Reading the rows
+## The tests (`tests/`)
 
-| File | What it does |
-| --- | --- |
-| `plot_rows.py` | The rows against each other from their run folders, partial runs included: per-round cost and solve rate, cost by a user's k-th exposure to a task (the benchmark's own `metrics.cost_by_user_exposure`), training curves from `phase.json` and the memory counters. One PNG and one CSV per figure. |
-| `paper_compare.py` | A row's learning curve beside the paper's baseline runs, read from a checkout of the run records ([continual-arc-runs](https://github.com/unifyai/continual-arc-runs)). |
-| `paper_backup.sh` | Backs a run up from its node while it runs: its small files to a local folder by one filtered rsync, and with `GCS=1` the whole run from the node to a bucket of yours. |
-| `gcs_upload.py` | Uploads a folder from the node straight to a bucket with a short-lived token read on stdin, each file checked by MD5, a rerun sending only what changed. |
-
-## Code of the earlier experiments that the rows import
-
-The rows import these modules, so they are here; the scripts and records of the experiments they were written for
-(Sep-Oct 2026, before the paper's rows) are not.
-
-| File | What it does |
-| --- | --- |
-| `overfit.py`, `overfit_expert.py`, `overfit_cards.json` | The recall overfit: could on-policy distillation write five puzzles' rules into the base model? `oracle_hint.py` reads captured plays with `overfit.read_docs` and `agent_calls`. |
-| `probe.py` | The same-state replay probes of the moments the student was stuck; `overfit.py` uses its `check_program`. |
-| `analysis/trend.py` | Per-play behaviour counts, which `probe.py` imports. |
-
-## Tests
-
-Run them from this folder with `python -m pytest` (the Python tests) and `bash test_frozen.sh` and
-`bash test_paper_backup.sh` (the shell tests); the README says what each needs.
-
-| File | What it tests |
-| --- | --- |
-| `test_realtime.py` | The three loops' file handshakes, the lag, the warm-up, the doses, the oracle's rules kept to the end, `realtime.sh`'s settings and launch lines. |
-| `test_train_chains.py`, `test_train_records.py`, `test_dev_loop.py` | How `train.py` finds chains and builds steps, `pg_items`, `opd_items`, `plan`, and what a policy-gradient step keeps in `phase.json`. |
-| `test_checkpoint.py` | Step checkpoints: written whole, resumed on the same batches, refused when they do not match the phase. |
-| `test_gpupool.py`, `test_fleet.py` | The pool's split and the trainer's decisions over it, and fleet.py's profile, simulator and planner. |
-| `test_kernel_stack.py` | The stop on a stack with wrong gradients, and `kernels.json`. |
-| `test_scratch.py` | The retrain's summary: both adapters' held-out loss and their plays compared instance by instance. |
-| `test_paper.py` | `paper.py`'s schedule cuts, the round-sharded capture, a round's training reading its own games, the served-adapter check against a fake server, the resume from the last call, and `paper.sh`'s shell logic. |
-| `test_reference.py` | The reference rows' settings and players. |
-| `test_frozen.py`, `test_frozen.sh` | The frozen tests' seeding (paths renamed in text files, links and SQLite rows), the summary, the schedules against the benchmark's own; `frozen.sh` end to end in a fake home. |
-| `test_loop.py`, `test_memory.py`, `test_plot_rows.py`, `test_paper_compare.py` | The shared play code, the memory counters, the plots and the comparison, on synthetic runs. |
-| `test_forward.py`, `test_dagger.py`, `test_oracle_hint.py`, `test_c1_loader.py` | Labelling, the expert's trigger and view, DAgger's helpers and phases, the hinted plays' checks, and c1's grid loader (an earlier instance's log beside the current one). |
-| `test_overfit.py` | The earlier overfit test's schedules, its cards' programs on fresh Re-ARC pairs, and its report. |
-| `test_gcs_upload.py`, `test_paper_backup.sh` | The uploader against a fake bucket on localhost, and the backup against a fake node. |
+One test module per module, each on hand-made data with play, the oracle, the server and training faked where they
+would need a network or a GPU. `test_trainer.py` and `test_parallel.py` run the real trainer on a tiny random Qwen3.5
+on the CPU and compare every pass over a chain with the same quantities computed directly, call by call;
+`test_frozen.py` and `test_scripts.py` run the node scripts in a fake home with every node tool stubbed; `fakes.py`
+holds the tokenizers and games the tests share.

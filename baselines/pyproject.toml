@@ -35,7 +35,7 @@ arc-baselines = "continual_arc_baselines.cli:main"
 allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/continual_arc_baselines", "src/continual_workbench"]
+packages = ["src/continual_arc_baselines"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -44,11 +44,7 @@ addopts = "-q"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["src/continual_workbench"]  # the workbench's modules as it ships them, under its own lint settings
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
-
-[tool.ruff.lint.isort]
-known-third-party = ["continual_workbench"]

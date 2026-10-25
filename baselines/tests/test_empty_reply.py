@@ -1,8 +1,8 @@
-"""An empty reply under ``empty_reply="reprompt"`` (every launch since 28 Sep 2026): an unusable reply like any other,
-re-prompted in the same conversation, and a restart only for a system that is dead, silent, or has answered nothing for
-longer than one action's re-prompts. Cells launched before keep "restart". The contract every adapter is held to before
-a launch: a turn with no text and a failed model call are each re-prompted, not restarted, and the turn log says how the
-turn ended (``outcome``)."""
+"""An empty reply under ``empty_reply="reprompt"``: an unusable reply like any other, re-prompted in the same
+conversation, and a restart only for a system that is dead, silent, or has answered nothing for longer than one action's
+re-prompts; under "restart", the paper's earliest cells' rule, a restart. The contract every adapter is held to: a turn
+with no text and a failed model call are each re-prompted, not restarted, and the turn log says how the turn ended
+(``outcome``)."""
 
 import json
 import sqlite3

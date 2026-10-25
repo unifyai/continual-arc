@@ -12,13 +12,16 @@ The system starts as a blank slate: every bundled skill is blocked
 (``OPENCLAW_SKIP_CHANNELS``), and the workspace holds no memory files until the
 system writes them.
 
-Self-improvement in openclaw is two mechanisms, both switched by
-``self_improve``: the skill workshop's autonomous mode (``"auto"`` captures
-reusable workflows from conversations into skills and applies them, ``"off"``
-never captures) and dreaming (background memory consolidation that promotes
-session material into ``MEMORY.md``). Row H0 runs with both off, row H1 with
-both on. ``refine()`` additionally sends ``/learn`` and applies any pending
-workshop proposals, for an explicit cadence on top of the autonomous mode.
+Self-improvement in openclaw is two mechanisms, both on: the skill workshop's
+autonomous mode, which captures reusable workflows from conversations into
+skills and applies them, and dreaming, a background consolidation that promotes
+session material into ``MEMORY.md``, swept hourly. ``refine()`` additionally
+sends ``/learn`` and applies any pending workshop proposals, for an explicit
+cadence on top of the autonomous mode (``refine_every``).
+
+The ACP bridge drives one fixed session (:data:`BRIDGE_KEY`) and takes up its
+conversation at every start, so every instance opens with openclaw's own
+``/reset`` (:meth:`OpenClawLearner.new_session`).
 
 Install: ``curl -fsSL https://openclaw.ai/install-cli.sh | bash`` (gives
 ``openclaw`` on PATH), or a built checkout run as ``node openclaw.mjs``; pass
@@ -78,8 +81,8 @@ def settle_bridge_session(openclaw_dir: Path) -> str | None:
     aborted, then starts it again). It exempts only session keys with an ``acp`` segment, which the
     bridge's key lacks, so the bridge session is replayed like a chat, and the replay holds the session
     when the adapter's first prompt arrives: the prompt gets an empty reply, the adapter restarts, the
-    gateway goes down before the replay ends, and every boot replays it again. Row H then gave up every
-    instance (26 Sep). A restart in the protocol starts afresh, and the
+    gateway goes down before the replay ends, and every boot replays it again, so that every instance
+    is given up. A restart in the protocol starts afresh, and the
     adapter drives no gateway while this runs (before every start), so it closes the run as a clean stop
     leaves it: status done, abortedLastRun false, an end time, and no recovery cycle.
     """
@@ -123,8 +126,8 @@ class OpenClawLearner(ACPSystemLearner):
     def turn_diagnostics(self, started_at: float) -> dict[str, Any]:
         """How openclaw's last run in the bridge session ended (``harness_stop_reason``, ``harness_error``) and how many
         subagent sessions it opened since ``started_at``, read from its agent database. Its ACP bridge reports a run that
-        failed as an ordinary end_turn, and a subagent's answer stays in the subagent's session (28 Sep: of 177 empty
-        replies in the persistent cells, 70 turns whose work had gone to subagents and 63 failed runs)."""
+        failed as an ordinary end_turn, and a subagent's answer stays in the subagent's session: most of openclaw's
+        empty replies are a turn whose work went to subagents or a run that failed."""
         if not self.agent_db.exists():
             return {}
         out: dict[str, Any] = {}
@@ -162,11 +165,11 @@ class OpenClawLearner(ACPSystemLearner):
         self._port: int | None = None
         self._config_checked = False
         self._token = secrets.token_hex(16)
-        # memory_search configures openclaw's memory search explicitly (MEMORY_SEARCH); off, it is left unset, as the
-        # grid cells of 27 and 28 Sep ran it. Unset, openclaw asks for OpenAI embeddings the sandbox cannot reach,
-        # builds a keyword index instead and later refuses searches against it ("index was built for model fts-only,
-        # expected text-embedding-3-small"), and memory_search over session transcripts answers "Session transcript
-        # search is not enabled." (18 of the 23 memory searches at low effort, H-openclaw-luna6-low-ws0, 29 Sep).
+        # memory_search configures openclaw's memory search explicitly (MEMORY_SEARCH), as the grid's rows HA, HPL
+        # and HPL0 run it; off, it is left unset, as rows H and H0 run it. Unset, openclaw asks for OpenAI embeddings
+        # the sandbox cannot reach, builds a keyword index instead and later refuses searches against it ("index was
+        # built for model fts-only, expected text-embedding-3-small"), and memory_search over session transcripts
+        # answers "Session transcript search is not enabled."
         self.memory_search = memory_search
         super().__init__(model=model, **kwargs)
 
@@ -236,9 +239,9 @@ class OpenClawLearner(ACPSystemLearner):
 
     def check_config(self) -> None:
         """Refuse to run on an openclaw that rejects this config. Its gateway exits on a key it does not know, and
-        the adapter then sees only a closed connection at every start, so every action becomes a forced give-up
-        (2026.10.5 dropped ``skills.workshop.approvalPolicy`` with the workshop's proposals, and every action of a run
-        on it was given up that way). Checked once a run, in the environment the system runs in."""
+        the adapter then sees only a closed connection at every start, so every action would become a forced give-up
+        (release 2026.10.5 rejects ``skills.workshop.approvalPolicy``). Checked once a run, in the environment the
+        system runs in."""
         out = subprocess.run([*self.command, "config", "validate"], capture_output=True, text=True, timeout=120,
                              check=False, env=self.child_env())
         if out.returncode != 0:
@@ -258,11 +261,11 @@ class OpenClawLearner(ACPSystemLearner):
             # At every boot the gateway and then the ACP bridge run openclaw's "repair missing
             # configured plugin installs" step, which asks npm for the Perplexity web-search plugin.
             # The sandbox has no route to the registry (private network namespace; only the bridge
-            # to the proxy), so each attempt failed on DNS and then walked npm's retry ladder: two
-            # packages, two retries each with backoff, about 70 s per process, 140 s per boot, which
-            # was nine tenths of row H0's time between instances (measured 23 Sep, 158 s of which
-            # 140 s npm). One attempt, no retries: the same outcome ("continuing with degraded
-            # state") in about a second. Nothing the agent does with npm can succeed either way.
+            # to the proxy), so each attempt fails on DNS and then walks npm's retry ladder: two
+            # packages, two retries each with backoff, about 70 s per process, 140 s per boot, most of
+            # a stateless row's time between instances. One attempt, no retries: the same outcome
+            # ("continuing with degraded state") in about a second. Nothing the agent does with npm
+            # can succeed either way.
             "npm_config_fetch_retries": "0",
             "npm_config_fetch_retry_mintimeout": "1000",
             "npm_config_fetch_retry_maxtimeout": "1000",
@@ -310,9 +313,10 @@ class OpenClawLearner(ACPSystemLearner):
         """openclaw's own in-place session reset (``/reset``): the model's context starts again after it, while the
         session key, workspace, memory files and skills stay. openclaw marks the reset with a ``reset`` event in the
         same session window, whose earlier events it keeps (all ``context_eligible``), so the agent database shows one
-        unbroken conversation. The bridge runs on one fixed session key, so an ACP ``session/new`` would reattach to
-        the same conversation, as every start does; that is why every instance's first message waits for this, the
-        first instance a learner made anew plays (a frozen test's user, a cell resumed) included."""
+        unbroken conversation: a conversation's extent is read from its ``reset`` events, or from the proxy's prompt
+        sizes. The bridge runs on one fixed session key, so an ACP ``session/new`` would reattach to the same
+        conversation, as every start does; that is why every instance's first message waits for this, the first after
+        any start included (a run resumed, every instance of a frozen test, a test user forked from the stream)."""
         self.ask("/reset")
         self._roll_usage()
         self._fresh_session = True

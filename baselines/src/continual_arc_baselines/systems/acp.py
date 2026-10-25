@@ -1,10 +1,10 @@
 """Systems that speak the Agent Client Protocol (ACP) over stdio.
 
-hermes-agent, openclaw and opencode each ship an ACP server: one long-running
-process, one JSON-RPC session, one ``prompt`` per turn, and the reply streamed
-back as ``agent_message_chunk`` updates. This module holds everything those
-three adapters share; each subclass says only how to launch its system, which
-files to write for it, and which of its state to wipe.
+hermes-agent and openclaw each ship an ACP server: one long-running process,
+one JSON-RPC session, one ``prompt`` per turn, and the reply streamed back as
+``agent_message_chunk`` updates. This module holds everything their adapters
+share; each subclass says only how to launch its system, which files to write
+for it, and which of its state to wipe.
 
 The transport is the ``agent-client-protocol`` package (the same one the
 verifiers harnesses use for RL rollouts, so a system runs the same way in the
@@ -35,10 +35,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from continual_arc_baselines import secrets
-from continual_arc_baselines.systems.base import SystemLearner, SystemUnavailable
+from continual_arc_baselines.proxy import OPENROUTER
+from continual_arc_baselines.systems.base import SystemLearner, SystemUnavailable, remove
 from continual_arc_baselines.systems.protocol import BUDGET_NOTICE
 from continual_arc_baselines.systems.sandbox import (
+    INHERITED_ENV,
+    KEY_VARIABLE,
+    PROXY_ENV,
     SandboxSpec,
     darwin_user_dirs,
     default_mask_paths,
@@ -51,20 +54,6 @@ from continual_arc_baselines.systems.sandbox import (
 )
 
 log = logging.getLogger(__name__)
-
-OPENROUTER = "https://openrouter.ai/api/v1"
-KEY_VARIABLE = "ARC_LLM_API_KEY"
-INHERITED_ENV = ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
-PROXY_ENV = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENAI_API_KEY", "OPENROUTER_BASE_URL",
-             "OPENROUTER_API_KEY", "ARC_LLM_BASE_URL")
-
-
-def _remove(path: Path) -> None:
-    if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
-    else:
-        path.unlink()
-
 
 def free_port() -> int:
     import socket
@@ -209,7 +198,7 @@ class ACPSystemLearner(SystemLearner):
         self._usage = {"input": 0, "output": 0, "turns": 0, "tool_calls": 0}
         # ACP's PromptResponse.usage is the session total across all turns (schema: "Total input
         # tokens across all turns"), not the turn's own; _usage_seen is the latest total of the
-        # current session and _usage_base what earlier sessions of this cell reported.
+        # current session and _usage_base what earlier sessions of this run reported.
         self._usage_base = {"input": 0, "output": 0}
         self._usage_seen = {"input": 0, "output": 0}
         self._version: str | None = None
@@ -263,7 +252,7 @@ class ACPSystemLearner(SystemLearner):
         return self.environ.get("ARC_LLM_BASE_URL") or OPENROUTER
 
     def api_key(self) -> str:
-        return self.environ.get(KEY_VARIABLE) or secrets.get("OPENROUTER_API_KEY", default="")
+        return self.environ.get(KEY_VARIABLE) or os.environ.get("OPENROUTER_API_KEY") or ""
 
     # -- diagnostics ---------------------------------------------------------
 
@@ -298,7 +287,7 @@ class ACPSystemLearner(SystemLearner):
             reads.append(root)
         reads += self.extra_read_paths()
         reads += [Path(p).expanduser() for p in self.sandbox_read_paths]
-        reads.append(self.workdir / "netbridge.py")  # the sandbox half of the proxy bridge, inside the masked workbench
+        reads.append(self.workdir / "netbridge.py")  # the sandbox half of the proxy bridge, inside the masked attempt
         for path in list(reads):
             reads += package_manager_roots(path)
         parsed = urlparse(self.base_url())
@@ -574,7 +563,7 @@ class ACPSystemLearner(SystemLearner):
         for child in self.state_dir.iterdir():
             if child.name in keep:
                 continue
-            _remove(child)
+            remove(child)
 
     def describe(self) -> dict[str, Any]:
         return {**super().describe(), "system_version": self.version(), "model": self.model,

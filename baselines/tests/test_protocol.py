@@ -169,7 +169,7 @@ def test_parse_does_not_read_prose_as_an_action():
 
 
 def test_demonstrations_are_numbered_across_requests_and_padding_says_what_it_is():
-    """One pair per request since 26 Sep: the third request's pair is demo pair 3, and a padded pair (a transformed copy
+    """One pair per request: the third request's pair is demo pair 3, and a padded pair (a transformed copy
     of one of the task's own pairs) is introduced by its note before its grids."""
     from continual_arc.env import DemosFeedback
 

@@ -28,10 +28,10 @@ from pathlib import Path
 from continual_arc.aliases import SALT_FILE
 from continual_arc.schedule import Schedule
 
-from continual_arc_baselines.evidence import Evidence
+from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.statelog import GIT_ENV, _git, commit_of, restore
 
-# Arguments of the old launch that fork replaces: where its schedule came from, its run directory, its pilot stop.
+# Arguments of the old launch that fork replaces: where its schedule came from, its run directory, its --stop-after.
 _DROPPED = {"--config": 1, "--mode": 1, "--seed": 1, "--schedule": 1, "--out": 1, "--stop-after": 1, "--resume": 0}
 
 
@@ -58,8 +58,8 @@ def fork(run_dir: str | Path, round_index: int, out_dir: str | Path, schedule: S
     commit = commit_of(source / "state-log.jsonl", round_index)
 
     # A new attempt, named as the old one was (``.workbench/runs/adhoc-<name>-<stamp>/attempts/<id>``).
-    evidence = Evidence.from_environment(name=re.sub(r"^adhoc-|-\d+$", "", source.parent.parent.parent.name))
-    target = evidence.directory / "system"
+    attempt = Attempt.from_environment(re.sub(r"^adhoc-|-\d+$", "", source.parent.parent.parent.name))
+    target = attempt.directory / "system"
     target.mkdir(parents=True, exist_ok=True)
     repo = target / "state.git"
     subprocess.run(["git", "clone", "--quiet", "--bare", str(source / "state.git"), str(repo)],
@@ -76,7 +76,7 @@ def fork(run_dir: str | Path, round_index: int, out_dir: str | Path, schedule: S
     (out_dir / "records.jsonl").write_text("".join(line + "\n" for line in lines[:carried]))
     (out_dir / SALT_FILE).write_text((run_dir / SALT_FILE).read_text())
     new.save(out_dir / "schedule.json")
-    (out_dir / "attempt.json").write_text(json.dumps({"attempt_dir": str(evidence.directory)}))
+    (out_dir / "attempt.json").write_text(json.dumps({"attempt_dir": str(attempt.directory)}))
     (out_dir / "fork.json").write_text(json.dumps({"from": str(run_dir.resolve()), "round": round_index,
                                                    "commit": commit, "records": carried}, indent=1))
 

@@ -1,6 +1,6 @@
 """The Linux sandbox (systems/sandbox.py, bubblewrap) as an allowlist: every home directory and the host's temporary
-directory hidden whole, and only what the system is declared to need bound back (25 Sep 2026: under the old
-denylist a harness read other runs' transcripts in ~/runs)."""
+directory hidden whole, and only what the system is declared to need bound back, so that a harness cannot read other
+runs' transcripts wherever they lie."""
 
 import os
 import platform
@@ -88,9 +88,9 @@ def test_inside_the_sandbox_only_the_declared_paths_exist(tmp_path):
 
 def test_a_bridge_returns_once_its_own_socket_exists_not_one_an_earlier_bridge_left(tmp_path):
     """An adapter may start a bridge for every session in the same private directory, and an ended bridge
-    leaves its socket file. start_bridge found that file at once and bubblewrap then raced the new bridge, which
-    removes it before binding its own (27-28 Sep: "bwrap: Can't bind mount .../proxy.sock ... No such file
-    or directory"). When start_bridge returns, the file must be the new bridge's socket, and it must reach the proxy."""
+    leaves its socket file. Were start_bridge to find that file at once, bubblewrap would race the new bridge, which
+    removes it before binding its own ("bwrap: Can't bind mount .../proxy.sock ... No such file or directory"). When
+    start_bridge returns, the file must be the new bridge's socket, and it must reach the proxy."""
     proxy = socket.create_server(("127.0.0.1", 0))  # stands in for the tracking proxy
     short = Path(tempfile.mkdtemp(prefix="arc-t-", dir="/tmp"))  # UNIX socket paths must be short
     sock_path = short / "proxy.sock"

@@ -14,8 +14,8 @@ import continual_arc
 import pytest
 from continual_arc.schedule import stream_schedule
 from continual_arc.testing import FakeSource
-from continual_workbench.context import create_context
 
+from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.cli import main
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
 from continual_arc_baselines.systems.hosted import (
@@ -131,13 +131,13 @@ def run_hosted(tmp_path, monkeypatch, upstream, kwargs: dict, n_slots: int = 6):
     tmp_path.mkdir(parents=True, exist_ok=True)
     sched = tmp_path / "schedule.json"
     stream_schedule(source.task_ids(), n_slots, seed=1, source=source.name).save(sched)
-    context = create_context(tmp_path / "wb", "hosted", {"experiment_id": "t", "project_key": "t"})
+    context = Attempt.create("hosted", root=tmp_path / "wb")
     monkeypatch.setenv("WORKBENCH_RUN_DIR", str(context.directory))
     monkeypatch.setenv("OPENROUTER_API_KEY", SECRET)
     monkeypatch.setenv("ARC_TEST_SECRET", SECRET)  # in this process's environment, never in the learner's
     code = main(["run", "--learner", "continual_arc_baselines.systems.hosted:HostedLearner",
                  "--learner-kwargs", json.dumps(kwargs), "--schedule", str(sched),
-                 "--registry", "continual_arc_baselines.testing:fake_registry",
+                 "--registry", "tests.fixtures:fake_registry",
                  "--upstream", upstream.base_url, "--quiet"])
     assert code == 0
     system = context.directory / "system"
@@ -228,7 +228,7 @@ def test_a_hosted_learner_plays_its_test_from_the_memory_its_stream_left(tmp_pat
                  "--learner-kwargs", json.dumps({"python": sys.executable, "learner": "toy_submission:Learner",
                                                  "code": str(code), "sandbox": "none"}),
                  "--schedule", str(tmp_path / "schedule.json"), "--test", str(tmp_path / "test.json"),
-                 "--registry", "continual_arc_baselines.testing:fake_registry", "--upstream", upstream.base_url,
+                 "--registry", "tests.fixtures:fake_registry", "--upstream", upstream.base_url,
                  "--out", str(out), "--quiet"]) == 0
     stream = [json.loads(line) for line in (out / "records.jsonl").read_text().splitlines()]
     assert_learned(stream)
@@ -343,7 +343,7 @@ def test_a_learner_that_keeps_its_state_in_files_plays_its_test_one_instance_at_
                  "--learner-kwargs", json.dumps({"python": python, "learner": "file_toy:FileLearner",
                                                  "code": str(code), "sandbox": backend}),
                  "--schedule", str(tmp_path / "schedule.json"), "--test", str(tmp_path / "test.json"),
-                 "--registry", "continual_arc_baselines.testing:fake_registry", "--upstream", upstream.base_url,
+                 "--registry", "tests.fixtures:fake_registry", "--upstream", upstream.base_url,
                  "--out", str(out), "--quiet"]) == 0
     assert_learned([json.loads(line) for line in (out / "records.jsonl").read_text().splitlines()])
     play = out / "frozen" / "seen" / "play"

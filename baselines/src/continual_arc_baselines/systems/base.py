@@ -1,33 +1,31 @@
-"""The adapter base: one conversation with one long-running system.
+"""The adapter base: one conversation at a time with one long-running system.
 
-Subclasses implement how to start, prompt, reset and stop the system. The base
-handles the benchmark side: rendering observations, delivering feedback,
-parsing actions, re-prompting on protocol violations, restarting a system that
-stops answering, and wiping state on ``reset``. It counts nothing; usage comes
-from the proxy.
+Subclasses implement how to start, prompt, reset and stop the system. The base handles the benchmark side: rendering
+observations, delivering feedback, parsing actions, re-prompting on protocol violations, restarting a system that stops
+answering, and wiping state on ``reset``. It counts nothing; usage comes from the proxy.
 
-A system sees what the runner shows every learner: the instance alone, its task
-under the run's name (``task-<hex>``, :mod:`continual_arc.aliases`), which the
-adapter passes on as it is.
+A system sees what the runner shows every learner: the instance alone, its task under the run's name (``task-<hex>``,
+:mod:`continual_arc.aliases`), which the adapter passes on as it is.
 
-One policy lives here because it applies to every system: **a system failure
-costs one action, not the run.** If the system cannot be brought back after
-``max_restarts`` restarts, the action becomes a give-up, counted in
+One policy lives here because it applies to every system: **a system failure costs one action, not the run.** If the
+system cannot be brought back after ``max_restarts`` restarts, the action becomes a give-up, counted in
 ``system_forced_give_ups``, and the run continues.
 
-Every turn the adapter logs (``turns.jsonl``) carries how it ended when the adapter knows it
-(``outcome``: the harness's stop reason and its own error message), and a launch since 28 Sep
-re-prompts an empty reply rather than restarting the system (``empty_reply``).
+Every instance begins as every other does, whichever process plays it (:meth:`SystemLearner._begin_instance`): a
+stateless system is wiped before it, and any other has a conversation opened for it before its first message, after
+whatever start or restart that message needs. A start alone does not give one, since openclaw's ACP bridge takes up at
+every start the one conversation its state holds, and a learner is often made anew on a state an earlier process left:
+a run resumed, a frozen test played from the stream's state, a test user forked from the stream's last commit.
 
-Everything a system keeps between instances lives under its state directory (``state_dir``). A frozen test plays
-every instance from the state the stream left there: :meth:`SystemLearner.freeze` makes each reset put a copy of that
-state in its place, at the same path, instead of wiping it (:mod:`continual_arc_baselines.frozen`).
+Every turn the adapter logs (``turns.jsonl``) carries how it ended when the adapter knows it (``outcome``: the
+harness's stop reason and its own error message).
 
-A system attached with ``log_state`` commits its whole state directory at the end of every round
-(:mod:`continual_arc_baselines.statelog`), so that a run can be taken up again from any round
-(:mod:`continual_arc_baselines.fork`) and its frozen tests played as one round of users, each forked from the commit of
-the stream's last round (:mod:`continual_arc_baselines.frozen_collective`). Such a system may be made anew on a folder
-an earlier process wrote, so its first instance begins as every later one does (:meth:`SystemLearner._begin_instance`).
+Everything a system keeps between instances lives under its state directory (``state_dir``). A frozen test plays every
+instance from the state the stream left there: :meth:`SystemLearner.freeze` makes each reset put a copy of that state
+in its place, at the same path, instead of wiping it (:mod:`continual_arc_baselines.frozen`). A system attached with
+``log_state`` commits its whole state directory at the end of every round (:mod:`continual_arc_baselines.statelog`), so
+that a run can be taken up again from any round (:mod:`continual_arc_baselines.fork`) and its frozen tests played as one
+round of users, each forked from the commit of the stream's last round.
 """
 
 from __future__ import annotations
@@ -35,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import tarfile
 import threading
 import time
@@ -45,6 +44,7 @@ from typing import Any
 from continual_arc.env import Action, Feedback, GiveUp, LearnerObservation
 from continual_arc.learner import BaseLearner
 
+from continual_arc_baselines.attempt import ROOT
 from continual_arc_baselines.frozen import put_back
 from continual_arc_baselines.statelog import StateLog
 from continual_arc_baselines.systems import protocol
@@ -73,6 +73,14 @@ class SystemUnavailable(RuntimeError):
     """The system process died or stopped answering."""
 
 
+def remove(path: Path) -> None:
+    """A file, a link or a directory tree, as a wipe deletes the entries of a state directory."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
 class SystemLearner(BaseLearner):
     """A learner that forwards the benchmark conversation to an external system.
 
@@ -98,28 +106,30 @@ class SystemLearner(BaseLearner):
                  stateless: bool = False, storage_turn: bool = False, end: str = "", empty_reply: str = "restart",
                  archive_wipes: bool = False, ask_to_store: bool = False, program_library: bool = False):
         self.max_reprompts = max_reprompts
+        # every refine_every instances (0: never), the system's own refinement after the instance (refine): prime-agent's
+        # global refinement, openclaw's /learn; never for a stateless row
         self.refine_every = refine_every
-        # How an instance ends. Off: a closing turn with the verdict and "no action is needed" (the harness rows since 23
-        # Sep). On: the verdict and a turn of the agent's own in which to save what will help later, with whatever tools
-        # its harness has (protocol.render_storage; the team rows since 26 Sep: many harnesses store at will, and the
-        # turn that submits ends before the verdict comes, so without it nothing could be stored knowing the outcome).
-        # Never for a stateless row, whose state could not survive it.
-        # ``end`` names how an instance ends: "closing" and "storage" are the two above (storage_turn picks between them
-        # when ``end`` is not given); "finish" (the harness rows of the grid since 27 Sep, so that the harnesses are
-        # free to do what they want) sends the verdict alone, with no instruction, and the harness ends the instance
-        # itself with the finish action, which is refused until the instance is over. The rules state facts only
-        # (protocol.RULES_FINISH). Rows H and H0 are treated alike: nothing is said to one that is not said to the other.
+        # How an instance ends once its verdict is in (``end``; storage_turn picks "storage" when it is not given):
+        # - "closing": a closing turn with the verdict and "no action is needed";
+        # - "storage": the verdict and a turn of the agent's own in which to save what will help later, with whatever
+        #   tools its harness has (protocol.render_storage): a harness stores at will, and the turn that submits ends
+        #   before the verdict comes, so without it nothing could be stored knowing the outcome. Never for a stateless
+        #   row, whose state could not survive it;
+        # - "finish" (every harness row of the paper's grid): the verdict alone, with no instruction, and the harness
+        #   ends the instance itself with the finish action, which is refused until the instance is over, so that the
+        #   harness is free to do what it wants. The rules state facts only (protocol.RULES_FINISH). Rows H and H0 are
+        #   treated alike: nothing is said to one that is not said to the other.
         self.end = end or ("storage" if storage_turn else "closing")
         if self.end not in END_MODES:
             raise ValueError(f"end must be one of {END_MODES}, got {end!r}")
         self.storage_turn = self.end == "storage"
-        # The ablation row HA (29 Sep): the finish protocol with one change, an ask to save liberally after the
-        # verdict (protocol.ASK_TO_STORE), so that the row shows the most that asking a harness to
-        # store can give. Never for a stateless row, whose state could not survive it.
+        # The ablation row HA: the finish protocol with one change, an ask to save liberally after the verdict
+        # (protocol.ASK_TO_STORE), so that the row shows the most that asking a harness to store can give. Never for a
+        # stateless row, whose state could not survive it.
         if ask_to_store and self.end != "finish":
             raise ValueError("ask_to_store is an addition to the finish protocol (end='finish')")
         self.ask_to_store = ask_to_store
-        # The ablation row HPL (29 Sep): a harness-driven program library. The finish protocol's rules gain row M's
+        # The ablation row HPL: a harness-driven program library. The finish protocol's rules gain row PL's
         # method as a procedure (protocol.PROGRAM_LIBRARY_RULES: a program per task in a folder of the workspace, run
         # first when the task returns, checked on every pair before a submission, saved after the verdict) and the
         # verdict is followed by the ask to save the task's program (PROGRAM_LIBRARY_ASK). A
@@ -127,47 +137,50 @@ class SystemLearner(BaseLearner):
         if program_library and (self.end != "finish" or ask_to_store):
             raise ValueError("program_library is an addition to the finish protocol, and not beside ask_to_store")
         self.program_library = program_library
-        # An empty reply to an observation or a re-prompt. "restart" (every cell launched before 28 Sep): the system is
-        # taken for dead and restarted, state intact. "reprompt" (every launch since 28 Sep): it is an unusable reply
-        # like any other, re-prompted in the same conversation within the same max_reprompts; the system is restarted
-        # only when the adapter finds its process dead or silent (SystemUnavailable), or when it has answered nothing at
-        # all for longer than one action's re-prompts (max_reprompts + 2 empty replies in a row), which is silence too.
-        # openclaw's empty replies were a turn whose work had gone to subagents, a model call that failed, turns of tool
-        # calls alone, and text that never reached the adapter (28 Sep): a restart killed what the
-        # harness had in flight and sent the observation again, which a re-prompt does not.
+        # An empty reply to an observation or a re-prompt. "restart": the system is taken for dead and restarted, state
+        # intact, the rule the paper's earliest cells ran under (scripts/paper-grid.txt marks them). "reprompt": it is an
+        # unusable reply like any other, re-prompted in the same conversation within the same max_reprompts; the system
+        # is restarted only when the adapter finds its process dead or silent (SystemUnavailable), or when it has
+        # answered nothing at all for longer than one action's re-prompts (max_reprompts + 2 empty replies in a row),
+        # which is silence too. openclaw's empty replies are a turn whose work has gone to subagents, a model call that
+        # failed, turns of tool calls alone, or text that never reached the adapter: a restart kills what the harness
+        # has in flight and sends the observation again, which a re-prompt does not.
         if empty_reply not in EMPTY_REPLY_MODES:
             raise ValueError(f"empty_reply must be one of {EMPTY_REPLY_MODES}, got {empty_reply!r}")
         self.empty_reply = empty_reply
         self._empty_in_a_row = 0
-        # Before a stateless row's wipe (and a fresh cell's reset), copy the system's own transcripts (transcript_paths)
-        # to workdir/wipe-archive/, outside the system's reach, so its turns can be read afterwards as row H's can
-        # (since 28 Sep: H0 deleted openclaw's transcripts with its state, so its empty replies could not be diagnosed).
+        # Before a stateless row's wipe (and any other reset), copy the system's own transcripts (transcript_paths) to
+        # workdir/wipe-archive/, outside the system's reach, so that its turns can be read afterwards as a persistent
+        # row's can: the wipe deletes them with the rest of its state.
         self.archive_wipes = archive_wipes
         # Row H0: the same harness with its own persistence switched off. Before every instance the
         # system is stopped, everything it wrote is deleted (the fresh mode's wipe: home, memory,
         # skills, sessions, workspace, tmp; only the adapter's provider configuration survives) and
         # it is started again. Its end-of-instance storage step and idle gap are skipped, since
         # nothing could survive them. Paired against row H on the same schedule, the difference is
-        # the value of persistence with the harness's within-instance skill held equal (23 Sep).
+        # the value of persistence with the harness's within-instance skill held equal.
         self.stateless = stateless
         if stateless:
             instance_gap_s = 0.0
         # Each instance is a new piece of work: the system gets a fresh conversation for it and
-        # keeps only what it persisted itself (files, memory, skills). The gap is idle wall-clock
-        # after an instance, for systems whose housekeeping waits for quiet (openclaw).
+        # keeps only what it persisted itself (files, memory, skills); False keeps one conversation for the whole
+        # stream. The gap is idle wall-clock after an instance, for systems whose housekeeping waits for quiet
+        # (openclaw).
         self.session_per_instance = session_per_instance
         self.instance_gap_s = instance_gap_s
-        # Set as an instance ends and taken by the next one's first observation (_begin_instance); set from the start
-        # for a system whose state is logged (attach), so that its first instance begins as every other does.
-        self._session_pending = False
-        # A logged system's instance has begun, and its first message waits for a conversation opened for it
+        # Set as an instance ends and taken by the next one's first observation (_begin_instance), and set from the
+        # start, so that a learner's first instance begins as every later one does: a learner made anew (a run resumed,
+        # a frozen test, a test user forked from the stream's last commit) finds in its state whatever the instance
+        # before it left there, a stateless system's files and a harness's last conversation alike.
+        self._session_pending = True
+        # A stateful system's instance has begun, and its first message waits for a conversation opened for it
         # (new_session, in _ask_resilient), whether the system is running then or has to be started or restarted: a
         # start need not open one, since openclaw's ACP bridge takes up the one conversation its state holds.
         self._conversation_pending = False
         self.demo_cost = demo_cost
         self.max_cost = max_cost
         self.max_restarts = max_restarts
-        self.workdir: Path = Path(".workbench") / "system"
+        self.workdir: Path = Path(ROOT) / "system"   # until attach names the attempt's
         self._state_dir: Path | None = None  # a state directory attach named outside the workdir
         self.frozen: Path | None = None      # the saved state every reset puts back (freeze)
         self.state_log: StateLog | None = None   # the round-by-round commits of the state (attach's log_state)
@@ -208,7 +221,7 @@ class SystemLearner(BaseLearner):
 
     def instance_preface(self, obs: LearnerObservation) -> str:
         """Text put before the instance in the first message of its conversation (protocol.render_observation's
-        ``preface``): nothing for a harness row; the demo-cache floor's cached pairs (systems/bare.py, 28 Sep)."""
+        ``preface``): nothing for a harness row; the demo-cache floor's cached pairs (systems/bare.py)."""
         return ""
 
     def after_instance(self) -> None:
@@ -257,8 +270,7 @@ class SystemLearner(BaseLearner):
         """``state_dir`` is ``workdir/state`` unless named: a frozen test's system keeps its logs in a workdir of its
         own and plays from the state its stream left, where the stream left it. ``log_state`` commits the state
         directory at the end of every round into ``workdir/state.git``, each round's commit listed in
-        ``workdir/state-log.jsonl`` (:meth:`end_round`), and makes the first instance begin as every later one does
-        (:meth:`_begin_instance`)."""
+        ``workdir/state-log.jsonl`` (:meth:`end_round`)."""
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self._state_dir = None if state_dir is None else Path(state_dir)
@@ -266,7 +278,6 @@ class SystemLearner(BaseLearner):
         self.tracker = tracker
         if log_state:
             self.state_log = StateLog(self.state_dir, self.workdir / "state.git", self.workdir / "state-log.jsonl")
-            self._session_pending = True
         self.load_state()
 
     @property
@@ -349,7 +360,7 @@ class SystemLearner(BaseLearner):
         (prime-agent's daemon injects its digest only when the store changed and drops
         events under load; the ACP harnesses return one text per turn and keep the rest
         in their own databases), so the adapter, which sees every exchange for every
-        harness, is the one place a complete record can be written (23 Sep)."""
+        harness, is the one place a complete record can be written."""
         try:
             if self._turns is None:
                 self._turns = (self.workdir / "turns.jsonl").open("a")
@@ -391,9 +402,9 @@ class SystemLearner(BaseLearner):
                 self.stats["empty_replies"] += 1
                 self._empty_in_a_row += 1
                 if self.empty_reply == "restart":
-                    # Cells launched before 28 Sep: a system that answers with nothing is taken to have stopped
-                    # functioning as surely as one that crashed (its context exhausted, or its model call failed
-                    # inside it), and is restarted, state intact.
+                    # a system that answers with nothing is taken to have stopped functioning as surely as one that
+                    # crashed (its context exhausted, or its model call failed inside it), and is restarted, state
+                    # intact
                     raise SystemUnavailable("empty reply")
                 if self._empty_in_a_row > self.max_reprompts + 1:
                     # nothing at all for longer than one action's re-prompts: silence, as a dead process is
@@ -411,12 +422,9 @@ class SystemLearner(BaseLearner):
 
     def _begin_instance(self, obs: LearnerObservation) -> None:
         """At an instance's first observation, once (``_session_pending``): a stateless system is stopped, everything it
-        wrote is deleted and it starts again on the next ask. Any other gets a fresh conversation: a logged system's
-        waits for the instance's first message, opened after whatever start or restart that message needs
-        (``_conversation_pending``), so that a system made anew on a folder an earlier process wrote never plays on in
-        the conversation its state holds. An unlogged system's is opened here when it is running; one that is not has
-        the conversation its start gives it, a new one for prime-agent and hermes-agent, while openclaw's ACP bridge
-        takes up the one its state holds."""
+        wrote is deleted and it starts again on the next ask; any other gets a fresh conversation before the instance's
+        first message (``_conversation_pending``), so that a system made anew on a state an earlier process left never
+        plays on in the conversation that state holds."""
         if not (obs.is_fresh and self._session_pending):
             return
         self._session_pending = False
@@ -424,15 +432,8 @@ class SystemLearner(BaseLearner):
             self.reset()
             self.stats["wipes"] += 1
             self.stats["sessions"] += 1
-        elif self.state_log is not None:
+        else:
             self._conversation_pending = True
-        elif self._started:
-            try:
-                self.new_session()
-                self.stats["sessions"] += 1
-            except SystemUnavailable as error:
-                self.note(f"step {obs.step}: new session failed ({error}); restarting the system")
-                self.close()
 
     def act(self, obs: LearnerObservation) -> Action:
         self._begin_instance(obs)
@@ -513,9 +514,9 @@ class SystemLearner(BaseLearner):
     def _close_instance(self, obs: LearnerObservation) -> None:
         """Deliver the verdict on the instance's final submission to the system, in the same
         conversation, before any storage step runs and before the conversation is closed. Without
-        this the verdict sat in the transcript until the next instance's first message, in a new
-        session about another task, so every harness's storage step reviewed a trajectory whose
-        outcome it did not know (23 Sep). One turn per instance; the reply is not read. With
+        it the verdict would wait in the transcript until the next instance's first message, in a new
+        conversation about another task, and a harness's storage step would review a trajectory whose
+        outcome it did not know. One turn per instance; the reply is not read. With
         ``storage_turn`` the turn is the agent's own to save what will help later
         (:func:`protocol.render_storage`), logged as kind ``storage``; else a short closing."""
         pending = self.transcript.take()
@@ -539,7 +540,7 @@ class SystemLearner(BaseLearner):
             self.stats["storage_turns" if storage else "closings"] += 1
         except SystemUnavailable as error:
             # a system that cannot take the closing is restarted for the next instance; the
-            # verdict is lost to it, as it was to every system before this message existed
+            # verdict is lost to it
             self.note(f"step {obs.step}: closing message failed ({error}); restarting the system")
             self.close()
             self.stats["restarts"] += 1

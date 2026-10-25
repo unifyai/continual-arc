@@ -57,7 +57,7 @@ jobs:
       - run: uv sync --all-packages
       - name: Lint
         working-directory: training
-        run: uv run --no-sync ruff check .
+        run: uv run --no-sync ruff check src tests
       - name: Cache pinned data
         uses: actions/cache@v4
         with:
@@ -65,13 +65,7 @@ jobs:
           key: continual-arc-data-${{ hashFiles('src/continual_arc/data.py') }}
       - name: Fetch pinned data
         run: uv run --no-sync continual-arc data fetch
-      # paper_backup.sh copies a run with rsync, which the runner's image lacks.
-      - name: Install rsync
-        run: sudo apt-get install -y -q rsync
-      # Without ask_sd, torch or a GPU: the tests that need them skip.
+      # Without torch or a GPU: the trainer's tests skip, and the node scripts run against stubbed tools.
       - name: Test
         working-directory: training
-        run: |
-          PYTHONPATH=.:../src:../baselines/src uv run --no-sync python -m pytest
-          uv run --no-sync bash test_frozen.sh
-          uv run --no-sync bash test_paper_backup.sh
+        run: uv run --no-sync pytest

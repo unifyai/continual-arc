@@ -1,4 +1,4 @@
-"""The finish protocol (a system's end="finish", every harness row since 27 Sep 2026): the rules state facts only,
+"""The finish protocol (a system's end="finish", every harness row of the paper's grid): the rules state facts only,
 the verdict comes alone, and the harness ends each instance itself with the finish action, refused until the instance is
 over. A scripted system plays one instance of a two-pair task through the environment, shown it as the runner shows a
 learner."""
@@ -128,7 +128,7 @@ def test_finish_parses_only_under_the_finish_protocol():
 
 
 def test_the_ask_to_store_follows_the_verdict_only_in_row_ha(tmp_path):
-    """Row HA (ask_to_store, 29 Sep): the same finish protocol and facts-only rules, with the ask after the verdict and
+    """Row HA (ask_to_store): the same finish protocol and facts-only rules, with the ask after the verdict and
     the harness's own note on what it keeps; a stateless row is never asked, and the ask needs the finish protocol."""
     import pytest
 
@@ -154,7 +154,7 @@ def test_the_ask_to_store_follows_the_verdict_only_in_row_ha(tmp_path):
 
 
 def test_the_program_library_row_states_the_procedure_and_asks_for_the_program(tmp_path):
-    """Row HPL (program_library, 29 Sep): the finish protocol's rules gain row M's method as a procedure, with the
+    """Row HPL (program_library): the finish protocol's rules gain row PL's method as a procedure, with the
     library's folder, and the verdict is followed by the ask to save the task's program to its file; a stateless row
     gets the same messages; the option needs the finish protocol and does not go beside ask_to_store."""
     import re

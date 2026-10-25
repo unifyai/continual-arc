@@ -13,10 +13,10 @@ agent directory (a marker file records that the scenario has fired):
 * ``FAKE_AGENT_ERROR_FIRST``: a provider error ends the run with a text-less
   message, then the agent retries in a fresh run and answers.
 * ``FAKE_AGENT_STALL_ONCE``: the turn ends on the final reply, but no
-  ``agent_end`` ever follows (prime-agent 0.9.5, 2026-09-17).
+  ``agent_end`` ever follows (prime-agent 0.9.5).
 * ``FAKE_AGENT_LOSE_TAIL=<n>``: for the next ``n`` prompts, everything after
-  ``message_end`` is lost (no ``turn_end``, no ``agent_end``), exactly as the
-  daemon relay did on 2026-09-17; the command path still answers.
+  ``message_end`` is lost (no ``turn_end``, no ``agent_end``), as prime-agent's
+  daemon relay can lose it; the command path still answers.
 * ``FAKE_AGENT_HANG_ONCE``: the prompt is accepted and nothing happens.
 * ``FAKE_AGENT_LOOP_ONCE``: the agent keeps starting model calls without
   concluding, until it is aborted; the aborted run ends without an action.

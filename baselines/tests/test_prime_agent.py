@@ -9,10 +9,10 @@ from pathlib import Path
 import pytest
 from continual_arc.schedule import epilogue_schedule, stream_schedule
 from continual_arc.testing import FakeSource
-from continual_workbench.accounting import CostJournal
-from continual_workbench.context import create_context
 
+from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.cli import main
+from continual_arc_baselines.costs import CostJournal
 
 FAKE = str(Path(__file__).with_name("fake_prime_agent.py"))
 REPO = Path(__file__).resolve().parents[1]
@@ -36,7 +36,7 @@ def run_mode(tmp_path, monkeypatch, upstream, mode: str, extra_kwargs: dict | No
         epilogue_schedule(source.task_ids(), seed=1, source=source.name, reset_each=True, instances_per_task=3).save(sched)
     else:
         stream_schedule(source.task_ids(), n_slots, seed=1, source=source.name).save(sched)
-    context = create_context(tmp_path / "wb", f"pa-{mode}", {"experiment_id": "t", "project_key": "t"})
+    context = Attempt.create(f"pa {mode}", root=tmp_path / "wb")
     monkeypatch.setenv("WORKBENCH_RUN_DIR", str(context.directory))
     monkeypatch.setenv("FAKE_AGENT_LOG", str(tmp_path / f"{mode}-commands.log"))
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-upstream")
@@ -47,7 +47,7 @@ def run_mode(tmp_path, monkeypatch, upstream, mode: str, extra_kwargs: dict | No
               **(extra_kwargs or {})}
     code = main(["run", "--learner", "continual_arc_baselines.systems.prime_agent:PrimeAgentLearner",
                  "--learner-kwargs", json.dumps(kwargs), "--schedule", str(sched),
-                 "--registry", "continual_arc_baselines.testing:fake_registry",
+                 "--registry", "tests.fixtures:fake_registry",
                  "--upstream", upstream.base_url, "--llm-defaults", '{"reasoning_effort": "low"}',
                  "--quiet"])
     assert code == 0
@@ -90,8 +90,9 @@ def test_workstreams_learns_and_is_measured_at_the_boundary(tmp_path, monkeypatc
     assert params["proxy"]["enabled"] and params["proxy"]["upstream_key_present"]
     assert params["system"]["sandbox"] == "none" and params["alias_style"] == "hex"
     # No resets in workstreams mode, one process for the whole run, and a fresh conversation for
-    # every instance after the first.
-    assert commands.read_text().count("new_session") == len(records) - 1
+    # every instance, the first included.
+    assert commands.read_text().count("new_session") == len(records)
+    assert all(r["resources"]["system_sessions"] == 1.0 for r in records)
     assert (context.directory / "system" / "state" / "agent" / "models.json").is_file()
     models = json.loads((context.directory / "system" / "state" / "agent" / "models.json").read_text())
     entry = next(iter(models["providers"].values()))["models"][0]
@@ -158,7 +159,7 @@ def test_home_agent_dir_is_the_agent_directory(tmp_path):
 
 
 def test_the_finish_protocol_ends_every_instance_with_the_verdict_alone(tmp_path, monkeypatch, upstream):
-    """end="finish" (the harness rows since 27 Sep): the rules state facts only, prime-agent's one fact about its store among
+    """end="finish" (the harness rows): the rules state facts only, prime-agent's one fact about its store among
     them; every instance ends with the verdict alone, and the agent ends it with finish."""
     context, _ = run_mode(tmp_path, monkeypatch, upstream, "workstreams", {"end": "finish"})
     records = records_of(context)
@@ -423,15 +424,14 @@ def test_budget_abort_with_nothing_said_is_reprompted_not_restarted(tmp_path, mo
 
 
 def test_stateless_row_wipes_and_restarts_before_every_instance(tmp_path, monkeypatch, upstream):
-    """Row H0: the harness is stopped, its state deleted and started again before each instance."""
+    """Row H0: the harness is stopped, its state deleted and started again before each instance, the first included."""
     context, commands = run_mode(tmp_path, monkeypatch, upstream, "workstreams",
                                  {"stateless": True, "refine_every": 1, "storage_turn": True})
     records = records_of(context)
     assert len(records) > 2 and all(r["solved"] for r in records)
     # no storage turn either: the closing carries the verdict, as nothing saved could last
     assert sum(r["resources"]["system_storage_turns"] for r in records) == 0
-    assert sum(r["resources"]["system_wipes"] for r in records) == len(records) - 1
-    assert sum(r["resources"]["system_resets"] for r in records) == len(records) - 1
+    assert all(r["resources"]["system_wipes"] == r["resources"]["system_resets"] == 1 for r in records)
     assert sum(r["resources"]["system_refines"] for r in records) == 0   # nothing could survive it
     assert commands.read_text().count("get_state") == len(records)        # one start per instance
     assert commands.read_text().count("new_session") == 0

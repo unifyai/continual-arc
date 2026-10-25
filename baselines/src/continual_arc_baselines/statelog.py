@@ -6,7 +6,7 @@ and its commit to ``workdir/state-log.jsonl``. Git stores a file once however ma
 that changes, so a run's every state costs about what its last one does. Nothing in the directory is left out: ignore
 files a system writes there are overridden, so the commit is the state as it was, caches and environments included.
 
-A system may keep working between instances (a consolidation on a schedule, a refinement of its own), so the cell's
+A system may keep working between instances (a consolidation on a schedule, a refinement of its own), so the run's
 other processes are stopped with SIGSTOP for the moment the commit takes and continued after it, and no file is caught
 half written. :func:`restore` writes a commit's state into a new directory, from which a run is continued. Git does not
 keep empty directories, so a restored state lacks the ones the system had made and left empty, and a system that keeps
@@ -64,7 +64,7 @@ def _signal(pids: list[int], sig: signal.Signals) -> None:
 
 class StateLog:
     """The commits of one system's state directory, one per round, numbered from the rounds a log already holds, so a
-    cell resumed after a crash goes on counting where it stopped."""
+    run resumed after a crash goes on counting where it stopped."""
 
     def __init__(self, tree: Path, repo: Path, log: Path):
         self.tree, self.repo, self.log = Path(tree).resolve(), Path(repo).resolve(), Path(log).resolve()
@@ -73,7 +73,7 @@ class StateLog:
             subprocess.run(["git", "init", "--quiet", "--bare", str(self.repo)], env={**os.environ, **GIT_ENV},
                            check=True)
             _git(self.repo, "config", "core.bare", "false")
-            _git(self.repo, "config", "gc.auto", "0")  # a repack mid-run would hold the cell stopped while it ran
+            _git(self.repo, "config", "gc.auto", "0")  # a repack mid-run would hold the run stopped while it ran
         self.rounds = sum(1 for _ in self.log.open()) if self.log.exists() else 0
 
     def commit(self) -> str:
