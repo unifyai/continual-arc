@@ -65,6 +65,9 @@ jobs:
           key: continual-arc-data-${{ hashFiles('src/continual_arc/data.py') }}
       - name: Fetch pinned data
         run: uv run --no-sync continual-arc data fetch
+      # paper_backup.sh copies a run with rsync, which the runner's image lacks.
+      - name: Install rsync
+        run: sudo apt-get install -y -q rsync
       # Without ask_sd, torch or a GPU: the tests that need them skip.
       - name: Test
         working-directory: training
