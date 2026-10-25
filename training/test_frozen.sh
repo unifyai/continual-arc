@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 HERE=$(pwd)
-F=$(mktemp -d); trap 'pkill -f "[f]rozen.sh pg-u1-lag1" 2>/dev/null; rm -rf "$F"' EXIT
+F=$(mktemp -d); trap 'pkill -f "[f]rozen.sh pg-u1-lag1" 2>/dev/null || true; rm -rf "$F"' EXIT
 fail=0
 check() { if eval "$1"; then :; else echo "FAIL: $2"; fail=1; fi; }
 wait_for() { for _ in $(seq 120); do eval "$1" && return 0; sleep 1; done; echo "FAIL: timed out waiting for $2"; fail=1; }
