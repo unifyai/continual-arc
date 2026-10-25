@@ -26,7 +26,7 @@ R=$RUNS/rt/$RUN O=$RUNS/rt/$RUN/scratch T=$(cd "$(dirname "${BASH_SOURCE[0]}")" 
 EXP=${EXP:-$HOME/exp}   # grid-vals.sh's folder of per-model markers and measures
 P=scratch-$RUN   # the grid-vals.sh names' prefix: EXP/$P-..., RUNS/loop/val-$P-...
 export CODE PRIME_RL RUNS EXP
-export PATH=$HOME/.local/bin:$PATH HF_HUB_OFFLINE=1 PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export PATH=$HOME/.local/bin:$PATH HF_HUB_OFFLINE=1
 mkdir -p "$O"
 say() { echo "$(date -u +%m-%d\ %H:%M) scratch: $*" >> "$O/progress"; }
 done_() { touch "$O/$1.done"; say "$1 done"; }
@@ -49,7 +49,10 @@ stage() { [ -f "$O/$1.done" ]; }
         pkill -f "[v]llm serve"; sleep 20
         mkdir -p "$O/view" && ln -sfn "$R/play" "$O/view/play"
         rm -rf "$O/model"
-        (cd "$PRIME_RL" && PYTHONPATH=$CODE uv run --no-sync python "$T/scratch.py" train --run "$O/view" \
+        # expandable segments for training alone: vLLM's custom all-reduce cannot open their memory over CUDA IPC, so
+        # a server started under them fails as it captures its graphs
+        (cd "$PRIME_RL" && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True PYTHONPATH=$CODE uv run --no-sync python \
+            "$T/scratch.py" train --run "$O/view" \
             --phase "$K" --out "$O/model" --gpus 8) >> "$O/train.log" 2>&1 \
             || { say "training failed ($O/train.log)"; exit 1; }
         say "trained: $(tail -1 "$O/train.log" | cut -c1-200)"
