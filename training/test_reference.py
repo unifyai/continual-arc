@@ -25,7 +25,7 @@ PAPER_ROW = {"hpl": "h", "hg": "h", "ha": "h", "hpl0": "h0", "hplg": "h", "hgpl"
 def test_players_play_at_the_trained_rows_settings():
     glm, qwen = reference.PLAYERS["glm"]["body"], reference.PLAYERS["qwen"]["body"]
     assert glm["reasoning"] == {"effort": "medium"}
-    assert glm["provider"] == {"order": ["gmicloud", "parasail", "fireworks"], "allow_fallbacks": False}
+    assert glm["provider"] == {"order": ["z-ai", "fireworks"], "allow_fallbacks": False}
     assert {k: qwen[k] for k in paper.SAMPLING} == {**paper.SAMPLING, "top_k": 0}
     assert qwen["reasoning"] == {"enabled": True}
     assert qwen["provider"] == {"order": ["together", "venice", "deepinfra"], "allow_fallbacks": False}

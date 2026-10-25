@@ -36,8 +36,9 @@ one user: ha is row h asked after every verdict to save liberally what could hel
 Two players:
 
   glm   GLM-5.3-flash, the trained rows' oracle, at the labeller's own settings (expert.py through realtime.sh's relay:
-        medium effort; gmicloud, parasail and fireworks in that order, no fallback; the provider's own sampling),
-        playing the games itself: where the oracle's own play sits beside the students it teaches.
+        medium effort; the provider's own sampling) but on Z.ai, then Fireworks, no fallback, since GMICloud's replies
+        to prompts it has cached run to the length cap or come back empty; playing the games itself: where the
+        oracle's own play sits beside the students it teaches.
   qwen  Qwen3.5-9B, the trained rows' base model, untrained: rows h and h0 themselves, on Together first (its
         precision unstated), then Venice (fp8), then DeepInfra (bf16, the one OpenRouter provider of it known to be at
         full precision with tool calls), and no other. Speed decides the order: when the rows started, Together
@@ -96,7 +97,7 @@ OPENROUTER = "https://openrouter.ai/api/v1"
 PLAYERS: dict[str, dict[str, Any]] = {
     "glm": {"model": "z-ai/glm-5.3-flash", "body": {
         "reasoning": {"effort": "medium"},
-        "provider": {"order": ["gmicloud", "parasail", "fireworks"], "allow_fallbacks": False}}},
+        "provider": {"order": ["z-ai", "fireworks"], "allow_fallbacks": False}}},
     "qwen": {"model": "qwen/qwen3.5-9b", "body": {
         **paper.SAMPLING, "top_k": 0, "reasoning": {"enabled": True},
         "provider": {"order": ["together", "venice", "deepinfra"], "allow_fallbacks": False}}},
