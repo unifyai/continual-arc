@@ -37,9 +37,10 @@ NAME=${NAME:-$ROW-u$USERS-lag$LAG}
 SERVE_GPUS=${SERVE_GPUS:-0,1,2,3}; SERVE_DP=${SERVE_DP:-1}
 TRAIN_GPUS=${TRAIN_GPUS:-4,5,6,7}
 # the labels (DAgger and OPSD): GLM-5.3 Flash at medium effort through the relay, its reasoning required (asked again
-# up to NEED_THINKING times); every row holds one game in HOLD_EVERY out for its held-out loss
+# up to NEED_THINKING times); every row holds one game in HOLD_EVERY out for its held-out loss; the relay asks Z.ai,
+# then Fireworks, since GMICloud's prompt cache returned malformed GLM replies
 LABEL_MODEL=${LABEL_MODEL:-z-ai/glm-5.3-flash}; LABEL_EFFORT=${LABEL_EFFORT:-medium}
-RELAY_PORT=${RELAY_PORT:-18230}; RELAY_PROVIDERS=${RELAY_PROVIDERS:-gmicloud,parasail,fireworks}
+RELAY_PORT=${RELAY_PORT:-18230}; RELAY_PROVIDERS=${RELAY_PROVIDERS:-z-ai,fireworks}
 NEED_THINKING=${NEED_THINKING:-4}; MIN_LABELLED_PCT=${MIN_LABELLED_PCT:-40}
 LABEL_ROUND_BUDGET_USD=${LABEL_ROUND_BUDGET_USD:-20}; LABEL_RUN_BUDGET_USD=${LABEL_RUN_BUDGET_USD:-3000}
 HOLD_EVERY=${HOLD_EVERY:-10}
