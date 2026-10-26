@@ -310,6 +310,20 @@ def test_a_prompt_refused_while_prime_agent_compacts_waits_and_is_sent_again(tmp
     assert "busy (compacting)" in adapter_log(context)
 
 
+def test_a_run_hung_between_turns_is_restarted_after_the_idle_timeout(tmp_path, monkeypatch, upstream):
+    # a run left going after its turn sticks in a cell that never returns: the next prompt waits for it only while it
+    # shows signs of life, then the system is restarted as a hung turn's is, long before the turn's hard ceiling
+    monkeypatch.setenv("FAKE_AGENT_BUSY_HANG_ONCE", "1")
+    context, commands = run_mode(tmp_path, monkeypatch, upstream, "workstreams",
+                                 {"idle_timeout_s": 1.5, "timeout_s": 60})
+    records = records_of(context)
+    assert all(r["solved"] for r in records)
+    assert sum(r["resources"]["system_idle_timeouts"] for r in records) == 1
+    assert sum(r["resources"]["system_restarts"] for r in records) == 1
+    assert "busy with no RPC event and no proxy traffic" in adapter_log(context)
+    assert "abort" in commands.read_text().splitlines()
+
+
 def test_a_run_stopped_to_compact_is_waited_for_not_taken_for_an_empty_reply(tmp_path, monkeypatch, upstream):
     monkeypatch.setenv("FAKE_AGENT_COMPACT_MIDRUN_ONCE", "1")
     context, commands = run_mode(tmp_path, monkeypatch, upstream, "workstreams")

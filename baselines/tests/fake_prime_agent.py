@@ -18,6 +18,10 @@ agent directory (a marker file records that the scenario has fired):
   ``message_end`` is lost (no ``turn_end``, no ``agent_end``), as prime-agent's
   daemon relay can lose it; the command path still answers.
 * ``FAKE_AGENT_HANG_ONCE``: the prompt is accepted and nothing happens.
+* ``FAKE_AGENT_BUSY_HANG_ONCE``: after a turn ends, its run goes on into a
+  Python cell that never returns: every plain prompt is refused as already
+  processing, ``get_state`` says it is streaming, and no event follows; an abort
+  is answered and changes nothing.
 * ``FAKE_AGENT_LOOP_ONCE``: the agent keeps starting model calls without
   concluding, until it is aborted; the aborted run ends without an action.
 * ``FAKE_AGENT_DIE``: the process exits after accepting every prompt.
@@ -124,6 +128,7 @@ def main() -> int:
     aborted_reply: str | None = None
     suspended = False  # abort suspends queued input until resume_queue, as prime-agent 0.9.5 does
     compacting = 0  # get_state polls left before a compaction after a turn ends (FAKE_AGENT_COMPACT_ONCE)
+    hung = False  # a run left going after its turn, stuck in a cell (FAKE_AGENT_BUSY_HANG_ONCE)
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -131,7 +136,7 @@ def main() -> int:
         command = json.loads(line)
         kind = command.get("type")
         log(kind)
-        if kind == "prompt" and compacting and not command.get("streamingBehavior"):
+        if kind == "prompt" and (compacting or hung) and not command.get("streamingBehavior"):
             emit({"type": "response", "command": "prompt", "success": False, "id": command.get("id"),
                   "error": "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to "
                            "queue the message."})
@@ -240,10 +245,16 @@ def main() -> int:
                 emit({"type": "compaction_end", "reason": "threshold", "aborted": False, "willRetry": False})
                 emit({"type": "agent_start"})
             emit({"type": "agent_end", "messages": [{"role": "user", "content": prompt}, assistant(reply)]})
+            if once("FAKE_AGENT_BUSY_HANG_ONCE"):
+                hung = True
+                emit({"type": "agent_start"})
+                emit({"type": "tool_execution_start", "toolName": "ipython"})
             if once("FAKE_AGENT_COMPACT_ONCE"):
                 # prime-agent compacts after a turn whose context passed its threshold, and refuses a prompt meanwhile
                 compacting = 2
                 emit({"type": "compaction_start", "reason": "threshold"})
+        elif kind == "abort" and hung:
+            emit({"type": "response", "command": "abort", "success": True})  # answered, but the cell holds the run
         elif kind == "abort":
             suspended = True
             emit({"type": "response", "command": "abort", "success": True})
@@ -252,7 +263,7 @@ def main() -> int:
                 aborted_reply = None
         elif kind == "get_state":
             emit({"type": "response", "command": kind, "success": True, "id": command.get("id"),
-                  "data": {"isStreaming": False, "isCompacting": compacting > 0}})
+                  "data": {"isStreaming": hung, "isCompacting": compacting > 0}})
             if compacting:
                 compacting -= 1
                 if not compacting:

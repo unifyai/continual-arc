@@ -623,15 +623,39 @@ class PrimeAgentLearner(SystemLearner):
         self._needs_settle = False
 
     def _wait_idle(self, timeout: float) -> None:
-        """Wait until prime-agent is neither answering nor compacting."""
-        deadline = time.monotonic() + timeout
+        """Wait until prime-agent is neither answering nor compacting, under a turn's guards: ``timeout`` and
+        ``idle_timeout_s`` of no event from the worker and no proxy traffic. A run left going between turns can hang as
+        one inside a turn can, on a Python cell that never returns, and would hold its instance until ``timeout``: it is
+        aborted and the system restarted, as a hung turn is. Our own ``get_state`` polls are not the worker's
+        activity."""
+        start = time.monotonic()
+        deadline, last_rpc = start + timeout, start
         while True:
             self._send({"type": "get_state"})
-            state = self._wait_response("get_state", timeout=30.0).get("data") or {}
+            answer_by = time.monotonic() + 30.0
+            while True:
+                try:
+                    event = self._next(answer_by)
+                except TimeoutError:
+                    self._note("no response envelope for get_state within 30s")
+                    raise SystemUnavailable("no response to get_state within 30s") from None
+                if event.get("type") == "response" and event.get("command") == "get_state":
+                    break
+                last_rpc = time.monotonic()
+            if not event.get("success", False):
+                raise SystemUnavailable(f"get_state failed: {event.get('error')}")
+            state = event.get("data") or {}
             if not state.get("isStreaming") and not state.get("isCompacting"):
                 return
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if now >= deadline:
                 raise SystemUnavailable(f"prime-agent still busy after {timeout:g}s")
+            idle = now - max(last_rpc, self._proxy_activity())
+            if idle >= self.idle_timeout_s:
+                self.stats["idle_timeouts"] += 1
+                self._note(f"prime-agent busy with no RPC event and no proxy traffic for {idle:.0f}s; aborting its run")
+                self._abort()
+                raise SystemUnavailable(f"system idle for {idle:.0f}s while busy")
             time.sleep(2.0)
 
     def ask(self, message: str, *, reprompt: bool = False, until: tuple[str, ...] = ("agent_end",)) -> str:
