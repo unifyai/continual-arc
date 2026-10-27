@@ -22,6 +22,10 @@ agent directory (a marker file records that the scenario has fired):
   Python cell that never returns: every plain prompt is refused as already
   processing, ``get_state`` says it is streaming, and no event follows; an abort
   is answered and changes nothing.
+* ``FAKE_AGENT_PRINT_HANG_ONCE``: the prompt's run goes into a Python cell that
+  prints in a loop that never ends: its output streams as
+  ``tool_execution_update`` events until the process is killed, and an abort is
+  answered and changes nothing.
 * ``FAKE_AGENT_LOOP_ONCE``: the agent keeps starting model calls without
   concluding, until it is aborted; the aborted run ends without an action.
 * ``FAKE_AGENT_DIE``: the process exits after accepting every prompt.
@@ -41,9 +45,13 @@ import json
 import os
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 
 import httpx
+
+EMIT = threading.Lock()  # a printing cell's thread emits beside the command loop
 
 
 def log(kind: str) -> None:
@@ -54,7 +62,16 @@ def log(kind: str) -> None:
 
 
 def emit(obj: dict) -> None:
-    print(json.dumps(obj), flush=True)
+    with EMIT:
+        print(json.dumps(obj), flush=True)
+
+
+def print_forever() -> None:
+    """A cell printing in a loop that never ends, its output streamed line by line as prime-agent streams it."""
+    while True:
+        emit({"type": "tool_execution_update", "toolName": "ipython",
+              "partialResult": {"content": [{"type": "text", "text": "request another\n"}]}})
+        time.sleep(0.05)
 
 
 def call_model(prompt: str) -> None:
@@ -185,6 +202,14 @@ def main() -> int:
                      "usage": {"input": 12, "output": 0, "cost": {"total": 0.0}}}]})
                 emit({"type": "agent_start"})
             if once("FAKE_AGENT_HANG_ONCE"):
+                continue
+            if once("FAKE_AGENT_PRINT_HANG_ONCE"):
+                emit({"type": "agent_start"})
+                emit({"type": "turn_start"})
+                emit({"type": "message_start", "message": {"role": "assistant", "content": []}})
+                emit({"type": "message_end", "message": assistant("", "toolUse")})
+                emit({"type": "tool_execution_start", "toolName": "ipython"})
+                threading.Thread(target=print_forever, daemon=True).start()
                 continue
             errored = {"role": "assistant", "content": [], "stopReason": "error",
                        "errorMessage": "429 Provider returned error",

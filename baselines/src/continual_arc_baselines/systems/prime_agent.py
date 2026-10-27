@@ -28,7 +28,10 @@ unbounded loop of model calls and Python cells. Four guards bound it:
   ``get_last_assistant_text``. Two consecutive losses mean the attachment is
   dead and prime-agent is restarted before the next prompt.
 * ``idle_timeout_s``: no RPC event and no byte through the proxy for this long
-  means the system is hung; the turn is aborted and the system restarted.
+  means the system is hung; the turn is aborted and the system restarted. A
+  running cell's streamed output is no such event: a cell that printed in a
+  loop that never ended held three instances for hours on 26-27 Oct 2026,
+  until each was stopped by hand.
 * ``final_turn_grace_s``: if a turn ends on a final text reply and nothing
   follows, that reply is taken after this grace period instead of waiting.
 * ``action_budget_s`` / ``max_model_calls``: a soft budget per action. When it
@@ -99,6 +102,9 @@ REFINE_INSTRUCTIONS = (
 PRESERVED = ("models.json", "settings.json", "kernel-venv")  # survive a state wipe
 INTEGRATION_SKILLS = ("linear", "notion", "prime-intellect")  # MCP integrations; off
 ACTIVITY = ("agent_start", "turn_start", "message_start")  # a new run or turn is underway
+# A running cell's output, which prime-agent streams as it is printed: never a sign that the run moves on, since a cell
+# that prints in a loop that never ends streams it for as long as it runs, so it holds off no idle guard
+CELL_OUTPUT = "tool_execution_update"
 
 
 def _last_role(event: dict) -> str | None:
@@ -641,7 +647,8 @@ class PrimeAgentLearner(SystemLearner):
                     raise SystemUnavailable("no response to get_state within 30s") from None
                 if event.get("type") == "response" and event.get("command") == "get_state":
                     break
-                last_rpc = time.monotonic()
+                if event.get("type") != CELL_OUTPUT:
+                    last_rpc = time.monotonic()
             if not event.get("success", False):
                 raise SystemUnavailable(f"get_state failed: {event.get('error')}")
             state = event.get("data") or {}
@@ -802,7 +809,8 @@ class PrimeAgentLearner(SystemLearner):
                 if text.strip() and text != self._last_reply:
                     return "reply", self._lost_tail(text, now - last_rpc)
                 continue
-            last_rpc = time.monotonic()
+            if kind != CELL_OUTPUT:
+                last_rpc = time.monotonic()
             message_obj = event.get("message") if isinstance(event.get("message"), dict) else {}
             if kind == "message_start" and message_obj.get("role") == "assistant":
                 calls += 1

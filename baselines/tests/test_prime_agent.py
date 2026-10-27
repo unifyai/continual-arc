@@ -324,6 +324,21 @@ def test_a_run_hung_between_turns_is_restarted_after_the_idle_timeout(tmp_path, 
     assert "abort" in commands.read_text().splitlines()
 
 
+def test_a_cell_printing_forever_is_restarted_after_the_idle_timeout(tmp_path, monkeypatch, upstream):
+    # a cell prints in a loop that never ends: its streamed output is no sign that the run moves on, so the turn is
+    # aborted and the system restarted once nothing else has come for the idle timeout, long before the turn's hard
+    # ceiling
+    monkeypatch.setenv("FAKE_AGENT_PRINT_HANG_ONCE", "1")
+    context, commands = run_mode(tmp_path, monkeypatch, upstream, "workstreams",
+                                 {"idle_timeout_s": 1.5, "timeout_s": 60})
+    records = records_of(context)
+    assert all(r["solved"] for r in records)
+    assert sum(r["resources"]["system_idle_timeouts"] for r in records) == 1
+    assert sum(r["resources"]["system_restarts"] for r in records) == 1
+    assert "no RPC event and no proxy traffic" in adapter_log(context)
+    assert "abort" in commands.read_text().splitlines()
+
+
 def test_a_run_stopped_to_compact_is_waited_for_not_taken_for_an_empty_reply(tmp_path, monkeypatch, upstream):
     monkeypatch.setenv("FAKE_AGENT_COMPACT_MIDRUN_ONCE", "1")
     context, commands = run_mode(tmp_path, monkeypatch, upstream, "workstreams")
