@@ -70,7 +70,7 @@ def test_verifiers_agree_with_fixed_original_tasks(rearc):
 
 def test_env_with_real_sources():
     ids = SAMPLE[:3]
-    sched = stream_schedule(ids, 6, seed=0, source=SOURCE_REARC, params=RANDOM, mode="random").concat(
+    sched = stream_schedule(ids, 6, seed=0, source=SOURCE_REARC, params=RANDOM, order="random").concat(
         epilogue_schedule(arc_task_ids("evaluation")[:2], seed=0, source=SOURCE_ARC_EVAL)
     )
     env = ContinualArcEnv(sched, config=EnvConfig(demos_per_request=2))

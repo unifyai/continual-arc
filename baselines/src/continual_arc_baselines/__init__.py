@@ -14,7 +14,7 @@ import inspect
 
 from continual_arc import runner as _runner
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # The adapters pass a system each task's name as the benchmark's runner gives it. A runner that takes a ``view``
 # argument shows a learner the whole slot, the real task id (a lookup key into the public solutions) among it, so

@@ -33,7 +33,7 @@ def old_run(tmp_path, monkeypatch):
     (run / "records.jsonl").write_text("".join(json.dumps({"step": k}) + "\n" for k in range(4)))
     (run / "alias-salt").write_text("salt-of-the-old-run")
     (run / "attempt.json").write_text(json.dumps({"attempt_dir": str(system.parent)}))
-    argv = ["run", "--learner", "pkg:Learner", "--config", "arc1-small", "--mode", "workstreams", "--seed", "0",
+    argv = ["run", "--learner", "pkg:Learner", "--config", "arc1-small", "--order", "workstreams", "--seed", "0",
             "--out", str(run), "--stop-after", "25", "--quiet"]
     (run / "launches.jsonl").write_text(json.dumps({"argv": argv}) + "\n")
     return run, log

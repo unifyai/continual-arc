@@ -68,7 +68,7 @@ uv run pytest                                          # no network or keys need
 Or, as a dependency of your own learner, which brings the benchmark from the same repository:
 
 ```bash
-pip install "continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.2.0#subdirectory=baselines"
+pip install "continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.3.0#subdirectory=baselines"
 ```
 
 On Ubuntu 24.04, bubblewrap needs unprivileged user namespaces, which AppArmor restricts by default:
@@ -87,7 +87,7 @@ Each harness row needs its harness, at the versions of the paper's Appendix D:
 
 ```bash
 # a smoke run with a learner that never solves anything: no model, no key
-uv run arc-baselines run --learner continual_arc.testing:GiveUpLearner --config arc1-smoke --mode workstreams --seed 0
+uv run arc-baselines run --learner continual_arc.testing:GiveUpLearner --config arc1-smoke --seed 0
 
 # the stateless floor on the ARC-AGI-1 track at low effort, as the paper ran it
 export OPENROUTER_API_KEY=...
@@ -140,7 +140,7 @@ uv run continual-arc schedule make --config arc1-small --seed 0 --test seen --wi
 
 # the stream alone, then each test from the state it left
 uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
-  --config arc1-small --mode workstreams --seed 0 --no-epilogue --out runs/arc1/openclaw-ws0
+  --config arc1-small --seed 0 --no-epilogue --out runs/arc1/openclaw-ws0
 uv run arc-baselines test runs/arc1/openclaw-ws0 --schedule arc1-held-out0-1.json   # runs/arc1/openclaw-ws0/frozen/held-out/play
 uv run arc-baselines test runs/arc1/openclaw-ws0 --schedule arc1-seen0-1.json       # runs/arc1/openclaw-ws0/frozen/seen/play
 
@@ -150,7 +150,7 @@ uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-d
 uv run continual-arc transfer runs/arc1/openclaw-ws0/frozen/held-out/play runs/arc1/openclaw-reset-held-out
 
 # the share learned over the stream: the same stream, the harness wiped before every instance
-uv run continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --reset-each \
+uv run continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --reset-each \
   --out arc1-ws0-reset.json
 uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
   --schedule arc1-ws0-reset.json --out runs/arc1/openclaw-ws0-reset
@@ -198,7 +198,7 @@ user's state this way, in `users/uNNN/system/`.
 ```bash
 # the stream alone, its state committed at the end of every round
 uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
-  --config arc1-small --mode workstreams --seed 0 --stream-only --log-state --out runs/arc1/openclaw-ws0-logged
+  --config arc1-small --seed 0 --stream-only --log-state --out runs/arc1/openclaw-ws0-logged
 
 # taken up again from the end of round 99, with the state its learner had then: prints the command that plays on
 uv run arc-baselines fork runs/arc1/openclaw-ws0-logged --round 99 --out runs/arc1/openclaw-ws0-from-99

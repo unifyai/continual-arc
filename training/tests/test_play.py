@@ -107,7 +107,7 @@ def test_one_reference_play_over_users_0_to_3_serves_every_run_at_1_2_and_4_user
 
     reference = held(play.epilogue_cut(99, epilogue_users=4, users=4).slots)
     assert sorted(reference) == [0, 1, 2, 3] and all(len(v) == 100 for v in reference.values())
-    assert held(build_schedule(play.served(4), "fresh", play.SEED).slots) == reference
+    assert held(build_schedule(play.served(4), play.SEED, order="fresh").slots) == reference
     for users in (1, 2, 4):
         assert held(play.full_schedule(users=users).slots) == {u: reference[u] for u in range(users)}
 

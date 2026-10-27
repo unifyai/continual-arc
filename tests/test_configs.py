@@ -1,37 +1,37 @@
 import pytest
 
-from continual_arc.configs import CONFIGS, MODES, build_schedule, get_config, select_tasks
+from continual_arc.configs import CONFIGS, FRESH, ORDERS, build_schedule, get_config, select_tasks
 
 POOL = [f"r{i:03d}" for i in range(50)]
 EVAL = [f"e{i:03d}" for i in range(40)]
 
 
-@pytest.mark.parametrize("mode", MODES)
-def test_build_schedule_modes(mode):
-    sched = build_schedule("arc1-smoke", mode, seed=3, rearc_task_ids=POOL, eval_task_ids=EVAL)
+@pytest.mark.parametrize("order", (*ORDERS, FRESH))
+def test_build_schedule_orders(order):
+    sched = build_schedule("arc1-smoke", 3, order=order, rearc_task_ids=POOL, eval_task_ids=EVAL)
     cfg = CONFIGS["arc1-smoke"]
     stream = [s for s in sched.slots if s.phase != "epilogue"]
     epi = [s for s in sched.slots if s.phase == "epilogue"]
     assert len(epi) == cfg.n_epilogue_tasks
     assert all(sched.sources[s.task_id] == "arc_eval" for s in epi)
-    if mode == "fresh":
+    if order == "fresh":
         # the transfer reference: the held-out tasks alone, a fresh learner before each
         assert not stream and all(s.reset_before for s in epi)
     else:
         assert len({s.task_id for s in stream}) == cfg.n_tasks
         assert all(sched.sources[s.task_id] == "rearc" for s in stream)
-        assert not any(s.reset_before for s in sched.slots)  # a mode is an order, never a reset
-        if mode == "sequential":
+        assert not any(s.reset_before for s in sched.slots)  # an order arranges instances, never resets the learner
+        if order == "sequential":
             assert len(stream) == cfg.n_tasks * cfg.instances_per_task == cfg.stream_length
         else:
             assert len(stream) == cfg.stream_length
-    assert sched.meta["mode"] == mode and sched.meta["config"]["name"] == "arc1-smoke"
+    assert sched.meta["mode"] == order and sched.meta["config"]["name"] == "arc1-smoke"
 
 
-def test_same_task_set_across_modes():
+def test_same_task_set_across_orders():
     sets = []
-    for mode in MODES:
-        sched = build_schedule("arc1-smoke", mode, seed=11, rearc_task_ids=POOL, eval_task_ids=EVAL)
+    for order in (*ORDERS, FRESH):
+        sched = build_schedule("arc1-smoke", 11, order=order, rearc_task_ids=POOL, eval_task_ids=EVAL)
         sets.append(frozenset(s.task_id for s in sched.slots if s.phase != "epilogue"))
         sets.append(frozenset(s.task_id for s in sched.slots if s.phase == "epilogue"))
     assert sets[0] == sets[2] == sets[4]
@@ -39,7 +39,7 @@ def test_same_task_set_across_modes():
 
 
 def test_no_epilogue():
-    sched = build_schedule("arc1-smoke", "random", seed=0, rearc_task_ids=POOL, eval_task_ids=EVAL, epilogue=False)
+    sched = build_schedule("arc1-smoke", 0, order="random", rearc_task_ids=POOL, eval_task_ids=EVAL, epilogue=False)
     assert sched.phases() == ["stream"]
 
 
@@ -50,11 +50,11 @@ def test_select_tasks_deterministic_and_bounded():
         select_tasks(POOL, 51, 0, "x")
 
 
-def test_unknown_config_and_mode():
+def test_unknown_config_and_order():
     with pytest.raises(KeyError):
         get_config("huge")
     with pytest.raises(ValueError):
-        build_schedule("arc1-smoke", "sideways", 0, rearc_task_ids=POOL, eval_task_ids=EVAL)
+        build_schedule("arc1-smoke", 0, order="sideways", rearc_task_ids=POOL, eval_task_ids=EVAL)
 
 
 def test_named_configs_arrivals_fit_in_stream():
@@ -100,18 +100,18 @@ def test_canonical_protocol_per_track():
         assert proto["seeds"] == list(CANONICAL_SEEDS)
     pool = [f"t{i:03d}" for i in range(40)]
     evals = [f"e{i:03d}" for i in range(120)]
-    sched = build_schedule("arc1-small", "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    sched = build_schedule("arc1-small", 0, rearc_task_ids=pool, eval_task_ids=evals)
     assert sched.meta["track"] == "arc1"
     p = protocol_of(sched, EnvConfig())
     assert p["canonical"] and p["deviations"] == []
     p = protocol_of(sched, EnvConfig(demo_cost=0.5))
     assert not p["canonical"] and any("demo_cost" in d for d in p["deviations"])
-    sched = build_schedule("arc1-small", "sequential", 7, rearc_task_ids=pool, eval_task_ids=evals, epilogue=False)
+    sched = build_schedule("arc1-small", 7, order="sequential", rearc_task_ids=pool, eval_task_ids=evals, epilogue=False)
     p = protocol_of(sched)
     assert not p["canonical"]
     assert any("sequential" in d for d in p["deviations"]) and any("seed 7" in d for d in p["deviations"])
     # the frozen tests replaced the epilogue, so a stream without one is the canonical protocol
-    sched = build_schedule("arc1-small", "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals, epilogue=False)
+    sched = build_schedule("arc1-small", 0, rearc_task_ids=pool, eval_task_ids=evals, epilogue=False)
     p = protocol_of(sched, EnvConfig())
     assert p["canonical"] and p["deviations"] == [] and not p["epilogue"]
 
@@ -136,7 +136,7 @@ def test_a_configuration_served_to_several_users_gives_each_a_stream_of_their_ow
     assert cfg.instances_per_task == 8
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
-    sched = build_schedule(cfg, "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    sched = build_schedule(cfg, 0, rearc_task_ids=pool, eval_task_ids=evals)
     assert sched.users == 16 and sched.meta["config"]["users"] == 16 and len(sched.meta["users"]["seeds"]) == 16
     rounds = sched.rounds()
     assert rounds[-1] + 1 == 200 + 100  # 200 stream rounds, then every user's 100 held-out tasks
@@ -147,7 +147,7 @@ def test_a_configuration_served_to_several_users_gives_each_a_stream_of_their_ow
     assert set(Counter(s.task_id for s in stream).values()) == {128}  # every task 128 times over the team
     assert set(Counter((s.user, s.task_id) for s in stream).values()) == {8}  # and 8 times per user
     # the same tasks as one user alone, stream and epilogue alike
-    small = build_schedule("arc1-small", "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    small = build_schedule("arc1-small", 0, rearc_task_ids=pool, eval_task_ids=evals)
     for phase in ("stream", "epilogue"):
         assert {s.task_id for s in sched.slots if s.phase == phase} == {s.task_id for s in small.slots if s.phase == phase}
     # user 0 walks exactly one user's stream and epilogue at the same seed
@@ -160,13 +160,13 @@ def test_a_configuration_served_to_several_users_gives_each_a_stream_of_their_ow
     epi_orders = {tuple(s.task_id for s in sched.slots if s.user == u and s.phase == "epilogue") for u in range(16)}
     assert len(epi_orders) == 16  # a held-out task reaches the team gradually, in each user's own order
     # fewer users are more users cut to their first ones: user u's stream does not depend on how many there are
-    four = build_schedule(with_users("arc1-small", 4), "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    four = build_schedule(with_users("arc1-small", 4), 0, rearc_task_ids=pool, eval_task_ids=evals)
     for u in range(4):
         assert ([(s.task_id, s.instance_seed) for s in four.slots if s.user == u]
                 == [(s.task_id, s.instance_seed) for s in sched.slots if s.user == u])
     p = protocol_of(sched)
     assert p["regime"] == REGIME_COLLECTIVE and p["users"] == 16 and p["canonical"] and p["deviations"] == []
-    ten = protocol_of(build_schedule(with_users("arc1-small", 10), "workstreams", 0, rearc_task_ids=pool,
+    ten = protocol_of(build_schedule(with_users("arc1-small", 10), 0, rearc_task_ids=pool,
                                      eval_task_ids=evals))
     assert not ten["canonical"] and any("10 users is not one of the canonical" in d for d in ten["deviations"])
     with pytest.raises(ValueError, match="users"):
@@ -178,7 +178,7 @@ def test_collective_exposure_counts_the_team_and_each_user():
 
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
-    sched = build_schedule(with_users("arc1-small", 16), "workstreams", 1, rearc_task_ids=pool, eval_task_ids=evals)
+    sched = build_schedule(with_users("arc1-small", 16), 1, rearc_task_ids=pool, eval_task_ids=evals)
     infos = sched.annotate()
     seen: dict[tuple[int, str], int] = {}
     for slot, info in zip(sched.slots, infos, strict=True):
@@ -196,7 +196,7 @@ def test_collective_fresh_reference_wipes_before_every_round():
 
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
-    sched = build_schedule(with_users("arc1-small", 16), "fresh", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    sched = build_schedule(with_users("arc1-small", 16), 0, order="fresh", rearc_task_ids=pool, eval_task_ids=evals)
     assert len(sched) == 1_600 and sched.rounds()[-1] + 1 == 100
     assert [s.reset_before for s in sched.slots] == [i % 16 == 0 for i in range(1_600)]  # once per round
 
@@ -207,7 +207,7 @@ def test_epilogue_for_users_matches_the_full_schedules_own_epilogue():
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
     cfg = with_users("arc1-small", 16)
-    full = build_schedule(cfg, "workstreams", 3, rearc_task_ids=pool, eval_task_ids=evals)
+    full = build_schedule(cfg, 3, rearc_task_ids=pool, eval_task_ids=evals)
     k = 4
     epi = epilogue_for_users(cfg, 3, k, rearc_task_ids=pool, eval_task_ids=evals)
     assert epi.users == k and epi.phases() == ["epilogue"]
@@ -234,7 +234,7 @@ def test_protocol_labels_a_cut_stream_and_a_k_user_epilogue():
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
     cfg = with_users("arc1-small", 16)
-    full = build_schedule(cfg, "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    full = build_schedule(cfg, 0, rearc_task_ids=pool, eval_task_ids=evals)
 
     cut = full.first_rounds(20)
     p = protocol_of(cut)
@@ -290,7 +290,7 @@ def test_the_seen_test_draws_new_instances_of_the_streams_tasks():
     tasks = config_tasks(get_config("arc1-small"), pool, 0)
     assert sorted(s.task_id for s in test.slots) == sorted(tasks * SEEN_TEST_PER_TASK) and len(test.slots) == 100
     assert {s.phase for s in test.slots} == {"seen-test"} and set(test.sources.values()) == {"rearc"}
-    stream = build_schedule(with_users("arc1-small", 16), "workstreams", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    stream = build_schedule(with_users("arc1-small", 16), 0, rearc_task_ids=pool, eval_task_ids=evals)
     seeds = [s.instance_seed for s in test.slots]
     assert len(set(seeds)) == 100 and not set(seeds) & {s.instance_seed for s in stream.slots}
 

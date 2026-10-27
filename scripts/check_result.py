@@ -119,8 +119,8 @@ def check(run_dir: Path) -> list[str]:
         return problems
     schedule, config, records = load_run(run_dir)
     protocol = protocol_of(schedule, config)
-    expected = build_schedule(with_users(protocol["config"], protocol["users"]), protocol["mode"], protocol["seed"],
-                              epilogue=bool(protocol.get("epilogue")))
+    expected = build_schedule(with_users(protocol["config"], protocol["users"]), protocol["seed"],
+                              order=protocol["mode"], epilogue=bool(protocol.get("epilogue")))
     problems, _ = check_run(run_dir, expected, "the stream")
     submission = json.loads((run_dir / "submission.json").read_text())
     for field in SUBMISSION_FIELDS:

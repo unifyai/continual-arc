@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from continual_arc import __version__ as benchmark_version
 from continual_arc.learner import BaseLearner
 from continual_arc.schedule import stream_schedule
 from continual_arc.testing import FakeSource
@@ -33,7 +34,7 @@ def test_run_inside_a_drivers_attempt(tmp_path, monkeypatch, capsys):
     assert params["protocol"] == "workstreams/workstreams" and params["seed"] == 2
     assert params["benchmark"] == "continual-arc" and params["model"] is None
     assert set(params["dependencies"]) == {"continual-arc"}
-    assert params["protocol_version"].startswith("0.1.0+")
+    assert params["protocol_version"].startswith(f"{benchmark_version}+")
     assert params["proxy"] == {"enabled": False} and params["system"] == {}
 
 
@@ -108,15 +109,15 @@ def test_resume_continues_in_the_same_attempt(tmp_path, monkeypatch, capsys):
 
 
 def test_stream_only_plays_the_full_runs_stream_and_stops_before_its_epilogue():
-    """arc1-small's real schedule in each mode, over fake task ids (25 stream, 100 held out),
+    """arc1-small's real schedule in each order, over fake task ids (25 stream, 100 held out),
     so the test needs none of the pinned ARC data, which CI does not fetch."""
     from continual_arc.configs import build_schedule
 
     from continual_arc_baselines.cli import stream_of
 
     pool = FakeSource(n_tasks=125).task_ids()
-    for mode in ("workstreams", "sequential", "random"):
-        full = build_schedule("arc1-small", mode, seed=0, rearc_task_ids=pool[:25], eval_task_ids=pool[25:])
+    for order in ("workstreams", "sequential", "random"):
+        full = build_schedule("arc1-small", 0, order=order, rearc_task_ids=pool[:25], eval_task_ids=pool[25:])
         stream = stream_of(full)
         streamed = [s for s in full.slots if s.phase == "stream"]
         assert stream.slots == full.slots[:len(streamed)] and {s.phase for s in stream.slots} == {"stream"}

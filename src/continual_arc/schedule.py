@@ -1,6 +1,6 @@
 """Schedules: the sequence of task instances a learner faces.
 
-Every benchmark mode is just a schedule. A schedule is a list of :class:`Slot`
+The benchmark's stream is just a schedule. A schedule is a list of :class:`Slot`
 values, each naming a task, an instance seed (which fully determines the test
 input and any demos served for that slot), a phase label, whether the learner's
 persistent state must be wiped before the slot, and the user whose work it is.
@@ -13,16 +13,17 @@ in user order, all served at once (:func:`interleave_users`).
 One process generates every stream (:func:`stream_schedule`): a set of active tasks,
 each worked in a spell, resting between spells, with new tasks arriving over time.
 Its parameters (:class:`StreamParams`) place the stream on an axis from blocked to
-structureless, and the modes are named points on it:
+structureless, and its orders are named points on it:
 
-* ``workstreams`` — a few tasks active at once, exponential bursts, log-normal dormancy, Poisson arrivals.
+* ``workstreams`` — the benchmark's: a few tasks active at once, exponential bursts, log-normal dormancy, Poisson
+  arrivals.
 * ``sequential``  — one task active, one spell of every instance, tasks never return (blocked order).
 * ``random``      — every task active from the first step, spells never end (uniform i.i.d. order).
 
-A configuration gives every task the same *supply* of instances (its stream length over its
-number of tasks), and the process serves exactly that supply in every mode, so the three
-modes are the same multiset of instances in three orders. A supply of ``None`` is the process
-without that constraint.
+The last two serve the stream's visits only to check that the order does not change a finding (the paper's
+Appendix I). A configuration gives every task the same *supply* of instances (its stream length over its number of
+tasks), and the process serves exactly that supply in every order, so the three are the same multiset of instances
+in three orders. A supply of ``None`` is the process without that constraint.
 
 :func:`epilogue_schedule` generates the held-out tasks, each seen once.
 
@@ -375,14 +376,14 @@ def stream_schedule(
     seed: int,
     source: str,
     params: StreamParams | None = None,
-    mode: str = "workstreams",
+    order: str = "workstreams",
     name: str | None = None,
     instances_per_task: int | None = None,
 ) -> Schedule:
     """The stream: ``length`` instances over ``task_ids`` under one process.
 
     ``instances_per_task`` is each task's *supply*: when given, every task is served exactly
-    that many times over the stream, in every mode, so ``length`` must be the number of tasks
+    that many times over the stream, in every order, so ``length`` must be the number of tasks
     times the supply. A spell never exceeds what the task has left, and a task whose supply is
     spent is finished (it neither rests nor returns). Sequential is unchanged by it (one spell of
     the whole supply); random becomes a uniform shuffle of the balanced multiset; workstreams keeps
@@ -400,16 +401,17 @@ def stream_schedule(
     due, the soonest-waking dormant task is woken early so the stream never idles;
     unseen tasks are only pulled ahead of schedule when nothing else exists.
 
-    ``mode`` names the point on the axis (it seeds the generator and labels the
-    schedule), so the same seed gives different streams under different modes and
-    the same stream under the same parameters.
+    ``order`` names the point on the axis (it seeds the generator and labels the
+    schedule, under the key ``mode`` that saved schedules and run records carry), so the
+    same seed gives different streams in different orders and the same stream under the
+    same parameters.
     """
     params = params or StreamParams()
     params.validate()
     tasks = sorted(set(task_ids))
     if not tasks:
         raise ValueError("stream_schedule needs at least one task")
-    rng = random.Random(derive_seed(seed, mode))
+    rng = random.Random(derive_seed(seed, order))
     if instances_per_task is not None:
         if instances_per_task < 1:
             raise ValueError("instances_per_task must be >= 1")
@@ -483,13 +485,13 @@ def stream_schedule(
     spells.sort(key=lambda x: (x[1], x[0]))
 
     return Schedule(
-        name=name or mode,
+        name=name or order,
         seed=seed,
         slots=slots,
         sources={tid: source for tid in tasks},
         meta={
             "generator": "stream",
-            "mode": mode,
+            "mode": order,
             "length": length,
             "n_tasks": len(tasks),
             "params": asdict(params),

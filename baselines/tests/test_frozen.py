@@ -248,7 +248,7 @@ def test_a_test_stopped_hard_leaves_the_streams_state_aside_and_the_next_play_ta
 
 
 def test_a_test_of_a_stream_that_went_on_is_refused_and_the_stream_plays_on_from_its_own_state(frozen_tests, tmp_path):
-    full = build_schedule(CONFIG, "workstreams", 0, rearc_task_ids=STREAM_POOL, eval_task_ids=HELD_OUT_POOL,
+    full = build_schedule(CONFIG, 0, rearc_task_ids=STREAM_POOL, eval_task_ids=HELD_OUT_POOL,
                           epilogue=False)
     full.save(tmp_path / "full.json")
     full.first_rounds(60).save(tmp_path / "cut.json")

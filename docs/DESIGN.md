@@ -24,7 +24,7 @@ caching outputs pointless.
 | score | mean cost per instance = wrong attempts + demo requests | one number; compute/tokens/memory are plotted, not scored |
 | headline | T on the held-out test: the budget a learner saves there against itself reset before each instance, on the same instances; T on the seen test and the share learned on the stream, against the learner reset on its own stream, beside it (20, 21 and 22 Oct 2026, below) | no cache helps on a task never seen, and the reset plays the learner's own model in its own harness, the environment the learner learns in |
 | track | one, ARC-AGI-1 (`arc1`), named in every config (`arc1-small`); a bare size names nothing | its Re-ARC generators give every stream task fresh, verified instances without end, so a return is never a lookup; one track gives a learner one number, and the held-out season that verifies results streams as `arc1-small` does. ARC-AGI-2 has no generators, so its stream rested on augmentation, and ARC-AGI-3 serves levels, not fresh instances of a rule (Dan, 19 Oct 2026) |
-| canonical protocol | the `arc1-small` config's stream in workstreams mode, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
+| canonical protocol | the `arc1-small` config's stream, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
 | frozen tests | after the stream, two tests, each one round in which every instance is a user of its own from the learner's state at the stream's end: the held-out test, one instance of each of 100 never-seen evaluation tasks on `arc1-small` (25 until 20 Oct 2026), and the seen test, four fresh instances of each of the stream's 25 tasks (21 Oct 2026, below) | the held-out test reads generalisation and the seen test memorisation; a test during which the learner keeps learning would mix what it built on the stream with what it builds on the test |
 | add-ons | optional run-time auxiliary episodes, tagged separately | permits adaptive interventions such as spaced review without making them part of the learner protocol |
@@ -42,28 +42,28 @@ adapters key their bookkeeping on them, and the diagnostics use exposure from th
 adapters in `baselines/` render prompts without them (`systems/protocol.py`), but nothing
 in this package stops a Python learner from reading them.
 
-## Modes as schedules
+## The stream's order
 
-Every mode is a schedule and an order of presentation, nothing else: it never touches the learner's
-state, and the environment does not know which mode it is serving. One process generates every stream
+An order is how a schedule arranges its instances, nothing else: it never touches the learner's
+state, and the environment does not know which order it is serving. One process generates every stream
 (`stream_schedule`, `StreamParams`). Up to `concurrency` tasks are active and each step serves one of
 them, drawn uniformly; an active task runs for a spell (exponential with mean `burst_mean`, rounded to
 whole instances), then rests for a log-normal number of steps (median `dormancy_median`, sigma
 `dormancy_sigma`); never-seen tasks arrive as a Poisson process (mean interval `arrival_interval`) and
-take priority for a free slot, so the seen set grows through the stream. The modes are named settings
-of the process, from blocked to structureless:
+take priority for a free slot, so the seen set grows through the stream. The benchmark's stream is one
+setting of the process, and two others serve the same visits only as a check:
 
-* `sequential`: one task active, one spell of its whole supply, no return (blocked practice).
 * `workstreams`: the process's defaults, a few tasks active in bursts, dormant between them, new
-  tasks arriving; the mode of the canonical number.
+  tasks arriving; the benchmark's stream.
+* `sequential`: one task active, one spell of its whole supply, no return (blocked practice).
 * `random`: every task active from the first step, spells that never end (the i.i.d. control; a
   system's workstreams score minus its random score is what burstiness and dormancy cost it).
 
-Every configuration gives each task the same supply of instances and every mode serves exactly that
-supply, so the modes are one multiset of instances in three orders. Every mode can end with the same epilogue, the
-held-out tasks once each, nothing reset, which no measure reads since the frozen tests. `fresh` is not a mode but the
-epilogue alone, met by a learner whose state is wiped before each held-out task, which can stand in for the held-out
-test's reset reference.
+Every configuration gives each task the same supply of instances and every order serves exactly that
+supply, so the three are one multiset of instances in three orders. The stream can end with the epilogue, the
+held-out tasks once each, nothing reset, which no measure reads since the frozen tests. `fresh` is not an order but
+the epilogue alone, met by a learner whose state is wiped before each held-out task, which can stand in for the
+held-out test's reset reference.
 
 Why these three (Dan, 21 Sep 2026): the first design's `isolated` mode wiped the learner's state at task
 boundaries, an intervention on the system dressed as a schedule, with no analogue in any job; it became
@@ -71,6 +71,13 @@ boundaries, an intervention on the system dressed as a schedule, with no analogu
 live from the first step) was an epoch, a training-loop artefact whose constant gap cannot produce the
 retention-by-gap curve; `random` replaced it. The workstreams streams are frozen by
 `tests/fixtures/stream-golden.json`, because running cells were launched on those exact orders.
+
+One stream (Dan, 26 Oct 2026): the benchmark is the workstreams stream alone. It is the realistic order, a
+few tasks worked at once, set aside and taken up again, as work goes in an office, where neither one task at a
+time nor a full shuffle happens. One protocol makes a result simply a result on Continual-ARC, and gives later
+editions one base to add an axis to. Sequential and random stay only as the paper's check that the order does not
+change its findings (its Appendix I): played either way, the same visits lead GPT-6 Luna's harnesses to the same
+findings.
 
 ## Metrics
 

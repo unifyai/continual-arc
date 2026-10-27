@@ -89,7 +89,7 @@ class PartialPlugin:
 
 def test_addon_episode_is_inserted_without_changing_primary_metadata(fake_registry, fake_source):
     schedule = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name,
-                               params=sequential_params(2), mode="sequential")
+                               params=sequential_params(2), order="sequential")
     result = run(
         ShiftMemoryLearner(),
         schedule,
@@ -113,7 +113,7 @@ def test_addon_episode_is_inserted_without_changing_primary_metadata(fake_regist
 
 
 def test_env_reset_removes_inserted_addon_episodes(fake_registry, fake_source):
-    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, order="random")
     from continual_arc.env import ContinualArcEnv
 
     env = ContinualArcEnv(schedule, registry=fake_registry)
@@ -127,7 +127,7 @@ def test_env_reset_removes_inserted_addon_episodes(fake_registry, fake_source):
 
 
 def test_inserted_episode_preserves_dynamic_request_source(fake_registry, fake_source):
-    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, order="random")
     inline = InlineSource()
     fake_registry.add_source(inline)
     env = ContinualArcEnv(schedule, registry=fake_registry)
@@ -149,7 +149,7 @@ def test_inserted_episode_preserves_dynamic_request_source(fake_registry, fake_s
 
 
 def test_full_plugin_lifecycle_can_transform_and_record(fake_registry, fake_source):
-    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, order="random")
     plugin = FullPlugin()
     result = run(EchoLearner(), schedule, registry=fake_registry, plugins=[plugin])
 
@@ -166,7 +166,7 @@ def test_full_plugin_lifecycle_can_transform_and_record(fake_registry, fake_sour
 
 
 def test_plugin_can_implement_only_the_hooks_it_needs(fake_registry, fake_source):
-    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    schedule = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=RANDOM, order="random")
     result = run(EchoLearner(), schedule, registry=fake_registry, plugins=[PartialPlugin()])
 
     assert result.records[0].gave_up

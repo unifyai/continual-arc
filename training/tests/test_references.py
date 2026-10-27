@@ -256,7 +256,7 @@ def test_the_demo_cache_floor_at_the_players_settings_has_one_cache_for_the_team
 
 def test_the_floor_plays_the_one_user_rows_stream():
     from continual_arc.configs import build_schedule, get_config
-    canonical = build_schedule(get_config(play.STREAM_CONFIG), "workstreams", play.SEED)
+    canonical = build_schedule(get_config(play.STREAM_CONFIG), play.SEED)
     rows = play.full_schedule(play.SEED, 1)
     assert [(s.user, s.phase, s.task_id, s.instance_seed) for s in canonical.slots] == \
         [(s.user, s.phase, s.task_id, s.instance_seed) for s in rows.slots]

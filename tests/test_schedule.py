@@ -27,9 +27,9 @@ def workstreams_schedule(tasks, length, seed, source, params=None):
 
 
 def test_sequential_is_blocked_and_keeps_state():
-    s = stream_schedule(TASKS, 100, seed=1, source="fake", params=sequential_params(5), mode="sequential")
+    s = stream_schedule(TASKS, 100, seed=1, source="fake", params=sequential_params(5), order="sequential")
     assert len(s) == 100
-    assert not any(slot.reset_before for slot in s.slots)  # a mode orders instances; it never touches the learner
+    assert not any(slot.reset_before for slot in s.slots)  # an order arranges instances; it never touches the learner
     # each block of 5 is one task, and every task gets exactly one block
     blocks = [{slot.task_id for slot in s.slots[i : i + 5]} for i in range(0, 100, 5)]
     assert all(len(b) == 1 for b in blocks)
@@ -41,11 +41,11 @@ def test_sequential_is_blocked_and_keeps_state():
 
 def test_sequential_stalls_past_the_supply():
     with pytest.raises(RuntimeError, match="stalled"):
-        stream_schedule(TASKS, 101, seed=1, source="fake", params=sequential_params(5), mode="sequential")
+        stream_schedule(TASKS, 101, seed=1, source="fake", params=sequential_params(5), order="sequential")
 
 
 def test_random_is_uniform_from_the_first_step():
-    s = stream_schedule(TASKS, 2000, seed=3, source="fake", params=RANDOM, mode="random")
+    s = stream_schedule(TASKS, 2000, seed=3, source="fake", params=RANDOM, order="random")
     assert len(s) == 2000
     first_seen = {}
     for i, slot in enumerate(s.slots):
@@ -58,9 +58,9 @@ def test_random_is_uniform_from_the_first_step():
     assert 15 < sum(gaps) / len(gaps) < 25  # geometric with mean n_tasks
 
 
-def test_modes_share_the_slot_seeds_and_differ_in_order():
-    seq = stream_schedule(TASKS, 100, seed=1, source="fake", params=sequential_params(5), mode="sequential")
-    rnd = stream_schedule(TASKS, 100, seed=1, source="fake", params=RANDOM, mode="random")
+def test_the_orders_share_the_slot_seeds():
+    seq = stream_schedule(TASKS, 100, seed=1, source="fake", params=sequential_params(5), order="sequential")
+    rnd = stream_schedule(TASKS, 100, seed=1, source="fake", params=RANDOM, order="random")
     ws = stream_schedule(TASKS, 100, seed=1, source="fake")
     assert [x.instance_seed for x in seq.slots] == [x.instance_seed for x in rnd.slots] == [x.instance_seed for x in ws.slots]
     assert len({tuple(x.task_id for x in s.slots) for s in (seq, rnd, ws)}) == 3
@@ -75,8 +75,8 @@ def test_workstreams_streams_are_frozen():
     pool = [f"t{i:03d}" for i in range(500)]
     evals = [f"e{i:03d}" for i in range(500)]
     for key, digest in gold.items():
-        cfg, mode, seed = key.split("/")
-        s = build_schedule(cfg, mode, int(seed), rearc_task_ids=pool, eval_task_ids=evals)
+        cfg, order, seed = key.split("/")
+        s = build_schedule(cfg, int(seed), order=order, rearc_task_ids=pool, eval_task_ids=evals)
         stream = [(x.task_id, x.instance_seed, x.phase, x.reset_before) for x in s.slots if x.phase == PHASE_STREAM]
         assert hashlib.sha256(json.dumps(stream).encode()).hexdigest() == digest, key
 
@@ -149,7 +149,7 @@ def test_epilogue_reset_flag():
 
 
 def test_concat_and_json_roundtrip(tmp_path):
-    a = stream_schedule(TASKS[:5], 20, seed=1, source="fake", params=RANDOM, mode="random")
+    a = stream_schedule(TASKS[:5], 20, seed=1, source="fake", params=RANDOM, order="random")
     e = epilogue_schedule(["e1", "e2"], seed=1, source="eval")
     s = a.concat(e, name="combo")
     assert s.phases() == ["stream", "epilogue"]
@@ -166,8 +166,8 @@ def test_concat_and_json_roundtrip(tmp_path):
 
 
 def test_concat_rejects_conflicting_sources():
-    a = stream_schedule(["x"], 3, seed=1, source="fake", params=RANDOM, mode="random")
-    b = stream_schedule(["x"], 3, seed=1, source="other", params=RANDOM, mode="random")
+    a = stream_schedule(["x"], 3, seed=1, source="fake", params=RANDOM, order="random")
+    b = stream_schedule(["x"], 3, seed=1, source="other", params=RANDOM, order="random")
     with pytest.raises(ValueError):
         a.concat(b)
 
@@ -178,7 +178,7 @@ def test_from_json_rejects_unknown_format():
 
 
 def test_rounds_group_slots_by_users_and_break_at_phases():
-    stream = stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, mode="random")
+    stream = stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, order="random")
     epi = epilogue_schedule(["e1", "e2", "e3"], seed=1, source="eval")
     s = stream.concat(epi)
     assert s.users == 1 and s.rounds() == list(range(10))  # the individual regime: a round per slot
@@ -209,7 +209,7 @@ def test_annotate_counts_exposures_and_gaps_in_rounds():
 
 
 def test_users_survive_json_and_concat(tmp_path):
-    s = as_users(stream_schedule(TASKS[:3], 6, seed=1, source="fake", params=RANDOM, mode="random"), 2)
+    s = as_users(stream_schedule(TASKS[:3], 6, seed=1, source="fake", params=RANDOM, order="random"), 2)
     path = tmp_path / "s.json"
     s.save(path)
     back = Schedule.load(path)
@@ -218,15 +218,15 @@ def test_users_survive_json_and_concat(tmp_path):
     legacy = {("width" if k == "users" else k): v for k, v in s.to_json().items()}
     assert Schedule.from_json(legacy).users == 2  # files written before the rename
     assert Schedule.from_json({k: v for k, v in s.to_json().items() if k != "users"}).users == 1
-    one = stream_schedule(TASKS[:3], 6, seed=1, source="fake", params=RANDOM, mode="random")
+    one = stream_schedule(TASKS[:3], 6, seed=1, source="fake", params=RANDOM, order="random")
     assert all("user" not in x for x in one.to_json()["slots"])  # an individual schedule's file is unchanged
 
 
 def test_interleave_users_lays_out_rounds_of_every_user():
     from continual_arc.schedule import interleave_users
 
-    a = stream_schedule(TASKS[:3], 6, seed=1, source="fake", params=RANDOM, mode="random")
-    b = stream_schedule(TASKS[:3], 6, seed=2, source="fake", params=RANDOM, mode="random")
+    a = stream_schedule(TASKS[:3], 6, seed=1, source="fake", params=RANDOM, order="random")
+    b = stream_schedule(TASKS[:3], 6, seed=2, source="fake", params=RANDOM, order="random")
     team = interleave_users([a.concat(epilogue_schedule(["e1", "e2"], seed=1, source="eval", reset_each=True)),
                              b.concat(epilogue_schedule(["e1", "e2"], seed=2, source="eval"))], seed=7, name="team")
     assert team.users == 2 and len(team) == 16 and team.seed == 7
@@ -244,40 +244,40 @@ def test_unconstrained_streams_are_prefix_consistent():
     """Without a supply, a longer horizon is a superset of a shorter one. With a supply (every
     configuration) the stream depends on its length, and a checkpoint is a prefix read of one run
     rather than a shorter configuration."""
-    for mode, params in (("workstreams", None), ("random", RANDOM), ("sequential", sequential_params(30))):
-        short = stream_schedule(TASKS, 200, seed=4, source="fake", params=params, mode=mode)
-        long = stream_schedule(TASKS, 600, seed=4, source="fake", params=params, mode=mode)
-        assert long.slots[:200] == short.slots, mode
+    for order, params in (("workstreams", None), ("random", RANDOM), ("sequential", sequential_params(30))):
+        short = stream_schedule(TASKS, 200, seed=4, source="fake", params=params, order=order)
+        long = stream_schedule(TASKS, 600, seed=4, source="fake", params=params, order=order)
+        assert long.slots[:200] == short.slots, order
     n = len(TASKS)
-    short = stream_schedule(TASKS, 8 * n, seed=4, source="fake", params=RANDOM, mode="random", instances_per_task=8)
-    long = stream_schedule(TASKS, 24 * n, seed=4, source="fake", params=RANDOM, mode="random", instances_per_task=24)
+    short = stream_schedule(TASKS, 8 * n, seed=4, source="fake", params=RANDOM, order="random", instances_per_task=8)
+    long = stream_schedule(TASKS, 24 * n, seed=4, source="fake", params=RANDOM, order="random", instances_per_task=24)
     assert long.slots[:8 * n] != short.slots
 
 
-def test_even_visits_in_every_mode():
-    """With a supply, the three modes are one multiset of instances in three orders: every
+def test_even_visits_in_every_order():
+    """With a supply, the three orders serve one multiset of instances: every
     task exactly instances_per_task times, every task introduced, and no stall."""
     n = len(TASKS)
-    for mode, params in (("workstreams", StreamParams(concurrency=4, burst_mean=3.0, dormancy_median=30.0,
+    for order, params in (("workstreams", StreamParams(concurrency=4, burst_mean=3.0, dormancy_median=30.0,
                                                        dormancy_sigma=1.0, arrival_interval=2.0)),
                          ("random", RANDOM), ("sequential", sequential_params(8))):
         for seed in (0, 1, 2):
-            s = stream_schedule(TASKS, 8 * n, seed=seed, source="fake", params=params, mode=mode, instances_per_task=8)
+            s = stream_schedule(TASKS, 8 * n, seed=seed, source="fake", params=params, order=order, instances_per_task=8)
             counts = Counter(slot.task_id for slot in s.slots)
-            assert set(counts) == set(TASKS) and set(counts.values()) == {8}, (mode, seed)
+            assert set(counts) == set(TASKS) and set(counts.values()) == {8}, (order, seed)
             assert s.meta["instances_per_task"] == 8 and s.meta["n_tasks_introduced"] == n
     # the supply fixes the length
     with pytest.raises(ValueError, match="supply"):
-        stream_schedule(TASKS, 8 * n + 1, seed=0, source="fake", params=RANDOM, mode="random", instances_per_task=8)
+        stream_schedule(TASKS, 8 * n + 1, seed=0, source="fake", params=RANDOM, order="random", instances_per_task=8)
     # sequential is the same schedule with or without the supply
-    a = stream_schedule(TASKS, 8 * n, seed=5, source="fake", params=sequential_params(8), mode="sequential")
-    b = stream_schedule(TASKS, 8 * n, seed=5, source="fake", params=sequential_params(8), mode="sequential", instances_per_task=8)
+    a = stream_schedule(TASKS, 8 * n, seed=5, source="fake", params=sequential_params(8), order="sequential")
+    b = stream_schedule(TASKS, 8 * n, seed=5, source="fake", params=sequential_params(8), order="sequential", instances_per_task=8)
     assert a.slots == b.slots
 
 
 
 def test_reset_each_wipes_the_learner_before_every_slot_of_the_same_stream():
-    stream = as_users(stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, mode="random"), 2)
+    stream = as_users(stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, order="random"), 2)
     reset = stream.reset_each()
     assert [(s.task_id, s.instance_seed, s.user) for s in reset.slots] == [(s.task_id, s.instance_seed, s.user)
                                                                           for s in stream.slots]
@@ -285,7 +285,7 @@ def test_reset_each_wipes_the_learner_before_every_slot_of_the_same_stream():
     assert reset.users == stream.users and reset.meta["reset_each"] and reset.name == stream.name + "-reset"
 
 def test_first_rounds_is_a_literal_prefix():
-    stream = stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, mode="random")
+    stream = stream_schedule(TASKS[:4], 7, seed=1, source="fake", params=RANDOM, order="random")
     epi = epilogue_schedule(["e1", "e2", "e3"], seed=1, source="eval")
     full = as_users(stream.concat(epi), 3)
     assert full.rounds() == [0, 0, 0, 1, 1, 1, 2, 3, 3, 3]  # round 2 is a short, phase-ending round
@@ -304,7 +304,7 @@ def test_first_rounds_is_a_literal_prefix():
 
 
 def test_first_rounds_on_the_individual_regime():
-    s = stream_schedule(TASKS[:5], 20, seed=2, source="fake", params=RANDOM, mode="random")
+    s = stream_schedule(TASKS[:5], 20, seed=2, source="fake", params=RANDOM, order="random")
     assert s.users == 1
     cut = s.first_rounds(8)
     assert cut.slots == s.slots[:8]  # one user: a round is one slot
@@ -313,9 +313,9 @@ def test_first_rounds_on_the_individual_regime():
 
 def test_small_configs_visit_every_task_equally():
     for cfg in ("arc1-small",):
-        for mode in ("workstreams", "random", "sequential"):
+        for order in ("workstreams", "random", "sequential"):
             pool = [f"t{i:03d}" for i in range(500)]
-            s = build_schedule(cfg, mode, 0, rearc_task_ids=pool, eval_task_ids=[f"e{i:03d}" for i in range(500)])
+            s = build_schedule(cfg, 0, order=order, rearc_task_ids=pool, eval_task_ids=[f"e{i:03d}" for i in range(500)])
             stream = [x for x in s.slots if x.phase == PHASE_STREAM]
             counts = Counter(x.task_id for x in stream)
-            assert len(stream) == 200 and set(counts.values()) == {8} and len(counts) == 25, (cfg, mode)
+            assert len(stream) == 200 and set(counts.values()) == {8} and len(counts) == 25, (cfg, order)

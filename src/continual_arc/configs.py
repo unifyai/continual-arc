@@ -1,28 +1,29 @@
-"""Named benchmark configurations, the track they belong to, and the modes built
+"""Named benchmark configurations, the track they belong to, and the schedules built
 from them.
 
 Continual-ARC is one track, ARC-AGI-1 (``arc1``), and every configuration name
 carries it (``arc1-small``), so a bare size such as ``small`` names nothing. The
-track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream in
-workstreams mode and then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2,
-4, 8 or 16 users (:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only at the same number
-of users. Every other configuration, mode, seed, number of users or setting is an
-ablation and is labelled as such in run metadata and reports (:func:`protocol_of`).
+track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream and
+then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2, 4, 8 or 16 users
+(:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only at the same number of users. Every
+other configuration, order, seed, number of users or setting is an ablation and is labelled as such in run metadata
+and reports (:func:`protocol_of`).
 
-A configuration fixes the number of tasks, the stream length, the workstream
-parameters, the size of the held-out epilogue and the environment settings. From
-one configuration and one seed, :func:`build_schedule` produces any mode over the
-*same* task set. A mode is an order of presentation and nothing else; the
-environment, the interface and every metric are the same under each. One process
-generates every stream (:func:`continual_arc.schedule.stream_schedule`) and the
-modes are named settings of its parameters, from blocked to structureless:
+A configuration fixes the number of tasks, the stream length, the stream's parameters, the size of the held-out
+epilogue and the environment settings. From one configuration and one seed, :func:`build_schedule` produces its
+stream. One process generates every stream (:func:`continual_arc.schedule.stream_schedule`), and the benchmark's is
+one setting of its parameters, ``workstreams``: a few tasks active at once in bursts, dormancy between, new tasks
+arriving. Two other settings serve the same visits over the *same* task set in other orders, only to check that the
+order does not change a finding (the paper's Appendix I), and a run in either is an ablation:
 
-* ``sequential``  — one task at a time, every instance of a task before the next (blocked order).
-* ``workstreams`` — a few tasks active at once in bursts, dormancy between, new tasks arriving (the canonical protocol).
-* ``random``      — every task active from the first step, sampled uniformly (no temporal structure).
+* ``sequential`` — one task at a time, every instance of a task before the next (blocked order).
+* ``random``     — every task active from the first step, sampled uniformly (no temporal structure).
 
-A mode may be followed by the epilogue of never-seen evaluation tasks, met while the learner still learns, which no
-measure reads since the frozen tests replaced it. ``fresh`` is not a mode but the epilogue tasks alone, met by a
+An order is an order of presentation and nothing else; the environment, the interface and every metric are the same
+under each.
+
+The stream may be followed by the epilogue of never-seen evaluation tasks, met while the learner still learns, which
+no measure reads since the frozen tests replaced it. ``fresh`` is not an order but the epilogue tasks alone, met by a
 learner whose state is wiped before each, which serves as the held-out test's reset reference.
 
 After the stream the system is measured by two frozen tests (:func:`test_schedule`; Dan, 21 Oct 2026): the
@@ -45,8 +46,8 @@ weeks.
 A configuration's ``stream_length`` is an observation window, not a ceiling on
 what a learner may learn from: the generators produce fresh instances forever.
 Every task gets the same supply of instances, the stream length over the number
-of tasks, in every mode (:meth:`BenchmarkConfig.instances_per_task`), so the modes are one multiset of
-instances in three orders and a configuration's stream depends on its length: a
+of tasks, in every order (:meth:`BenchmarkConfig.instances_per_task`), so the three orders serve one multiset of
+instances and a configuration's stream depends on its length: a
 longer configuration is a different schedule, not a superset. ``checkpoints`` name
 the horizons within a run at which the score is also reported; a checkpoint read is
 a prefix of that run and never changes when the run is carried further.
@@ -78,12 +79,11 @@ from continual_arc.seeds import derive_seed
 from continual_arc.tasks import SOURCE_ARC_EVAL, SOURCE_REARC
 
 TRACKS = (DATASET_ARC1,)
-MODE_SEQUENTIAL = "sequential"
-MODE_WORKSTREAMS = "workstreams"
-MODE_RANDOM = "random"
-MODE_FRESH = "fresh"  # the transfer reference: epilogue only, state wiped before each task
-STREAM_MODES = (MODE_SEQUENTIAL, MODE_WORKSTREAMS, MODE_RANDOM)
-MODES = STREAM_MODES + (MODE_FRESH,)
+ORDER_WORKSTREAMS = "workstreams"  # the benchmark's stream
+ORDER_SEQUENTIAL = "sequential"
+ORDER_RANDOM = "random"
+ORDERS = (ORDER_WORKSTREAMS, ORDER_SEQUENTIAL, ORDER_RANDOM)
+FRESH = "fresh"  # the transfer reference: epilogue only, state wiped before each task
 REGIME_INDIVIDUAL = "individual"  # one user: one system, one person's stream, one instance at a time
 REGIME_COLLECTIVE = "collective"  # many users: one system serving a team, one instance per user per round
 
@@ -96,7 +96,7 @@ class BenchmarkConfig:
     """Instances in each user's stream (the whole stream in the individual regime)."""
     n_epilogue_tasks: int
     workstreams: StreamParams = field(default_factory=StreamParams)
-    """The canonical mode's point on the stream axis. Sequential and random are fixed
+    """The stream's point on the stream axis. The check's orders, sequential and random, are fixed
     functions of ``n_tasks`` and ``stream_length`` (:meth:`stream_params`)."""
     users: int = 1
     """People served at once (:func:`with_users`): 1 is the individual regime; more is the collective, where every
@@ -117,7 +117,8 @@ class BenchmarkConfig:
         if self.dataset not in TRACKS:
             raise ValueError(f"dataset must be one of {TRACKS}, got {self.dataset!r}")
         if self.stream_length % self.n_tasks:
-            raise ValueError("stream_length must be a multiple of n_tasks so sequential mode gives every task the same count")
+            raise ValueError("stream_length must be a multiple of n_tasks so the sequential order gives every task the "
+                             "same count")
         if self.users < 1:
             raise ValueError("users must be >= 1")
         total = self.stream_length * self.users
@@ -131,18 +132,18 @@ class BenchmarkConfig:
     @property
     def instances_per_task(self) -> int:
         """Each task's supply in one user's stream: the stream length shared equally, served
-        in every mode and in one block per task in sequential mode.
+        in every order and in one block per task in the sequential order.
         Over all users a task is met ``users`` times as often."""
         return self.stream_length // self.n_tasks
 
-    def stream_params(self, mode: str) -> StreamParams:
-        if mode == MODE_WORKSTREAMS:
+    def stream_params(self, order: str) -> StreamParams:
+        if order == ORDER_WORKSTREAMS:
             return self.workstreams
-        if mode == MODE_SEQUENTIAL:
+        if order == ORDER_SEQUENTIAL:
             return sequential_params(self.instances_per_task)
-        if mode == MODE_RANDOM:
+        if order == ORDER_RANDOM:
             return RANDOM
-        raise ValueError(f"{mode!r} is not a stream mode; choose from {STREAM_MODES}")
+        raise ValueError(f"{order!r} is not an order of the stream; choose from {ORDERS}")
 
     @property
     def track(self) -> str:
@@ -201,7 +202,6 @@ CONFIGS: dict[str, BenchmarkConfig] = {
 }
 
 
-CANONICAL_MODE = MODE_WORKSTREAMS
 CANONICAL_SEEDS = (0, 1, 2)
 CANONICAL_SIZE = "small"
 # The numbers of users a canonical score is read at, each a number of its own: powers of two up to 16, a low-data
@@ -220,7 +220,7 @@ def canonical_protocol(track: str) -> dict:
     return {
         "track": track,
         "config": canonical_config_name(track),
-        "mode": CANONICAL_MODE,
+        "mode": ORDER_WORKSTREAMS,
         "users": list(CANONICAL_USERS),
         "tests": list(TESTS),
         "seeds": list(CANONICAL_SEEDS),
@@ -281,7 +281,8 @@ def protocol_of(schedule, env_config=None) -> dict:
     """Describe a schedule's protocol and say whether it is the canonical one.
 
     Returns ``{"track", "config", "mode", "regime", "users", "seed", "epilogue",
-    "canonical", "deviations"}``. ``deviations`` lists, in words, every way the run departs
+    "canonical", "deviations"}``, ``mode`` naming the order under the key run records carry.
+    ``deviations`` lists, in words, every way the run departs
     from the track's canonical protocol; it is empty when ``canonical`` is true. A schedule cut
     short (:meth:`continual_arc.schedule.Schedule.first_rounds`) or built as a K-user epilogue
     alone (:func:`epilogue_for_users`) is always a deviation, named by round or by user count.
@@ -292,7 +293,7 @@ def protocol_of(schedule, env_config=None) -> dict:
     cfg_meta = meta.get("config") or {}
     track = meta.get("dataset") or cfg_meta.get("dataset") or DATASET_ARC1
     name = cfg_meta.get("name") or schedule.name
-    mode = meta.get("mode")
+    order = meta.get("mode")
     seed = meta.get("seed", schedule.seed)
     if meta.get("test"):   # a frozen test is canonical when its configuration and seed are
         deviations = ([f"configuration {name} is not {canonical_config_name(track)}"]
@@ -311,8 +312,8 @@ def protocol_of(schedule, env_config=None) -> dict:
         deviations.append(f"configuration {name} is not {canonical_config_name(track)}")
     if users not in CANONICAL_USERS:
         deviations.append(f"{users} users is not one of the canonical numbers of users {CANONICAL_USERS}")
-    if not epilogue_only and mode != CANONICAL_MODE:
-        deviations.append(f"mode {mode} is not {CANONICAL_MODE}")
+    if not epilogue_only and order != ORDER_WORKSTREAMS:
+        deviations.append(f"order {order} is not the stream's own, {ORDER_WORKSTREAMS}")
     if seed not in CANONICAL_SEEDS:
         deviations.append(f"seed {seed} is not one of the canonical seeds {CANONICAL_SEEDS}")
     if cut_to_round is not None:
@@ -325,7 +326,7 @@ def protocol_of(schedule, env_config=None) -> dict:
             if key in actual and actual[key] != value:
                 deviations.append(f"{key} = {actual[key]} instead of {value}")
     return {
-        "track": track, "config": name, "mode": mode,
+        "track": track, "config": name, "mode": order,
         "regime": REGIME_INDIVIDUAL if users == 1 else REGIME_COLLECTIVE, "users": users,
         "seed": seed, "epilogue": epilogue, "canonical": not deviations, "deviations": deviations,
     }
@@ -429,21 +430,25 @@ def _user_seeds(cfg: BenchmarkConfig, seed: int) -> list[int]:
 
 def build_schedule(
     config: str | BenchmarkConfig,
-    mode: str,
     seed: int,
+    *,
+    order: str = ORDER_WORKSTREAMS,
     rearc_task_ids: list[str] | None = None,
     eval_task_ids: list[str] | None = None,
     epilogue: bool = True,
 ) -> Schedule:
-    """Build the schedule for ``mode`` under ``config`` and ``seed``.
+    """The schedule of ``config`` at ``seed``: the benchmark's stream, then the held-out epilogue unless
+    ``epilogue`` is false.
 
-    ``rearc_task_ids`` (the stream pool) and ``eval_task_ids`` default to the full pinned
-    pools and are only overridable for testing. The same ``config``/``seed`` pair selects the
-    same task set in every mode, so runs are comparable across modes.
+    ``order`` serves the stream's visits in one of the check's orders instead (:data:`ORDERS`), or is
+    :data:`FRESH`, the held-out tasks alone with the learner wiped before each. ``rearc_task_ids`` (the
+    stream pool) and ``eval_task_ids`` default to the full pinned pools and are only overridable for
+    testing. The same ``config``/``seed`` pair selects the same task set in every order, so a check's
+    run meets the same visits as the stream's.
     """
     cfg = get_config(config)
-    if mode not in MODES:
-        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    if order not in (*ORDERS, FRESH):
+        raise ValueError(f"order must be one of {ORDERS} or {FRESH!r}, got {order!r}")
     if rearc_task_ids is None:
         rearc_task_ids = stream_task_pool(cfg)
     tasks = config_tasks(cfg, rearc_task_ids, seed)
@@ -454,12 +459,12 @@ def build_schedule(
     def one_user(user_seed: int) -> Schedule:
         """One user's own schedule: the stream process and the epilogue order at ``user_seed``,
         over the tasks and held-out tasks drawn at the configuration's ``seed``."""
-        if mode == MODE_FRESH:
+        if order == FRESH:
             # the transfer reference: the held-out tasks alone, a fresh learner before each
             return epilogue_schedule(_held_out_tasks(cfg, seed, eval_task_ids), user_seed, cfg.epilogue_source,
                                      reset_each=True, name=f"{cfg.name}-fresh")
         one = stream_schedule(
-            tasks, cfg.stream_length, user_seed, source, cfg.stream_params(mode), mode, name=f"{cfg.name}-{mode}",
+            tasks, cfg.stream_length, user_seed, source, cfg.stream_params(order), order, name=f"{cfg.name}-{order}",
             instances_per_task=cfg.instances_per_task,
         )
         if epilogue and cfg.n_epilogue_tasks > 0:
@@ -477,13 +482,13 @@ def build_schedule(
         # would; every other user draws the same process with a seed of their own.
         user_seeds = _user_seeds(cfg, seed)
         per_user = [one_user(s) for s in user_seeds]
-        sched = interleave_users(per_user, seed, name=f"{cfg.name}-{mode}")
+        sched = interleave_users(per_user, seed, name=f"{cfg.name}-{order}")
         parts = []  # each user's own parts (spells included) are under "users"
         user_meta = {"users": {"n": cfg.users, "seeds": user_seeds,
                                "parts": [x.meta.get("parts", [x.meta]) for x in per_user]}}
     sched.meta = {
         "config": cfg.to_json(),
-        "mode": mode,
+        "mode": order,
         "seed": seed,
         "dataset": cfg.dataset,
         "track": cfg.track,

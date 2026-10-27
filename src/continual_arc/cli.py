@@ -83,6 +83,7 @@ def cmd_schedule(args) -> int:
 
     if args.schedule_cmd == "make":
         from continual_arc.configs import (
+            ORDER_WORKSTREAMS,
             build_schedule,
             epilogue_for_users,
             test_schedule,
@@ -95,12 +96,12 @@ def cmd_schedule(args) -> int:
             raise SystemExit("--reset-each wipes the learner before every slot of a stream; a frozen test and the "
                              "held-out epilogue already say when their learner is wiped")
         if args.test is not None:
-            if args.mode is not None or args.rounds is not None or args.epilogue_users is not None:
-                raise SystemExit("--test builds a frozen test alone; --mode, --rounds and --epilogue-users do not apply")
+            if args.order is not None or args.rounds is not None or args.epilogue_users is not None:
+                raise SystemExit("--test builds a frozen test alone; --order, --rounds and --epilogue-users do not apply")
             sched = test_schedule(config, args.seed, args.test, width=args.width)
         elif args.epilogue_users is not None:
-            if args.mode is not None:
-                raise SystemExit("--epilogue-users builds the held-out epilogue alone; --mode does not apply to it")
+            if args.order is not None:
+                raise SystemExit("--epilogue-users builds the held-out epilogue alone; --order does not apply to it")
             if args.rounds is not None:
                 raise SystemExit("--epilogue-users and --rounds are not combined: cut the stream, or serve its "
                                  "epilogue to some users, not both in one schedule")
@@ -108,9 +109,8 @@ def cmd_schedule(args) -> int:
                 raise SystemExit("--epilogue-users already means epilogue only; --no-epilogue does not apply to it")
             sched = epilogue_for_users(config, args.seed, args.epilogue_users)
         else:
-            if args.mode is None:
-                raise SystemExit("--mode is required unless --epilogue-users is given")
-            sched = build_schedule(config, args.mode, args.seed, epilogue=not args.no_epilogue)
+            sched = build_schedule(config, args.seed, order=args.order or ORDER_WORKSTREAMS,
+                                   epilogue=not args.no_epilogue)
             if args.rounds is not None:
                 sched = sched.first_rounds(args.rounds)
             if args.reset_each:
@@ -247,7 +247,9 @@ def build_parser() -> argparse.ArgumentParser:
     ssub = s.add_subparsers(dest="schedule_cmd", required=True)
     sm = ssub.add_parser("make", help="build a schedule from a named config")
     sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}")
-    sm.add_argument("--mode", help="workstreams | sequential | random | fresh (the transfer reference); required unless --epilogue-users is given")
+    sm.add_argument("--order", help="unset for the benchmark's stream; sequential or random serve its visits in another "
+                                    "order, only for the check that the order does not change a finding (the paper's "
+                                    "Appendix I), and fresh the held-out tasks alone, the learner wiped before each")
     sm.add_argument("--seed", type=int, default=0)
     sm.add_argument("--users", type=int, default=1,
                     help="how many users the configuration is served to at once (with_users); 1, 2, 4, 8 and 16 are "
@@ -260,7 +262,7 @@ def build_parser() -> argparse.ArgumentParser:
     sm.add_argument("--epilogue-users", type=int, dest="epilogue_users",
                     help="build the held-out epilogue alone, for the first K of the --users "
                          "(each in the order and instance seeds the full schedule's own epilogue gives them); "
-                         "not combined with --mode, --rounds or --no-epilogue")
+                         "not combined with --order, --rounds or --no-epilogue")
     sm.add_argument("--test", choices=TESTS, help="build a frozen test alone (configs.test_schedule): held-out or seen")
     sm.add_argument("--width", type=int, help="with --test, how many users play at once (default all of them)")
     sm.add_argument("--out", help="output path (default <name>-seed<seed>.json)")

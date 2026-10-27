@@ -6,19 +6,20 @@
 # skipped, so a line can be run again; RESUME=1 continues a cell that stopped part-way. DRY_RUN=1 prints each cell's
 # run directory and command and runs nothing. RUNS=<dir> writes somewhere other than runs/.
 #
-#   bash scripts/launch-cell.sh floors <preset> <mode> <seed> [config]           row F: the bare model, stateless and
+#   bash scripts/launch-cell.sh floors <preset> <order> <seed> [config]          row F: the bare model, stateless and
 #                                                                                 with its demonstration cache (two cells)
-#   bash scripts/launch-cell.sh method <preset> <mode> <seed> [config]           row PL (its cells named M): the bare
+#   bash scripts/launch-cell.sh method <preset> <order> <seed> [config]          row PL (its cells named M): the bare
 #                                                                                 program library
-#   bash scripts/launch-cell.sh harness <preset> <config> <mode> <seed>          row H: prime-agent, every learning
+#   bash scripts/launch-cell.sh harness <preset> <config> <order> <seed>         row H: prime-agent, every learning
 #                                                                                 mechanism it ships switched on
-#   bash scripts/launch-cell.sh acp <mode> <seed> [config] [preset] [hermes|openclaw]   row H: hermes-agent and openclaw
+#   bash scripts/launch-cell.sh acp <order> <seed> [config] [preset] [hermes|openclaw]  row H: hermes-agent and openclaw
 #
 # A prefix on the verb gives the other rows: stateless-harness and stateless-acp (row H0, persistence switched off:
 # stopped, wiped and restarted before every instance), stateless-method (row PL0, its cells named M0), ask-harness and
 # ask-acp (row HA, asked to store after every verdict), pl-harness and pl-acp (row HPL, told to keep a program library
-# as row PL does), stateless-pl-harness and stateless-pl-acp (row HPL0). Modes are workstreams, sequential, random and
-# fresh (the transfer reference); configuration arc1-small.
+# as row PL does), stateless-pl-harness and stateless-pl-acp (row HPL0). The order is workstreams, the benchmark's
+# stream, or sequential or random, which the paper plays only to check that the order does not change a finding, or
+# fresh, the transfer reference; configuration arc1-small.
 #
 # An empty reply is re-prompted like any unusable reply, and a system is restarted only when its process is dead or
 # silent. EMPTY_REPLY=restart gives the earlier rule, under which an empty reply restarted the system: the paper's
@@ -47,12 +48,12 @@ case $kind in floors|method) [ -n "$suffix" ] && { echo "ask- and pl- are harnes
 export PATH="$HOME/.local/bin:$HOME/.openclaw/bin:$PATH"
 cd "$(dirname "$0")/.."
 RUNS=${RUNS:-runs}
-modeabbr() { case $1 in workstreams) echo ws;; sequential) echo seq;; random) echo rnd;; fresh) echo fresh;; *) echo "${1:0:3}";; esac; }
-launch() {  # cell learner kwargs defaults config mode seed
-    local cell=$1 learner=$2 kwargs=$3 defaults=$4 cfg=$5 mode=$6 seed=$7
+orderabbr() { case $1 in workstreams) echo ws;; sequential) echo seq;; random) echo rnd;; fresh) echo fresh;; *) echo "${1:0:3}";; esac; }
+launch() {  # cell learner kwargs defaults config order seed
+    local cell=$1 learner=$2 kwargs=$3 defaults=$4 cfg=$5 order=$6 seed=$7
     local dir="$RUNS/${cfg%%-*}/$cell"
     local cmd=(uv run --no-sync python -m continual_arc_baselines run --learner "$learner" --learner-kwargs "$kwargs"
-               --llm-defaults "$defaults" --config "$cfg" --mode "$mode" --seed "$seed" --no-epilogue --out "$dir"
+               --llm-defaults "$defaults" --config "$cfg" --order "$order" --seed "$seed" --no-epilogue --out "$dir"
                --events --quiet)
     [ -n "${RESUME:-}" ] && cmd+=(--resume)
     if [ -n "${DRY_RUN:-}" ]; then echo "$dir"; printf '  %q' "${cmd[@]}"; echo; return; fi
@@ -75,16 +76,16 @@ model_of() {
 }
 case $kind in
 harness)
-    preset=$1; cfg=$2; mode=$3; seed=$4
+    preset=$1; cfg=$2; order=$3; seed=$4
     model_of "$preset"
-    m=$(modeabbr "$mode"); track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
+    m=$(orderabbr "$order"); track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac   # a smoke never takes a grid cell's name
     think=$effort; [ "$think" = minimal ] && think=low   # prime-agent's own thinking levels stop at low; the model call carries minimal
     launch "$ROW-prime-agent-$tag-$m$seed" continual_arc_baselines.systems.prime_agent:PrimeAgentLearner \
         "{\"model\": \"$model\", \"thinking\": \"$think\", \"end\": \"finish\"$REPLY_KW, \"action_budget_s\": 300, \"max_model_calls\": 15$STATELESS_KW$ASK_KW}" \
-        "{\"reasoning_effort\": \"$effort\"}" "$cfg" "$mode" "$seed" ;;
+        "{\"reasoning_effort\": \"$effort\"}" "$cfg" "$order" "$seed" ;;
 acp)
-    mode=$1; seed=$2; cfg=${3:-arc1-small}; preset=${4:-luna6-low}; only=${5:-all}; m=$(modeabbr "$mode")
+    order=$1; seed=$2; cfg=${3:-arc1-small}; preset=${4:-luna6-low}; only=${5:-all}; m=$(orderabbr "$order")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac
@@ -93,7 +94,7 @@ acp)
         local oc=""; [ -n "$suffix" ] && [ "$1" = openclaw ] && oc=', "memory_search": true'
         launch "$ROW-$1-$tag-$m$seed" "continual_arc_baselines.systems.$2" \
         "{\"model\": \"$model\", \"timeout_s\": 600, \"idle_timeout_s\": 300, \"end\": \"finish\"$REPLY_KW$STATELESS_KW$ASK_KW$oc}" \
-        "{\"reasoning_effort\": \"$effort\"}" "$cfg" "$mode" "$seed"; }
+        "{\"reasoning_effort\": \"$effort\"}" "$cfg" "$order" "$seed"; }
     acp hermes hermes_agent:HermesAgentLearner
     acp openclaw openclaw:OpenClawLearner ;;
 floors)
@@ -101,27 +102,27 @@ floors)
     # per message, deciding itself when to request a pair and when to submit. BareModelLearner is the stateless floor;
     # BareDemoCacheLearner the demo-cache floor, the same model with the pairs it bought for a task (up to eight) shown
     # again free when the task returns. max_tokens is the model's maximum completion length (128k for GPT-6 Luna).
-    preset=$1; mode=$2; seed=$3; cfg=${4:-arc1-small}; m=$(modeabbr "$mode")
+    preset=$1; order=$2; seed=$3; cfg=${4:-arc1-small}; m=$(orderabbr "$order")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac
     for L in BareModelLearner BareDemoCacheLearner; do
         launch "F-$L-$tag-$m$seed" "continual_arc_baselines.systems.bare:$L" \
             "{\"model\": \"$model\", \"max_tokens\": 128000, \"end\": \"finish\"$REPLY_KW}" \
-            "{\"reasoning\": {\"effort\": \"$effort\"}}" "$cfg" "$mode" "$seed"
+            "{\"reasoning\": {\"effort\": \"$effort\"}}" "$cfg" "$order" "$seed"
     done ;;
 method)
     # Row PL: the program library, the bare demo-cache floor with a program for every submission (systems/bare.py,
     # BareProgramLibraryLearner): each program is checked free on the task's pairs, and the last one that reproduces
     # all of them is kept and run first when the task returns. Row PL0 (stateless-method) wipes the kept programs and
     # the demonstration cache before every instance. Their cells are named M and M0, as the run records name them.
-    preset=$1; mode=$2; seed=$3; cfg=${4:-arc1-small}; m=$(modeabbr "$mode")
+    preset=$1; order=$2; seed=$3; cfg=${4:-arc1-small}; m=$(orderabbr "$order")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac
     mrow=M; [ -n "$zero" ] && mrow=M0
     launch "$mrow-BareProgramLibraryLearner-$tag-$m$seed" "continual_arc_baselines.systems.bare:BareProgramLibraryLearner" \
         "{\"model\": \"$model\", \"max_tokens\": 128000, \"end\": \"finish\"$REPLY_KW$STATELESS_KW}" \
-        "{\"reasoning\": {\"effort\": \"$effort\"}}" "$cfg" "$mode" "$seed" ;;
+        "{\"reasoning\": {\"effort\": \"$effort\"}}" "$cfg" "$order" "$seed" ;;
 *) echo "usage: launch-cell.sh [stateless-|ask-|pl-]harness|acp|floors|method ..."; exit 1 ;;
 esac

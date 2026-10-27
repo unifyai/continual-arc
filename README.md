@@ -121,7 +121,7 @@ a result also shows the bare model on the same instances, and a reset that plays
 The reasons, and what remains open, are in [docs/DESIGN.md](docs/DESIGN.md#why-transfer-is-the-headline).
 
 ```bash
-continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --out ws.json
+continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --out stream.json
 continual-arc schedule make --config arc1-small --seed 0 --test held-out --out held-out.json
 continual-arc schedule make --config arc1-small --seed 0 --test seen --out seen.json
 ```
@@ -142,11 +142,11 @@ from continual_arc.schedule import Schedule
 from my_pkg.learners import MyLearner
 
 learner = MyLearner()
-run(learner, Schedule.load("ws.json"), out_dir="runs/my-ws")
+run(learner, Schedule.load("stream.json"), out_dir="runs/my-stream")
 for test in ("held-out", "seen"):
-    out = Path(f"runs/my-ws-{test}")
+    out = Path(f"runs/my-stream-{test}")
     out.mkdir(parents=True)
-    shutil.copy("runs/my-ws/alias-salt", out)        # the names the stream gave its tasks
+    shutil.copy("runs/my-stream/alias-salt", out)        # the names the stream gave its tasks
     run(copy.deepcopy(learner), Schedule.load(f"{test}.json"), out_dir=out)
 ```
 
@@ -160,8 +160,8 @@ continual-arc schedule make --config arc1-small --seed 0 --test held-out --width
 continual-arc schedule make --config arc1-small --seed 0 --test seen --width 1 --out seen-1.json
 continual-arc run --learner my_pkg.learners:MyLearner --schedule held-out-1.json --out runs/my-reset-held-out
 continual-arc run --learner my_pkg.learners:MyLearner --schedule seen-1.json --out runs/my-reset-seen
-continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out
-continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen
+continual-arc transfer runs/my-stream-held-out runs/my-reset-held-out
+continual-arc transfer --test seen runs/my-stream-seen runs/my-reset-seen
 ```
 
 The bare model's runs, shown beside T, come from `continual_arc_baselines.systems.bare.BareModelLearner` in
@@ -190,9 +190,9 @@ the system has outgrown the track and the next edition measures it. The share le
 memorisation while it is being built, and the seen test what is left of it at the end.
 
 ```bash
-continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --reset-each --out ws-reset.json
-continual-arc run --learner my_pkg.learners:MyLearner --schedule ws-reset.json --out runs/my-ws-reset
-continual-arc learned runs/my-ws runs/my-ws-reset
+continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --reset-each --out stream-reset.json
+continual-arc run --learner my_pkg.learners:MyLearner --schedule stream-reset.json --out runs/my-stream-reset
+continual-arc learned runs/my-stream runs/my-stream-reset
 ```
 
 prints the share with a 95 percent interval from a bootstrap over tasks
@@ -203,26 +203,26 @@ reset never met (another user's, at more users than the reset served), against t
 on the task.
 
 
-## Modes
+## The stream
 
-All modes are schedules over the same seeded task set, so results are comparable. One
-process generates every stream (`stream_schedule`): a set of active tasks, each worked in
-a spell, resting between spells, new tasks arriving over time. The modes are named
-settings of its parameters, from blocked to structureless; a mode is an order of
-presentation and never touches the learner's state.
+The stream interleaves its tasks as work does: a few tasks are active at once, each is worked in
+a spell of a few instances and then rests, and new tasks keep arriving, so a task can rest long
+enough to be forgotten before it returns. One process generates it (`stream_schedule`):
+exponential spells, log-normal rests and Poisson arrivals, at the parameters each configuration
+sets, with every task served the same number of times. An order of instances never touches the
+learner's state.
 
-| mode          | parameters                                                              | what the learner sees                                                    |
-|---------------|-------------------------------------------------------------------------|--------------------------------------------------------------------------|
-| `sequential`  | one active task, one spell of all its instances, no return               | one task at a time, every instance of it, then the next (blocked)         |
-| `workstreams` | a few active, exponential bursts, log-normal dormancy, Poisson arrivals  | bursts of a few tasks; tasks go dormant and return; new tasks keep arriving (canonical) |
-| `random`      | every task active, spells never end                                      | a uniform draw over all tasks at every step (no temporal structure)       |
+The same process can serve the stream's visits one task at a time (`--order sequential`) or
+fully shuffled (`--order random`). The paper plays those two only to check that the order does
+not change its findings (its Appendix I). They are not settings of the benchmark, and a run in
+either is an ablation.
 
-A mode can still end with the **epilogue** (`--no-epilogue` leaves it out): the held-out
+The stream can still end with the **epilogue** (`--no-epilogue` leaves it out): the held-out
 tasks once each, met while the learner still learns. No measure reads it. A learner that
 keeps learning through 100 held-out tasks mixes what it built on the stream with what it
-builds on them, and the held-out test reads the first alone. `fresh` is not a mode but the
-held-out tasks alone, met by a learner whose state is wiped before each, at the held-out
-test's own instances, so it can stand in for the held-out test's reset reference.
+builds on them, and the held-out test reads the first alone. `--order fresh` builds no stream
+but the held-out tasks alone, met by a learner whose state is wiped before each, at the
+held-out test's own instances, so it can stand in for the held-out test's reset reference.
 
 ## Regimes
 
@@ -277,7 +277,7 @@ under the uncut schedule.
 
 ```bash
 # the first 20 rounds of the stream served to 16 users
-continual-arc schedule make --config arc1-small --users 16 --mode workstreams --seed 0 --no-epilogue --rounds 20 --out stream-r20.json
+continual-arc schedule make --config arc1-small --users 16 --seed 0 --no-epilogue --rounds 20 --out stream-r20.json
 ```
 
 The frozen tests need none of the stream, only the configuration and seed, so a learner can
@@ -293,30 +293,30 @@ Continual-ARC is one track, ARC-AGI-1 (`arc1`), and every configuration name car
 |---|---|---|---|
 | `arc1` | `arc1-smoke`, `arc1-small`, `arc1-medium`, `arc1-full` | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
 
-The track has one canonical protocol: its `small` configuration's stream in workstreams order
-and then its two frozen tests, at the default environment settings, at each canonical number
+The track has one canonical protocol: its `small` configuration's stream and then its two
+frozen tests, at the default environment settings, at each canonical number
 of users. Its number is T on the held-out test, with T on the seen test and the share learned
 over the stream beside it. Seeds 0, 1 and 2 are all canonical; the paper reports seed 0, and
 the leaderboard compares runs at seed 0. Every run's `summary.json` and `meta.json` carry a `protocol` block that
-names the track and says whether the run is canonical; any other configuration, mode,
+names the track and says whether the run is canonical; any other configuration, order,
 seed or environment setting is an ablation and the report labels it as such. A bare
 size name such as `small` is refused: a configuration names its track.
 
 ## Quickstart
 
 ```bash
-uv run continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --out ws.json
+uv run continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --out stream.json
 uv run continual-arc schedule make --config arc1-small --seed 0 --test held-out --out held-out.json
 uv run continual-arc schedule make --config arc1-small --seed 0 --test seen --out seen.json
-uv run continual-arc schedule show ws.json --head 40
-uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule ws.json --out runs/my-ws
-uv run continual-arc report runs/my-ws --plots
-uv run continual-arc schedule make --config arc1-small --mode workstreams --seed 0 --no-epilogue --reset-each --out ws-reset.json
-uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule ws-reset.json --out runs/my-ws-reset
-uv run continual-arc learned runs/my-ws runs/my-ws-reset   # share learned over the stream
+uv run continual-arc schedule show stream.json --head 40
+uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule stream.json --out runs/my-stream
+uv run continual-arc report runs/my-stream --plots
+uv run continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --reset-each --out stream-reset.json
+uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule stream-reset.json --out runs/my-stream-reset
+uv run continual-arc learned runs/my-stream runs/my-stream-reset   # share learned over the stream
 # each test played from the end of the stream, and the learner reset on it (the two frozen tests, above)
-uv run continual-arc transfer runs/my-ws-held-out runs/my-reset-held-out   # the headline
-uv run continual-arc transfer --test seen runs/my-ws-seen runs/my-reset-seen
+uv run continual-arc transfer runs/my-stream-held-out runs/my-reset-held-out   # the headline
+uv run continual-arc transfer --test seen runs/my-stream-seen runs/my-reset-seen
 ```
 
 ## Writing a learner
@@ -409,7 +409,7 @@ arguments. The arguments are matched by position:
 ```bash
 uv run continual-arc run \
   --learner my_pkg.learners:MyLearner \
-  --schedule ws.json \
+  --schedule stream.json \
   --plugin my_pkg.plugins:ReviewPlugin \
   --plugin-kwargs '{"initial_interval":8}'
 ```
@@ -422,7 +422,7 @@ src/continual_arc/
   data.py        pinned fetch of Re-ARC and ARC-AGI-1, and of ARC-AGI-2 on request, whose public tasks new rules are screened against
   rearc.py       seeded, verified access to the Re-ARC generators
   tasks.py       task sources (generative Re-ARC, fixed ARC JSON) and registry
-  schedule.py    Slot/Schedule, the one stream generator and its mode presets, the phases and tests
+  schedule.py    Slot/Schedule, the one stream generator and its order presets, the phases and tests
   configs.py     named configurations, build_schedule() and test_schedule()
   env.py         the environment: observations (the slot's, and the learner's view of the instance), actions, feedback, cost accounting
   aliases.py     the per-run names a learner sees for tasks
@@ -444,7 +444,7 @@ The [leaderboard](https://unify.ai/continual-arc/leaderboard) opens with the pap
 on the public stream is taken as reported. It is marked verified once we have rerun its code on the held-out rules,
 which nobody outside unify has seen ([verified results](#verified-results)).
 
-1. Run your learner on the track's canonical protocol at seed 0 (`arc1-small`): its stream in workstreams order with
+1. Run your learner on the track's canonical protocol at seed 0 (`arc1-small`): its stream with
    `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset: on the same
    stream, wiped before every instance (`schedule make --reset-each`, [the share learned](#the-share-learned)), and
    before each instance of the tests ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start
@@ -465,7 +465,7 @@ which nobody outside unify has seen ([verified results](#verified-results)).
      "model": "GPT-6 Luna, medium effort",
      "code": "https://github.com/you/my-learner",
      "contact": "you@example.com",
-     "reset": "results/arc1/my-learner-ws-reset",
+     "reset": "results/arc1/my-learner-stream-reset",
      "tests": {
        "held-out": {"run": "results/arc1/my-learner-held-out", "reset": "results/arc1/my-learner-reset-held-out",
                     "bare": "results/arc1/bare-luna6-medium-held-out"},
@@ -504,7 +504,7 @@ tasks, and 25 held out. To have a learner verified on it:
    the repository with pip, implementing `continual_arc.learner`, and built with no arguments, so its settings are its
    class's defaults), the OpenRouter model it plays with and its reasoning effort, any other models it calls, and the
    encrypted key. A harness adapter on the baselines' `SystemLearner` depends on
-   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.2.0#subdirectory=baselines` alone,
+   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.3.0#subdirectory=baselines` alone,
    which brings the benchmark with it.
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,

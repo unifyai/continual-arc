@@ -15,7 +15,7 @@ from continual_arc.schedule import RANDOM, sequential_params, stream_schedule
 
 
 def make_env(fake_registry, fake_source, n=6, **cfg):
-    sched = stream_schedule(fake_source.task_ids()[:3], n, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    sched = stream_schedule(fake_source.task_ids()[:3], n, seed=0, source=fake_source.name, params=RANDOM, order="random")
     return ContinualArcEnv(sched, registry=fake_registry, config=EnvConfig(**cfg)), sched
 
 
@@ -130,7 +130,7 @@ def test_step_after_done_raises(fake_registry, fake_source):
 
 def test_records_carry_schedule_metadata(fake_registry, fake_source):
     ids = fake_source.task_ids()[:2]
-    sched = stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(3), mode="sequential")
+    sched = stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(3), order="sequential")
     env = ContinualArcEnv(sched, registry=fake_registry)
     obs = env.reset()
     assert not obs.reset_before and obs.phase == "stream"
@@ -162,7 +162,7 @@ def test_config_validation():
 
 def test_rounds_open_every_instance_at_once_and_commit_in_slot_order(fake_registry, fake_source):
     ids = fake_source.task_ids()[:1]
-    sched = stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(6), mode="sequential")
+    sched = stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(6), order="sequential")
     as_users(sched, 3)
     env = ContinualArcEnv(sched, registry=fake_registry)
     obs = env.reset()
@@ -193,7 +193,7 @@ def test_rounds_open_every_instance_at_once_and_commit_in_slot_order(fake_regist
 
 def test_restore_takes_whole_rounds_only(fake_registry, fake_source):
     ids = fake_source.task_ids()[:2]
-    sched = stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(3), mode="sequential")
+    sched = stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(3), order="sequential")
     as_users(sched, 3)
     env = ContinualArcEnv(sched, registry=fake_registry)
     env.reset()

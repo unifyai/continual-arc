@@ -100,7 +100,7 @@ def dependency_revisions(names: tuple[str, ...] = ("continual-arc",)) -> dict[st
     return out
 
 
-def run_parameters(*, learner, learner_spec, learner_kwargs, schedule, config_name, mode,
+def run_parameters(*, learner, learner_spec, learner_kwargs, schedule, config_name, order,
                    env_config, proxy_settings, alias_style) -> dict:
     """Everything worth recording about a run, in two layers: first the scalar keys by which runs are compared
     (programme, benchmark, protocol, method, model, seed, dataset, ...), then the full detail."""
@@ -118,7 +118,7 @@ def run_parameters(*, learner, learner_spec, learner_kwargs, schedule, config_na
         "benchmark": "continual-arc",
         "track": proto["track"],
         "canonical": proto["canonical"],
-        "protocol": f"{config_name or schedule.name}/{mode}",
+        "protocol": f"{config_name or schedule.name}/{order}",
         "protocol_version": f"{benchmark_version}+{arc_commit}",
         "method": learner_spec,
         "model": model,
@@ -191,7 +191,7 @@ def cmd_run(args) -> int:
     if args.schedule:
         schedule = Schedule.load(args.schedule)
     else:
-        schedule = build_schedule(args.config, args.mode, seed=args.seed, epilogue=not args.no_epilogue)
+        schedule = build_schedule(args.config, args.seed, order=args.order, epilogue=not args.no_epilogue)
     test = load_test(args.test) if args.test else None
     if args.stream_only or test is not None:
         schedule = stream_of(schedule)
@@ -288,7 +288,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         test = one_at_a_time(test)
     params = run_parameters(
         learner=learner, learner_spec=args.learner, learner_kwargs=kwargs, schedule=schedule,
-        config_name=args.config, mode=args.mode, env_config=config, proxy_settings=proxy_settings,
+        config_name=args.config, order=args.order, env_config=config, proxy_settings=proxy_settings,
         alias_style=args.alias_style,
     )
     attempt.parameters(params)
@@ -410,7 +410,10 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--learner-kwargs", help="JSON object of constructor kwargs")
     r.add_argument("--schedule", help="schedule JSON from `continual-arc schedule make`")
     r.add_argument("--config", help="named config to build a schedule from: <track>-<size>, e.g. arc1-small, arc1-medium (no default track)")
-    r.add_argument("--mode", default="workstreams", help="workstreams | sequential | random | fresh (the transfer reference)")
+    r.add_argument("--order", default="workstreams",
+                   help="workstreams, the benchmark's stream; sequential or random serve its visits in another order, "
+                        "only for the check that the order does not change a finding (the paper's Appendix I), and "
+                        "fresh the held-out tasks alone, the learner wiped before each")
     r.add_argument("--seed", type=int, default=0)
     r.add_argument("--no-epilogue", action="store_true",
                    help="with --config, the stream alone, as `continual-arc schedule make --no-epilogue` builds it: "

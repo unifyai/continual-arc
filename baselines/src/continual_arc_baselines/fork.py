@@ -32,7 +32,7 @@ from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.statelog import GIT_ENV, _git, commit_of, restore
 
 # Arguments of the old launch that fork replaces: where its schedule came from, its run directory, its --stop-after.
-_DROPPED = {"--config": 1, "--mode": 1, "--seed": 1, "--schedule": 1, "--out": 1, "--stop-after": 1, "--resume": 0}
+_DROPPED = {"--config": 1, "--order": 1, "--seed": 1, "--schedule": 1, "--out": 1, "--stop-after": 1, "--resume": 0}
 
 
 def _served(schedule: Schedule, n: int) -> list[tuple]:

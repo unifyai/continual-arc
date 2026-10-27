@@ -77,7 +77,7 @@ def served(users: int = SCHEDULE_USERS) -> Any:
 def full_schedule(seed: int = SEED, users: int = SCHEDULE_USERS) -> Any:
     """The whole schedule: the workstreams stream's 200 rounds of ``users`` instances, then the epilogue's 100."""
     from continual_arc.configs import build_schedule
-    return build_schedule(served(users), "workstreams", seed)
+    return build_schedule(served(users), seed)
 
 
 def schedule_cut(round_: int, seed: int = SEED, users: int = SCHEDULE_USERS) -> Any:

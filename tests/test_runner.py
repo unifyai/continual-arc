@@ -41,9 +41,9 @@ def test_memory_learner_pays_once_per_task_in_stream(fake_registry, fake_source,
     assert meta["learner"] == "ShiftMemoryLearner"
 
 
-def test_sequential_mode_keeps_memory_across_tasks(fake_registry, fake_source):
+def test_the_sequential_order_keeps_memory_across_tasks(fake_registry, fake_source):
     ids = fake_source.task_ids()[:4]
-    sched = stream_schedule(ids, len(ids) * 3, seed=1, source=fake_source.name, params=sequential_params(3), mode="sequential")
+    sched = stream_schedule(ids, len(ids) * 3, seed=1, source=fake_source.name, params=sequential_params(3), order="sequential")
     learner = ShiftMemoryLearner()
     result = run(learner, sched, registry=fake_registry)
     assert [r.cost for r in result.records] == [1, 0, 0] * 4
@@ -72,7 +72,7 @@ def test_epilogue_with_reset_each(fake_registry, fake_source):
 
 
 def test_echo_learner_hits_cap(fake_registry, fake_source):
-    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=sequential_params(2), mode="sequential")
+    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=sequential_params(2), order="sequential")
     result = run(EchoLearner(), sched, config=EnvConfig(attempt_cap=3), registry=fake_registry)
     # never solved: every instance costs the whole budget, 3 attempts + 8 demos
     assert all(r.cost == EnvConfig(attempt_cap=3).max_cost == 11 and not r.solved for r in result.records)
@@ -80,7 +80,7 @@ def test_echo_learner_hits_cap(fake_registry, fake_source):
 
 
 def test_demo_hungry_learner_respects_cap(fake_registry, fake_source):
-    sched = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=sequential_params(1), mode="sequential")
+    sched = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=sequential_params(1), order="sequential")
     cfg = EnvConfig(attempt_cap=4, demo_cap=3)
     result = run(DemoHungryLearner(), sched, config=cfg, registry=fake_registry)
     rec = result.records[0]
@@ -92,7 +92,7 @@ def test_runaway_learner_is_forced_to_give_up(fake_registry, fake_source):
         def act(self, obs):
             return RequestDemos()
 
-    sched = stream_schedule(fake_source.task_ids()[:1], 2, seed=0, source=fake_source.name, params=sequential_params(2), mode="sequential")
+    sched = stream_schedule(fake_source.task_ids()[:1], 2, seed=0, source=fake_source.name, params=sequential_params(2), order="sequential")
     cfg = EnvConfig(attempt_cap=2, demo_cap=2)
     result = run(Forever(), sched, config=cfg, registry=fake_registry)
     assert len(result.records) == 2
@@ -103,7 +103,7 @@ def test_runaway_learner_is_forced_to_give_up(fake_registry, fake_source):
 
 
 def test_events_log(fake_registry, fake_source, tmp_path):
-    sched = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=sequential_params(1), mode="sequential")
+    sched = stream_schedule(fake_source.task_ids()[:1], 1, seed=0, source=fake_source.name, params=sequential_params(1), order="sequential")
     run(ShiftMemoryLearner(), sched, out_dir=tmp_path / "r", registry=fake_registry, log_events=True)
     lines = (tmp_path / "r" / "events.jsonl").read_text().splitlines()
     kinds = [json.loads(line)["action"]["type"] for line in lines]
@@ -176,7 +176,7 @@ def test_collective_regime_runs_in_rounds(fake_registry, fake_source, tmp_path):
     from continual_arc.testing import RoundMemoryLearner
 
     ids = fake_source.task_ids()[:4]
-    sched = stream_schedule(ids, 24, seed=2, source=fake_source.name, params=sequential_params(6), mode="sequential")
+    sched = stream_schedule(ids, 24, seed=2, source=fake_source.name, params=sequential_params(6), order="sequential")
     as_users(sched, 4)  # six rounds of four; each task fills a round and a half
     learner = RoundMemoryLearner()
     result = run(learner, sched, out_dir=tmp_path / "run", registry=fake_registry)
@@ -201,7 +201,7 @@ def test_records_are_written_by_whole_rounds_and_resume_replays_the_round(fake_r
     from continual_arc.testing import RoundMemoryLearner
 
     ids = fake_source.task_ids()[:3]
-    sched = stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, mode="random")
+    sched = stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, order="random")
     as_users(sched, 4)
 
     class CrashInRound(RoundMemoryLearner):
@@ -227,7 +227,7 @@ def test_resume_plays_exactly_one_round_per_call_under_a_growing_cut(fake_regist
     stream: run one round, train outside the runner, repeat under a schedule one round longer."""
     ids = fake_source.task_ids()[:2]
     full = as_users(
-        stream_schedule(ids, 6, seed=7, source=fake_source.name, params=sequential_params(3), mode="sequential"), 2
+        stream_schedule(ids, 6, seed=7, source=fake_source.name, params=sequential_params(3), order="sequential"), 2
     )
     assert full.rounds()[-1] + 1 == 3
 
@@ -251,7 +251,7 @@ def test_resume_plays_exactly_one_round_per_call_under_a_growing_cut(fake_regist
 def test_resume_works_under_a_schedule_cut_longer_than_the_last_run(fake_registry, fake_source, tmp_path):
     ids = fake_source.task_ids()[:3]
     full = as_users(
-        stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, mode="random"), 4
+        stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, order="random"), 4
     )
     out = tmp_path / "run"
     run(ShiftMemoryLearner(), full.first_rounds(1), out_dir=out, registry=fake_registry)
@@ -264,7 +264,7 @@ def test_concurrent_users_are_served_at_their_own_pace(fake_registry, fake_sourc
 
     ids = fake_source.task_ids()[:4]
     sched = as_users(stream_schedule(ids, 24, seed=2, source=fake_source.name, params=sequential_params(6),
-                                     mode="sequential"), 4)
+                                     order="sequential"), 4)
     serial = run(RoundMemoryLearner(), sched, registry=fake_registry)
     learner = ConcurrentRoundMemoryLearner(delay_s=0.01)
     result = run(learner, sched, out_dir=tmp_path / "run", registry=fake_registry)
@@ -288,7 +288,7 @@ def test_a_failing_user_stops_the_round_and_resume_replays_it(fake_registry, fak
     from continual_arc.testing import ConcurrentRoundMemoryLearner
 
     ids = fake_source.task_ids()[:3]
-    sched = as_users(stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, mode="random"), 4)
+    sched = as_users(stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, order="random"), 4)
 
     class CrashInRound(ConcurrentRoundMemoryLearner):
         def act(self, obs):
@@ -311,10 +311,10 @@ def test_a_concurrent_learner_counts_per_user(fake_registry, fake_source):
         concurrent_users = True
 
     sched = as_users(stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=RANDOM,
-                                     mode="random"), 2)
+                                     order="random"), 2)
     with pytest.raises(TypeError, match="per user"):
         run(NoCounters(), sched, registry=fake_registry)
-    single = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    single = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=RANDOM, order="random")
     assert len(run(NoCounters(), single, registry=fake_registry).records) == 4  # one user: the serial loop
 
 
@@ -324,7 +324,7 @@ def test_add_ons_need_the_individual_regime(fake_registry, fake_source):
     class Quiet(Addon):
         name = "quiet"
 
-    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=RANDOM, mode="random")
+    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=RANDOM, order="random")
     as_users(sched, 2)
     with pytest.raises(ValueError, match="one user"):
         run(ShiftMemoryLearner(), sched, registry=fake_registry, addon=Quiet())
@@ -394,7 +394,7 @@ def test_rescore_charges_an_old_run_as_the_benchmark_charges_now(fake_registry, 
     """A run written under the earlier rule (an unsolved instance charged the attempt cap plus its demo requests) is
     recharged: every unsolved instance costs max_cost, the summary follows, meta.json says so, and a second pass
     changes nothing."""
-    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=sequential_params(2), mode="sequential")
+    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name, params=sequential_params(2), order="sequential")
     out = tmp_path / "run"
     config = EnvConfig(attempt_cap=3)
     run(EchoLearner(), sched, config=config, out_dir=out, registry=fake_registry)
@@ -415,7 +415,7 @@ def test_a_wide_round_can_be_served_a_few_users_at_a_time(fake_registry, fake_so
 
     ids = fake_source.task_ids()[:4]
     sched = as_users(stream_schedule(ids, 24, seed=2, source=fake_source.name, params=sequential_params(6),
-                                     mode="sequential"), 4)
+                                     order="sequential"), 4)
     serial = run(RoundMemoryLearner(), sched, registry=fake_registry)
     learner = ConcurrentRoundMemoryLearner(delay_s=0.01)
     result = run(learner, sched, registry=fake_registry, max_concurrent=2)
