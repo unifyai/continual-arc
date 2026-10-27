@@ -477,3 +477,88 @@ def test_a_long_serve_keeps_the_tracker_touched(upstream, monkeypatch):
         assert chat(proxy).json()["choices"][0]["message"]["content"] == "ok"
     assert touches[-1] > 0.15   # the tracker moved on while serve ran, without a byte through the proxy
     assert upstream.requests == []
+
+
+def _served_reply(cost: float) -> dict:
+    return {"id": "chatcmpl-served", "choices": [{"index": 0, "message": {"role": "assistant", "content": "ok"},
+                                                  "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 40, "completion_tokens": 7, "cost": cost}}
+
+
+def _stream(proxy: LLMProxy, read_s: float):
+    return httpx.stream("POST", proxy.base_url + "/chat/completions",
+                        timeout=httpx.Timeout(10, read=read_s),
+                        json={"model": "vendor/model", "messages": [{"role": "user", "content": "hi"}],
+                              "stream": True})
+
+
+def test_a_long_serve_keeps_a_streamed_call_open(upstream, monkeypatch):
+    """A streamed call the proxy answers itself gets its stream's headers and a comment every KEEPALIVE_S while serve
+    runs, so that a client that drops a call with nothing back for a while (prime-agent's, after about five minutes)
+    waits for the reply, which then follows on the same stream."""
+    import continual_arc_baselines.proxy as proxy_module
+
+    monkeypatch.setattr(proxy_module, "KEEPALIVE_S", 0.05)
+    tracker = Tracker()
+
+    def serve(parsed, call_id):
+        time.sleep(0.5)
+        return _served_reply(0.25)
+
+    with LLMProxy(upstream.base_url, tracker=tracker, serve=serve) as proxy:
+        with _stream(proxy, read_s=0.3) as response:   # a read timeout shorter than the serve
+            raw = b"".join(response.iter_bytes()).decode()
+    assert raw.startswith(": serving\n\n")
+    events = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
+    assert events[0]["choices"][0]["delta"]["content"] == "ok" and raw.rstrip().endswith("data: [DONE]")
+    usage = tracker.usage.as_resources()
+    assert usage["llm_failed_requests"] == 0 and usage["llm_cost_usd"] == pytest.approx(0.25)
+    assert upstream.requests == []
+
+
+def test_a_served_reply_whose_system_went_away_is_still_counted(upstream, monkeypatch):
+    """The provider charges for a reply the system went away from: it is counted, the call cancelled."""
+    import threading
+
+    import continual_arc_baselines.proxy as proxy_module
+
+    monkeypatch.setattr(proxy_module, "KEEPALIVE_S", 0.05)
+    tracker = Tracker()
+    seen = []
+    tracker.subscribe(seen.append)
+    gone = threading.Event()
+
+    def serve(parsed, call_id):
+        gone.wait(5)
+        time.sleep(0.3)   # a few comments meet the closed connection before the reply does
+        return _served_reply(0.5)
+
+    since = time.monotonic()
+    with LLMProxy(upstream.base_url, tracker=tracker, serve=serve) as proxy:
+        with _stream(proxy, read_s=5) as response:
+            next(response.iter_bytes())   # the stream opened; then the system leaves
+        gone.set()
+        assert tracker.wait_ended(since, timeout=5) == {}
+    assert seen[-1].status == "cancelled" and seen[-1].cost == Decimal("0.5")
+    usage = tracker.usage.as_resources()
+    assert usage["llm_failed_requests"] == 1 and usage["llm_cost_usd"] == pytest.approx(0.5)
+
+
+def test_a_serve_that_gives_up_once_the_stream_is_open_fails_the_call(upstream, monkeypatch):
+    """A hook that declines a streamed call after its stream opened cannot have it forwarded: the stream ends on a
+    mid-stream error, which a client retries as an upstream's failure, and the upstream never sees the call."""
+    import continual_arc_baselines.proxy as proxy_module
+
+    monkeypatch.setattr(proxy_module, "KEEPALIVE_S", 0.05)
+    tracker = Tracker()
+
+    def serve(parsed, call_id):
+        time.sleep(0.2)
+        return None
+
+    with LLMProxy(upstream.base_url, tracker=tracker, serve=serve) as proxy:
+        with _stream(proxy, read_s=5) as response:
+            raw = b"".join(response.iter_bytes()).decode()
+    events = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
+    assert events == [proxy_module.SERVE_FAILED] and events[0]["choices"][0]["finish_reason"] == "error"
+    assert tracker.usage.as_resources()["llm_failed_requests"] == 1 and upstream.requests == []

@@ -264,8 +264,9 @@ class LLMProxy:
         self.role_map: dict[str, str] = dict(role_map or {})
         self.thinking_field = thinking_field
         # a chat completion answered here instead of by the upstream: serve(parsed body, call id) -> a response body, or
-        # None to forward the call as it is; sent to the harness
-        # as JSON, or as one streamed message when the call asked for a stream, and captured and counted as any other
+        # None to forward the call as it is; sent to the harness as JSON, or as one streamed message when the call asked
+        # for a stream, and captured and counted as any other. A streamed call is opened and kept alive while serve
+        # runs (_Handler._serve), so a None after its first KEEPALIVE_S is no longer forwarded but fails the call
         self.serve = serve
         self.capture_content = capture_content
         self._server: ThreadingHTTPServer | None = None
@@ -457,7 +458,12 @@ def _has_block_cache_control(payload: dict) -> bool:
     return False
 
 
-KEEPALIVE_S = 30.0   # how often a call being served (LLMProxy.serve) touches the tracker
+KEEPALIVE_S = 30.0   # how often a call being served (LLMProxy.serve) touches the tracker and, streamed, sends a comment
+# What a streamed call whose serve gave up once its stream was open ends on: a mid-stream error as OpenRouter sends one,
+# which a system's client raises and retries as an upstream's failure.
+SERVE_FAILED = {"object": "chat.completion.chunk",
+                "error": {"code": "server_error", "message": "the call was not answered"},
+                "choices": [{"index": 0, "delta": {"content": ""}, "finish_reason": "error"}]}
 
 
 def served_events(served: dict) -> list[dict]:
@@ -504,23 +510,95 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _send_served(self, served: dict, stream: bool) -> None:
-        """A response made here (:attr:`LLMProxy.serve`): as JSON, or, when the call asked for a stream, as server-sent
-        events with the whole message in one delta, then its finish reason and usage, then ``[DONE]`` (what a client
-        assembles into the same message; :func:`served_events`)."""
-        if not stream:
-            self._send_json(200, served)
-            return
+    def _open_stream(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Transfer-Encoding", "chunked")
         self.end_headers()
-        for event in served_events(served) + ["[DONE]"]:
-            data = b"data: " + (event.encode() if isinstance(event, str) else json.dumps(event).encode()) + b"\n\n"
-            self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+
+    def _chunk(self, data: bytes) -> None:
+        self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+        self.wfile.flush()
+
+    def _end_stream(self, events: list[dict]) -> None:
+        """An open stream's server-sent events, then ``[DONE]`` and its end."""
+        for event in events:
+            self._chunk(b"data: " + json.dumps(event).encode() + b"\n\n")
+        self._chunk(b"data: [DONE]\n\n")
         self.wfile.write(b"0\r\n\r\n")
         self.wfile.flush()
+
+    def _serve(self, parsed: dict, call: LLMCall, stream: bool, started: float) -> bool:
+        """Answer a chat completion with :attr:`LLMProxy.serve`: as JSON, or, when the call asked for a stream, as
+        server-sent events with the whole message in one delta, then its finish reason and usage, then ``[DONE]`` (what
+        a client assembles into the same message; :func:`served_events`). False for a call the hook declined (None)
+        before its stream opened, which is forwarded.
+
+        The proxy is busy on the call, not hung. Every KEEPALIVE_S while serve runs it touches the tracker, as bytes
+        moving would, so that an adapter's idle watchdog does not take a long serve for a dead system; and a streamed
+        call gets its stream's headers and then a comment, as an upstream's stream carries bytes before its reply, so
+        that the system's client keeps waiting: prime-agent's drops a call that brings nothing back for about five
+        minutes and asks again, and the reply it dropped is paid for and lost. A hook that declines or fails once the
+        stream is open ends it on :data:`SERVE_FAILED`. A reply is counted before it is sent, so one whose system went
+        away still has its tokens and cost."""
+        owner = self.owner
+        writing, done = threading.Lock(), threading.Event()
+        opened = False
+
+        def keepalive() -> None:
+            nonlocal opened
+            while not done.wait(KEEPALIVE_S):
+                owner.tracker.touch()
+                with writing:
+                    if not stream or done.is_set():
+                        continue
+                    try:
+                        if not opened:
+                            self._open_stream()
+                            opened = True
+                        self._chunk(b": serving\n\n")
+                    except OSError:   # the system went away: the reply is still counted when it comes
+                        return
+
+        threading.Thread(target=keepalive, daemon=True, name="serve-keepalive").start()
+        try:
+            served = owner.serve(parsed, call.call_id)
+        except Exception:  # noqa: BLE001  (declined: forwarded, or failed once the stream is open)
+            logging.getLogger(__name__).exception("call %s: serve failed", call.call_id[:8])
+            served = None
+        finally:
+            with writing:
+                done.set()
+        if served is None and not opened:
+            return False
+        try:
+            if served is None:
+                call.status, call.error = "failed", "serve gave no reply after the stream opened"
+                self._end_stream([SERVE_FAILED])
+                return True
+            # the seconds of this call that were not the reply's generation (the served body's _budget_credit_s): its
+            # adapter leaves them out of the turn's budget (Tracker.credit), or, negative, counts a replayed reply's
+            # recorded generation that the call did not take; the system never sees the field
+            owner.tracker.credit(float(served.pop("_budget_credit_s", 0.0) or 0.0))
+            call.status_code, call.response_headers = 200, {"x-proxy-served": "local"}
+            _absorb(call, served)
+            if owner.capture_content:
+                call.response_body = served
+            if not stream:
+                self._send_json(200, served)
+            else:
+                if not opened:
+                    self._open_stream()
+                self._end_stream(served_events(served))
+            call.status = "completed"
+        except OSError:   # the system went away (a broken pipe, a reset, or macOS's EPROTOTYPE on a closing socket)
+            if served is not None:
+                call.status, call.error = "cancelled", "client disconnected"
+        finally:
+            call.latency_ms = (time.monotonic() - started) * 1000
+            owner.tracker.emit(_snapshot(call))
+        return True
 
     def _forward(self, method: str) -> None:
         owner = self.owner
@@ -535,44 +613,9 @@ class _Handler(BaseHTTPRequestHandler):
         )
         owner.tracker.emit(_snapshot(call))
         started = time.monotonic()
-        if owner.serve is not None and parsed is not None and self.path.rstrip("/").endswith("/chat/completions"):
-            # the proxy is busy on the call, not hung: its tracker is touched every KEEPALIVE_S while serve runs, as bytes
-            # moving would touch it, so that an adapter's idle watchdog does not take a long serve (minutes, near
-            # prime-agent's idle timeout) for a dead system
-            done = threading.Event()
-
-            def keepalive() -> None:
-                while not done.wait(KEEPALIVE_S):
-                    owner.tracker.touch()
-
-            threading.Thread(target=keepalive, daemon=True, name="serve-keepalive").start()
-            try:
-                served = owner.serve(parsed, call.call_id)
-            except Exception:  # noqa: BLE001  (the call is forwarded instead)
-                logging.getLogger(__name__).exception("call %s: serve failed; the call is forwarded", call.call_id[:8])
-                served = None
-            finally:
-                done.set()
-            if served is not None:
-                # the seconds of this call that were not the reply's generation (the served body's _budget_credit_s):
-                # its adapter leaves them out of the turn's budget (Tracker.credit), or, negative, counts a replayed
-                # reply's recorded generation that the call did not take; the system never sees the field
-                owner.tracker.credit(float(served.pop("_budget_credit_s", 0.0) or 0.0))
-                try:
-                    self._send_served(served, stream)
-                    call.status_code = 200
-                    call.response_headers = {"x-proxy-served": "local"}
-                    _absorb(call, served)
-                    if owner.capture_content:
-                        call.response_body = served
-                    call.latency_ms = (time.monotonic() - started) * 1000
-                    call.status = "completed"
-                except (BrokenPipeError, ConnectionResetError):
-                    call.latency_ms = (time.monotonic() - started) * 1000
-                    call.status, call.error = "cancelled", "client disconnected"
-                finally:
-                    owner.tracker.emit(_snapshot(call))
-                return
+        if (owner.serve is not None and parsed is not None and self.path.rstrip("/").endswith("/chat/completions")
+                and self._serve(parsed, call, stream, started)):
+            return
         sent = False
         try:
             # A throttled or failing upstream is infrastructure, not the system's answer: retry
