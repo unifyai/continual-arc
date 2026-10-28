@@ -1,13 +1,15 @@
 """Named benchmark configurations, the track they belong to, and the schedules built
 from them.
 
-Continual-ARC is one track, ARC-AGI-1 (``arc1``), and every configuration name
-carries it (``arc1-small``), so a bare size such as ``small`` names nothing. The
+Continual-ARC has a track for each ARC-AGI edition (:data:`TRACKS`): ARC-AGI-1 (``arc1``), its stream fresh
+instances of the ARC-AGI-1 training tasks from Re-ARC's generators, and ARC-AGI-2 (``arc2``), its stream fresh
+instances of the ARC-AGI-2 training tasks new to the second edition from ARC-GEN's generators (``docs/arc2.md``).
+Every configuration name carries its track (``arc1-small``), so a bare size such as ``small`` names nothing. Each
 track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream and
 then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2, 4, 8 or 16 users
-(:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only at the same number of users. Every
-other configuration, order, seed, number of users or setting is an ablation and is labelled as such in run metadata
-and reports (:func:`protocol_of`).
+(:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only on the same track at the same
+number of users. Every other configuration, order, seed, number of users or setting is an ablation and is labeled
+as such in run metadata and reports (:func:`protocol_of`).
 
 A configuration fixes the number of tasks, the stream length, the stream's parameters, the size of the held-out
 epilogue and the environment settings. From one configuration and one seed, :func:`build_schedule` produces its
@@ -58,7 +60,7 @@ from __future__ import annotations
 import random
 from dataclasses import asdict, dataclass, field, replace
 
-from continual_arc.data import DATASET_ARC1
+from continual_arc.data import DATASET_ARC1, DATASET_ARC2
 from continual_arc.env import EnvConfig
 from continual_arc.schedule import (
     PHASE_SEEN_TEST,
@@ -76,9 +78,12 @@ from continual_arc.schedule import (
     stream_schedule,
 )
 from continual_arc.seeds import derive_seed
-from continual_arc.tasks import SOURCE_ARC_EVAL, SOURCE_REARC
+from continual_arc.tasks import SOURCE_ARC2_EVAL, SOURCE_ARC_EVAL, SOURCE_ARCGEN, SOURCE_REARC
 
-TRACKS = (DATASET_ARC1,)
+TRACKS = (DATASET_ARC1, DATASET_ARC2)
+# each track's sources: its stream's (and seen test's), and its held-out tasks'
+_STREAM_SOURCE = {DATASET_ARC1: SOURCE_REARC, DATASET_ARC2: SOURCE_ARCGEN}
+_HELD_OUT_SOURCE = {DATASET_ARC1: SOURCE_ARC_EVAL, DATASET_ARC2: SOURCE_ARC2_EVAL}
 ORDER_WORKSTREAMS = "workstreams"  # the benchmark's stream
 ORDER_SEQUENTIAL = "sequential"
 ORDER_RANDOM = "random"
@@ -111,7 +116,9 @@ class BenchmarkConfig:
     env: EnvConfig = field(default_factory=EnvConfig)
     dataset: str = DATASET_ARC1
     """The track: ``arc1``, whose stream draws on Re-ARC generators over the ARC-AGI-1
-    training tasks and whose epilogue on the ARC-AGI-1 evaluation tasks."""
+    training tasks and whose held-out tasks are the ARC-AGI-1 evaluation tasks, or ``arc2``, whose stream draws on
+    ARC-GEN's generators over the ARC-AGI-2 training tasks new to the second edition that passed the screen and whose
+    held-out tasks are the ARC-AGI-2 evaluation tasks new to it."""
 
     def __post_init__(self) -> None:
         if self.dataset not in TRACKS:
@@ -152,11 +159,11 @@ class BenchmarkConfig:
 
     @property
     def stream_source(self) -> str:
-        return SOURCE_REARC
+        return _STREAM_SOURCE[self.dataset]
 
     @property
     def epilogue_source(self) -> str:
-        return SOURCE_ARC_EVAL
+        return _HELD_OUT_SOURCE[self.dataset]
 
     def to_json(self) -> dict:
         return asdict(self)
@@ -198,6 +205,28 @@ CONFIGS: dict[str, BenchmarkConfig] = {
         workstreams=StreamParams(
             concurrency=6, burst_mean=6.0, dormancy_median=300.0, dormancy_sigma=1.0, arrival_interval=20.0
         ),
+    ),
+    # ARC-AGI-2: the first track's smoke and small shapes, the stream from the screened ARC-GEN pool and the held-out
+    # tasks from the 114 evaluation tasks new to the second edition
+    "arc2-smoke": BenchmarkConfig(
+        name="arc2-smoke",
+        n_tasks=8,
+        stream_length=120,
+        n_epilogue_tasks=8,
+        workstreams=StreamParams(
+            concurrency=3, burst_mean=5.0, dormancy_median=20.0, dormancy_sigma=0.8, arrival_interval=10.0
+        ),
+        dataset=DATASET_ARC2,
+    ),
+    "arc2-small": BenchmarkConfig(
+        name="arc2-small",
+        n_tasks=25,
+        stream_length=200,
+        n_epilogue_tasks=100,
+        workstreams=StreamParams(
+            concurrency=4, burst_mean=3.0, dormancy_median=30.0, dormancy_sigma=1.0, arrival_interval=2.0
+        ),
+        dataset=DATASET_ARC2,
     ),
 }
 
@@ -402,17 +431,24 @@ def config_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
 
 
 def stream_task_pool(cfg: BenchmarkConfig) -> list[str]:
-    """Every task id the stream of ``cfg`` may draw on: the ARC-AGI-1 training tasks, through their Re-ARC
-    generators."""
+    """Every task id the stream of ``cfg`` may draw on: on ``arc1`` the ARC-AGI-1 training tasks, through their
+    Re-ARC generators; on ``arc2`` the screened pool of ARC-AGI-2 training tasks, through their ARC-GEN generators."""
+    if cfg.dataset == DATASET_ARC2:
+        from continual_arc.arcgen import pool
+
+        return pool()
     from continual_arc.rearc import ReArc
 
     return ReArc().task_ids
 
 
 def epilogue_task_pool(cfg: BenchmarkConfig) -> list[str]:
-    """Every task id the epilogue of ``cfg`` may draw on: the ARC-AGI-1 evaluation tasks."""
-    from continual_arc.data import arc_task_ids
+    """Every task id the held-out tasks of ``cfg`` may be drawn from: the ARC-AGI-1 evaluation tasks, or the
+    ARC-AGI-2 evaluation tasks new to the second edition."""
+    from continual_arc.data import arc2_new_task_ids, arc_task_ids
 
+    if cfg.dataset == DATASET_ARC2:
+        return arc2_new_task_ids("evaluation")
     return arc_task_ids("evaluation", dataset=cfg.dataset)
 
 

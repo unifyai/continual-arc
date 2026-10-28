@@ -234,11 +234,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("data", help="fetch or inspect the pinned upstream data")
     dsub = d.add_subparsers(dest="data_cmd", required=True)
-    df = dsub.add_parser("fetch", help="clone Re-ARC and ARC-AGI at the pinned commits")
+    df = dsub.add_parser("fetch", help="clone the pinned upstreams a track needs")
     df.add_argument("--force", action="store_true", help="re-clone even if present")
     df.add_argument("--datasets", nargs="+",
-                    help="arc1, the track (the default); arc2 also clones ARC-AGI-2, whose public tasks new rules are "
-                         "screened against")
+                    help="arc1 (the default), the first track: Re-ARC and ARC-AGI; arc2, the second: ARC-AGI-2, "
+                         "ARC-GEN and ARC-AGI")
     ds = dsub.add_parser("status", help="show whether the data is present and pinned")
     ds.add_argument("--datasets", nargs="+", help="arc1 (the default) and arc2")
     d.set_defaults(func=cmd_data)
@@ -246,7 +246,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("schedule", help="build or inspect schedules")
     ssub = s.add_subparsers(dest="schedule_cmd", required=True)
     sm = ssub.add_parser("make", help="build a schedule from a named config")
-    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}")
+    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, arc2-{smoke,small}")
     sm.add_argument("--order", help="unset for the benchmark's stream; sequential or random serve its visits in another "
                                     "order, only for the check that the order does not change a finding (the paper's "
                                     "Appendix I), and fresh the held-out tasks alone, the learner wiped before each")

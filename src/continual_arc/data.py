@@ -1,15 +1,20 @@
 """Fetching and loading the pinned upstream data.
 
-Three upstream repositories are pinned by commit:
+Four upstream repositories are pinned by commit:
 
 * Re-ARC (MIT) provides procedural generators and verifiers for the 400
   ARC-AGI-1 training tasks.
 * ARC-AGI (Apache-2.0) provides the original 400 training and 400 evaluation
   tasks as JSON.
 * ARC-AGI-2 (Apache-2.0) provides the 1,000 training and 120 evaluation tasks
-  of the second edition, JSON in the same schema. No track serves them: they are
-  fetched only on request (``arc2``), so that new rules, such as the held-out
-  season's, can be screened against every public ARC task.
+  of the second edition, JSON in the same schema.
+* ARC-GEN (Apache-2.0, Google) provides procedural generators for 900 public
+  tasks, 500 of them ARC-AGI-2 training tasks (:mod:`continual_arc.arcgen`).
+  Apache-2.0 allows the use and redistribution of what they generate.
+
+``arc1``, the first track, needs Re-ARC and ARC-AGI. ``arc2``, the second, needs
+ARC-AGI-2, ARC-GEN and ARC-AGI, whose ids tell which ARC-AGI-2 tasks are new to the
+second edition (:func:`arc2_new_task_ids`).
 
 All are cloned into ``$CONTINUAL_ARC_DATA`` (default ``~/.cache/continual-arc``)
 by :func:`fetch`. Nothing is vendored into this package, so the benchmark data is
@@ -35,20 +40,23 @@ ARC_COMMIT = "399030444e0ab0cc8b4e199870fb20b863846f34"
 ARC2_REPO = "https://github.com/arcprize/ARC-AGI-2"
 ARC2_COMMIT = "f3283f727488ad98fe575ea6a5ac981e4a188e49"
 
+ARCGEN_REPO = "https://github.com/google/arc-gen"
+ARCGEN_COMMIT = "a15cbdb44c776610aeeb9f487a06af875d3d0878"
+
 ARC_SPLITS = ("training", "evaluation")
 
 DATASET_ARC1 = "arc1"
 DATASET_ARC2 = "arc2"
 DATASETS = (DATASET_ARC1, DATASET_ARC2)
 
-# Upstream name -> (repo, commit, folder under the data root). ``arc1``, the track, needs the
-# first two; ``arc2`` the third.
+# Upstream name -> (repo, commit, folder under the data root), and what each dataset needs.
 _UPSTREAMS = {
     "re-arc": (REARC_REPO, REARC_COMMIT, "re-arc"),
     "ARC-AGI": (ARC_REPO, ARC_COMMIT, "ARC-AGI"),
     "ARC-AGI-2": (ARC2_REPO, ARC2_COMMIT, "ARC-AGI-2"),
+    "arc-gen": (ARCGEN_REPO, ARCGEN_COMMIT, "arc-gen"),
 }
-_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2",)}
+_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2", "arc-gen", "ARC-AGI")}
 
 
 class DataNotFound(RuntimeError):
@@ -72,6 +80,10 @@ def arc_dir() -> Path:
 
 def arc2_dir() -> Path:
     return data_root() / "ARC-AGI-2"
+
+
+def arcgen_dir() -> Path:
+    return data_root() / "arc-gen"
 
 
 def dataset_dir(dataset: str) -> Path:
@@ -210,4 +222,18 @@ def arc_task_ids(split: str, dataset: str = DATASET_ARC1) -> list[str]:
     return sorted(p.stem for p in folder.glob("*.json"))
 
 
+def arc1_task_ids() -> frozenset[str]:
+    """Every ARC-AGI-1 task id, training and evaluation splits together, from the ARC-AGI checkout the second
+    track fetches with its own data."""
+    require_data(DATASET_ARC2)
+    return frozenset(p.stem for split in ARC_SPLITS for p in (arc_dir() / "data" / split).glob("*.json"))
 
+
+def arc2_new_task_ids(split: str) -> list[str]:
+    """The ARC-AGI-2 tasks of ``split`` that are not ARC-AGI-1 tasks: 233 of the 1,000 training tasks and 114 of
+    the 120 evaluation tasks. The second edition carries the first inside it (391 ARC-AGI-1 training and 376
+    ARC-AGI-1 evaluation tasks among its training tasks, 6 among its evaluation tasks), and a stream drawn from
+    all of it was in practice an ARC-AGI-1 stream, solved at first sight by a model that scores 18 percent on
+    the second edition (23 Sep 2026). The second track draws only on these."""
+    old = arc1_task_ids()
+    return [t for t in arc_task_ids(split, DATASET_ARC2) if t not in old]

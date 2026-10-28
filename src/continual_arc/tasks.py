@@ -2,12 +2,14 @@
 
 Two kinds of source exist:
 
-* :class:`ReArcSource` — generative. Every instance and every demo pair is freshly
-  sampled from the task's Re-ARC generator, seeded by the slot, so no two slots
+* Generative: :class:`ReArcSource` (the first track's stream, Re-ARC's generators for
+  the ARC-AGI-1 training tasks) and :class:`ArcGenSource` (the second track's, ARC-GEN's
+  for ARC-AGI-2 training tasks). Every instance and every demo pair is freshly
+  sampled from the task's generator, seeded by the slot, so no two slots
   share a test input and demos differ across requests.
-* :class:`FixedArcSource` — the original ARC-AGI-1 JSON tasks. Used for the
-  evaluation split (which has no generators) in the held-out epilogue. Test
-  instances cycle through the task's ``test`` pairs; demos are the task's own
+* :class:`FixedArcSource` — the original ARC JSON tasks, ARC-AGI-1's or ARC-AGI-2's.
+  Used for the evaluation splits (which have no generators) in the held-out test.
+  Test instances cycle through the task's ``test`` pairs; demos are the task's own
   ``train`` pairs, always the same, and nothing after them.
 
 A :class:`TaskRegistry` maps each task id to the source it should be served from.
@@ -15,6 +17,7 @@ A :class:`TaskRegistry` maps each task id to the source it should be served from
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -24,7 +27,9 @@ from continual_arc.seeds import derive_seed
 SOURCE_REARC = "rearc"
 SOURCE_ARC_TRAIN = "arc_train"
 SOURCE_ARC_EVAL = "arc_eval"
-SOURCE_NAMES = (SOURCE_REARC, SOURCE_ARC_TRAIN, SOURCE_ARC_EVAL)
+SOURCE_ARCGEN = "arcgen"
+SOURCE_ARC2_EVAL = "arc2_eval"
+SOURCE_NAMES = (SOURCE_REARC, SOURCE_ARC_TRAIN, SOURCE_ARC_EVAL, SOURCE_ARCGEN, SOURCE_ARC2_EVAL)
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,19 @@ def _drip(own: list[Pair], exclude: Pair, start: int, n: int) -> list[Pair]:
     return [p for p in own if grid_hash(p.input) != ex][start:start + n]
 
 
+def _fresh(draw: Callable[[int, frozenset[str]], Pair], instance_seed: int, request_index: int, n: int,
+           exclude: Pair) -> list[Pair]:
+    """Request ``request_index``'s ``n`` demonstrations of an instance, each ``draw(seed, excluded input hashes)``
+    at a seed of its own, so that none shares its input with the test or with another of the request."""
+    seen = {grid_hash(exclude.input)}
+    pairs: list[Pair] = []
+    for k in range(n):
+        pair = draw(derive_seed("demo", instance_seed, request_index, k), frozenset(seen))
+        seen.add(grid_hash(pair.input))
+        pairs.append(pair)
+    return pairs
+
+
 class ReArcSource:
     """Generative source backed by the Re-ARC generators."""
 
@@ -103,19 +121,41 @@ class ReArcSource:
     def demos(
         self, task_id: str, instance_seed: int, request_index: int, n: int, exclude: Pair
     ) -> list[Pair]:
-        seen = {grid_hash(exclude.input)}
-        pairs: list[Pair] = []
-        for k in range(n):
-            pair = self._rearc.generate(
-                task_id,
-                derive_seed("demo", instance_seed, request_index, k),
-                self.diff_lb,
-                self.diff_ub,
-                exclude_input_hashes=frozenset(seen),
-            )
-            seen.add(grid_hash(pair.input))
-            pairs.append(pair)
-        return pairs
+        def draw(seed: int, excluded: frozenset[str]) -> Pair:
+            return self._rearc.generate(task_id, seed, self.diff_lb, self.diff_ub, exclude_input_hashes=excluded)
+
+        return _fresh(draw, instance_seed, request_index, n, exclude)
+
+
+class ArcGenSource:
+    """Generative source backed by the ARC-GEN generators: the second track's stream, over the ARC-AGI-2
+    training tasks new to the second edition whose generator passed the screen (:func:`continual_arc.arcgen.pool`).
+    Seeded as :class:`ReArcSource` is, so an instance and its demonstrations are pure functions of the slot."""
+
+    name = SOURCE_ARCGEN
+
+    def __init__(self, arcgen=None):
+        if arcgen is None:
+            from continual_arc.arcgen import ArcGen
+
+            arcgen = ArcGen()
+        self._arcgen = arcgen
+
+    def task_ids(self) -> list[str]:
+        from continual_arc.arcgen import pool
+
+        return pool()
+
+    def test_instance(self, task_id: str, instance_seed: int) -> Pair:
+        return self._arcgen.generate(task_id, derive_seed("test", instance_seed))
+
+    def demos(
+        self, task_id: str, instance_seed: int, request_index: int, n: int, exclude: Pair
+    ) -> list[Pair]:
+        def draw(seed: int, excluded: frozenset[str]) -> Pair:
+            return self._arcgen.generate(task_id, seed, exclude_input_hashes=excluded)
+
+        return _fresh(draw, instance_seed, request_index, n, exclude)
 
 
 class FixedArcSource:
@@ -179,6 +219,8 @@ class TaskRegistry:
                 SOURCE_REARC: ReArcSource(diff_lb=diff_lb, diff_ub=diff_ub),
                 SOURCE_ARC_TRAIN: FixedArcSource("training"),
                 SOURCE_ARC_EVAL: FixedArcSource("evaluation"),
+                SOURCE_ARCGEN: ArcGenSource(),
+                SOURCE_ARC2_EVAL: FixedArcSource("evaluation", dataset="arc2", name=SOURCE_ARC2_EVAL),
             }
         )
 

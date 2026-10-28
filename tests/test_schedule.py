@@ -312,7 +312,7 @@ def test_first_rounds_on_the_individual_regime():
 
 
 def test_small_configs_visit_every_task_equally():
-    for cfg in ("arc1-small",):
+    for cfg in ("arc1-small", "arc2-small"):
         for order in ("workstreams", "random", "sequential"):
             pool = [f"t{i:03d}" for i in range(500)]
             s = build_schedule(cfg, 0, order=order, rearc_task_ids=pool, eval_task_ids=[f"e{i:03d}" for i in range(500)])

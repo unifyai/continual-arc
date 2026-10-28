@@ -82,6 +82,7 @@ def test_bare_names_are_refused_because_no_track_is_the_default():
     with pytest.raises(KeyError, match="does not name its track"):
         get_config("small")
     assert get_config("arc1-small").track == "arc1"
+    assert get_config("arc2-small").track == "arc2"
 
 
 def test_canonical_protocol_per_track():
@@ -93,7 +94,7 @@ def test_canonical_protocol_per_track():
     )
     from continual_arc.env import EnvConfig
 
-    for track in ("arc1",):
+    for track in ("arc1", "arc2"):
         proto = canonical_protocol(track)
         assert proto["config"] == f"{track}-small" and proto["mode"] == "workstreams"
         assert proto["tests"] == ["held-out", "seen"]
@@ -260,9 +261,34 @@ def test_checkpoints_are_horizons_within_the_stream_and_scale_with_the_users():
 
 
 def test_every_configuration_caps_demo_requests_at_one():
-    for name in ("arc1-small", "arc1-medium"):
+    for name in ("arc1-small", "arc1-medium", "arc2-smoke", "arc2-small"):
         cfg = get_config(name)
         assert cfg.env.demo_cap == 8 and cfg.env.demos_per_request == 1 and cfg.env.attempt_cap == 8 and cfg.env.max_cost == 16, name
+
+
+def test_the_second_track_mirrors_the_first_over_its_own_sources():
+    from dataclasses import replace
+
+    from continual_arc.configs import canonical_config_name, protocol_of, test_schedule
+    from continual_arc.tasks import SOURCE_ARC2_EVAL, SOURCE_ARCGEN
+
+    for size in ("smoke", "small"):
+        one, two = get_config(f"arc1-{size}"), get_config(f"arc2-{size}")
+        assert replace(two, name=one.name, dataset=one.dataset) == one   # the same shape, stream and settings
+    assert canonical_config_name("arc2") == "arc2-small"
+    pool, evals = [f"g{i:03d}" for i in range(120)], [f"e{i:03d}" for i in range(114)]
+    sched = build_schedule("arc2-small", 0, rearc_task_ids=pool, eval_task_ids=evals)
+    stream = {s.task_id for s in sched.slots if s.phase == "stream"}
+    held_out = {s.task_id for s in sched.slots if s.phase == "epilogue"}
+    assert len(stream) == 25 and len(held_out) == 100 and stream <= set(pool) and held_out <= set(evals)
+    assert {sched.sources[t] for t in stream} == {SOURCE_ARCGEN} and {sched.sources[t] for t in held_out} == {SOURCE_ARC2_EVAL}
+    assert sched.meta["track"] == "arc2" and protocol_of(sched)["canonical"]
+    seen = test_schedule("arc2-small", 0, "seen", rearc_task_ids=pool, eval_task_ids=evals)
+    test = test_schedule("arc2-small", 0, "held-out", rearc_task_ids=pool, eval_task_ids=evals)
+    assert set(seen.sources.values()) == {SOURCE_ARCGEN} and {s.task_id for s in seen.slots} == stream
+    assert set(test.sources.values()) == {SOURCE_ARC2_EVAL} and {s.task_id for s in test.slots} == held_out
+    assert protocol_of(test)["canonical"] and not protocol_of(
+        test_schedule("arc2-smoke", 0, "held-out", rearc_task_ids=pool, eval_task_ids=evals))["canonical"]
 
 
 def test_the_held_out_test_is_user_0s_epilogue_played_at_once_from_the_end_state():
