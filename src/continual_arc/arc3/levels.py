@@ -12,9 +12,11 @@ level of those rules, drawn by the game's generator (``continual_arc.arc3.genera
     def solve(level: Level) -> list[ActionInput] | None:  # optional: a winning sequence; bfs() when absent
 
 Most games keep a level's layout in its sprites. A few keep it in tables of the game module instead (bp35 reads its
-board from a module-level table keyed by level index); a level of such a game carries the tables it replaces as
-``level.module_patch``, a dict of module attribute names to values, which :func:`new_game` sets on the fresh module
-before the game is built, and which :func:`layout` reads. Every search is bounded by states expanded, never by time, so
+board from a module-level table keyed by level index, lf52 likewise); a level of such a game carries the tables it
+replaces as ``level.module_patch``, a dict of module attribute names to values, which :func:`new_game` sets on the
+fresh module before the game is built, and which :func:`layout` reads by content. Such a level's sprites are level 0's
+placeholder, so the gate's sprite-type and level-0 filters cannot see its board: its generator keeps to level 0's
+tiles and rejects level 0's own board itself. Every search is bounded by states expanded, never by time, so
 that a level is solved, or not, the same way on every machine; :func:`check` times generate and solve only as a speed
 filter on top. :func:`check` is the gate a generator passes to enter the track (the filters above SEEDS).
 """
@@ -163,13 +165,16 @@ def signature(level: Any) -> tuple[frozenset, frozenset]:
 
 
 def _plain(value: Any) -> Any:
-    """``value`` with every array as nested lists, so that a layout's key sees every cell (an array's str elides)."""
+    """``value`` as plain data, so that a layout's key sees content, never an elided array or a memory address: arrays
+    as nested lists, and any other object (a game's own table entry, such as bp35's boards) as its class and attributes."""
     if hasattr(value, "tolist"):
         return value.tolist()
     if isinstance(value, dict):
         return {str(k): _plain(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain(v) for v in value]
+    if hasattr(value, "__dict__"):
+        return {type(value).__name__: _plain(vars(value))}
     return value
 
 
