@@ -57,6 +57,10 @@ class _Counted(random.Random):
     """A ``random.Random`` that raises :class:`TooLong` once it has given ``budget`` random numbers. It draws exactly
     what ``random.Random`` draws, since every method of it reaches one of the two it counts."""
 
+    def __new__(cls, seed: int, budget: int):
+        # random.Random's own __new__ takes the seed alone before Python 3.11, which the package supports
+        return super().__new__(cls, seed)
+
     def __init__(self, seed: int, budget: int):
         super().__init__(seed)
         self.budget = budget
