@@ -508,7 +508,7 @@ tasks, and 25 held out. To have a learner verified on it:
    the repository with pip, implementing `continual_arc.learner`, and built with no arguments, so its settings are its
    class's defaults), the OpenRouter model it plays with and its reasoning effort, any other models it calls, and the
    encrypted key. A harness adapter on the baselines' `SystemLearner` depends on
-   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.3.0#subdirectory=baselines` alone,
+   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.4.0#subdirectory=baselines` alone,
    which brings the benchmark with it.
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,
