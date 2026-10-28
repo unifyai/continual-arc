@@ -1,7 +1,7 @@
 """Confine a system's process tree so the benchmark cannot leak into it.
 
 Systems execute model-written code. Left alone, that code can read the benchmark
-source, import the Re-ARC generators and verifiers from the very environment that
+source, import the Re-ARC or ARC-GEN generators from the very environment that
 launched it, or reach the internet: a harness unconfined can locate ``continual_arc``
 in the baselines' environment and call the task's verifier to compute the ground
 truth before submitting.

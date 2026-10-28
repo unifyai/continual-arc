@@ -62,6 +62,8 @@ def _dataset_label(schedule) -> str:
     dataset = (schedule.meta or {}).get("dataset") or (schedule.meta or {}).get("config", {}).get("dataset")
     if dataset in (None, "arc1"):
         return "arc-agi-1+re-arc"
+    if dataset == "arc2":
+        return "arc-agi-2+arc-gen"
     return str(dataset)
 
 
@@ -409,7 +411,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--learner", required=True, help="import path, e.g. continual_arc_baselines.systems.prime_agent:PrimeAgentLearner")
     r.add_argument("--learner-kwargs", help="JSON object of constructor kwargs")
     r.add_argument("--schedule", help="schedule JSON from `continual-arc schedule make`")
-    r.add_argument("--config", help="named config to build a schedule from: <track>-<size>, e.g. arc1-small, arc1-medium (no default track)")
+    r.add_argument("--config", help="named config to build a schedule from: <track>-<size>, e.g. arc1-small, arc1-medium, arc2-small (no default track)")
     r.add_argument("--order", default="workstreams",
                    help="workstreams, the benchmark's stream; sequential or random serve its visits in another order, "
                         "only for the check that the order does not change a finding (the paper's Appendix I), and "
