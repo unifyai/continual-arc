@@ -10,8 +10,14 @@ level of those rules, drawn by the game's generator (``continual_arc.arc3.genera
     GAME = "ls20"
     def generate(rng: random.Random) -> Level: ...        # level 0's sprite types and data, a new layout
     def solve(level: Level) -> list[ActionInput] | None:  # optional: a winning sequence; bfs() when absent
+    REDRAWS = 0                                           # optional: layouts the last generate() rejected itself
 
-:func:`check` is the gate a generator passes to enter the track (FILTERS).
+Most games keep a level's layout in its sprites. A few keep it in tables of the game module instead (bp35 reads its
+board from a module-level table keyed by level index); a level of such a game carries the tables it replaces as
+``level.module_patch``, a dict of module attribute names to values, which :func:`new_game` sets on the fresh module
+before the game is built, and which :func:`layout` reads. Every search is bounded by states expanded, never by time, so
+that a level is solved, or not, the same way on every machine; :func:`check` times generate and solve only as a speed
+filter on top. :func:`check` is the gate a generator passes to enter the track (the filters above SEEDS).
 """
 from __future__ import annotations
 
@@ -21,8 +27,9 @@ import importlib.util
 import itertools
 import json
 import random
-import time
+import signal
 from collections import deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -31,9 +38,10 @@ from continual_arc.data import data_root
 
 _SEQUENCE = itertools.count()
 
-# A generator's gate (check): over SEEDS draws, a level within GENERATE_S, redraws under REDRAW_SHARE, every kept level
-# solved within SOLVE_S and won on replay, its solution LENGTH_BAND times level 0's, DISTINCT_SHARE of layouts distinct
-# and none level 0's, and only level 0's sprite types and data keys.
+# A generator's gate (check): over SEEDS draws, a level within GENERATE_S, redraws (draws that gave no level, and the
+# layouts a generator rejected itself, its REDRAWS) under REDRAW_SHARE of all layouts drawn, every kept level solved
+# within SOLVE_S and won on replay, its solution LENGTH_BAND times level 0's, DISTINCT_SHARE of layouts distinct and none
+# level 0's, and only level 0's sprite types and data keys.
 SEEDS = 50
 GENERATE_S = 2.0
 REDRAW_SHARE = 0.2
@@ -85,11 +93,14 @@ def level0(game_id: str) -> Any:
 
 
 def new_game(game_id: str, level: Any) -> tuple[Any, Any]:
-    """The game built on ``level`` alone, after its reset: (game, frame data)."""
+    """The game built on ``level`` alone, after its reset: (game, frame data). The level's ``module_patch``, if it has
+    one, replaces those attributes of the fresh module first, for a game whose layout lives in module tables."""
     from arcengine import ActionInput, GameAction
 
     module = load_module(game_id)
     module.levels = [level]
+    for name, value in getattr(level, "module_patch", {}).items():
+        setattr(module, name, copy.deepcopy(value))
     game = game_class(module)()
     return game, game.perform_action(ActionInput(id=GameAction.RESET))
 
@@ -121,16 +132,16 @@ def state_key(game: Any, frame: Any) -> bytes:
     return h.digest()
 
 
-def bfs(game_id: str, level: Any, max_states: int = 200_000, max_seconds: float = SOLVE_S) -> list[Any] | None:
+def bfs(game_id: str, level: Any, max_states: int = 200_000) -> list[Any] | None:
     """A shortest winning sequence of the engine's own valid actions, by breadth-first search over deep copies of the
-    game with states deduplicated (:func:`state_key`); None when the budget runs out first. Solves games whose states
-    are few, such as small mazes and click puzzles; a game whose valid actions or states are too many needs a
-    ``solve`` of its own."""
+    game with states deduplicated (:func:`state_key`); None when ``max_states`` expansions find none, the same answer
+    on every machine. Solves games whose states are few, such as small mazes and click puzzles; a game whose valid
+    actions or states are too many needs a ``solve`` of its own."""
     from arcengine import GameState
 
     game, frame = new_game(game_id, level)
-    seen, queue, started, expanded = {state_key(game, frame)}, deque([(game, [])]), time.monotonic(), 0
-    while queue and expanded < max_states and time.monotonic() - started < max_seconds:
+    seen, queue, expanded = {state_key(game, frame)}, deque([(game, [])]), 0
+    while queue and expanded < max_states:
         current, path = queue.popleft()
         for action in current._get_valid_actions():
             nxt = copy.deepcopy(current)
@@ -152,10 +163,27 @@ def signature(level: Any) -> tuple[frozenset, frozenset]:
     return (frozenset(s.name for s in level.get_sprites()), frozenset(level._data))
 
 
+def _plain(value: Any) -> Any:
+    """``value`` with every array as nested lists, so that a layout's key sees every cell (an array's str elides)."""
+    if hasattr(value, "tolist"):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    return value
+
+
 def layout(level: Any) -> tuple:
-    """A level's layout, for telling levels apart: every sprite's type and place, and its data."""
-    return (tuple(sorted((s.name, s.x, s.y) for s in level.get_sprites())), json.dumps(level._data, sort_keys=True,
-                                                                                         default=str))
+    """A level's layout, for telling levels apart: every sprite's type, place, orientation and pixels (a level may
+    carry its content in a sprite's pixels, as cd82's picture is), its data, and the module tables it replaces."""
+    import numpy as np
+
+    sprites = tuple(sorted((s.name, s.x, s.y, s.rotation, s.mirror_ud, s.mirror_lr, np.shape(s.pixels),
+                            hashlib.blake2b(np.ascontiguousarray(s.pixels).tobytes(), digest_size=8).hexdigest())
+                           for s in level.get_sprites()))
+    return (sprites, json.dumps(_plain(level._data), sort_keys=True, default=str),
+            json.dumps(_plain(getattr(level, "module_patch", {})), sort_keys=True, default=str))
 
 
 @dataclass
@@ -178,32 +206,56 @@ class Report:
     def line(self) -> str:
         band = f"{min(self.lengths)}-{max(self.lengths)}" if self.lengths else "-"
         return (f"{self.game}: {'PASS' if self.passed else 'FAIL'}; level 0 solved in {self.level0_length}; {self.kept} "
-                f"kept of {self.draws}, {self.solved} solved, lengths {band}, {self.distinct} distinct"
-                + (f"; {'; '.join(self.failures[:4])}" if self.failures else ""))
+                f"kept of {self.draws}, {self.redraws} redrawn inside, {self.solved} solved, lengths {band}, "
+                f"{self.distinct} distinct" + (f"; {'; '.join(self.failures[:4])}" if self.failures else ""))
+
+
+@contextmanager
+def _deadline(seconds: float):
+    """Stop the call inside with TimeoutError once ``seconds`` of wall time pass, by SIGALRM, so that a solve that
+    hangs fails the gate rather than holding it (check runs in a process's main thread)."""
+    def expire(signum: int, frame: Any) -> None:
+        raise TimeoutError
+
+    previous = signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+def _timed(seconds: float, fn: Any, *args: Any) -> tuple[Any, bool]:
+    """``fn(*args)`` and whether it finished within ``seconds``."""
+    try:
+        with _deadline(seconds):
+            return fn(*args), True
+    except TimeoutError:
+        return None, False
 
 
 def check(generator: Any, seeds: int = SEEDS) -> Report:
-    """Whether ``generator`` (a module with GAME, generate and optionally solve) passes the track's gate over
-    ``seeds`` draws: every filter of FILTERS, each failure named in the report."""
+    """Whether ``generator`` (a module with GAME, generate and optionally solve and REDRAWS) passes the track's gate
+    over ``seeds`` draws: every filter above SEEDS, each failure named in the report."""
     game = generator.GAME
     solve = getattr(generator, "solve", None) or (lambda level: bfs(game, level))
     base = level0(game)
-    base_solution = solve(base)
+    base_solution, in_time = _timed(SOLVE_S, solve, base)
     report = Report(game, len(base_solution) if base_solution else None)
-    if base_solution is None or not replay(game, base, base_solution):
-        report.failures.append("level 0 itself not solved")
+    if not in_time or base_solution is None or not replay(game, base, base_solution):
+        report.failures.append(f"level 0 itself not solved within {SOLVE_S:.0f} s")
         return report
     lo, hi = (f * len(base_solution) for f in LENGTH_BAND)
     sig, layouts = signature(base), set()
     for seed in range(seeds):
         rng = random.Random(seed)
-        started = time.monotonic()
-        level = generator.generate(rng)
+        level, in_time = _timed(GENERATE_S, generator.generate, rng)
         report.draws += 1
-        report.redraws += getattr(generator, "REDRAWS", 0)
-        if time.monotonic() - started > GENERATE_S:
-            report.failures.append(f"seed {seed}: generate took {time.monotonic() - started:.1f} s")
+        if not in_time:
+            report.failures.append(f"seed {seed}: generate ran past {GENERATE_S:.0f} s")
             continue
+        report.redraws += getattr(generator, "REDRAWS", 0)
         if level is None:
             continue
         report.kept += 1
@@ -212,9 +264,8 @@ def check(generator: Any, seeds: int = SEEDS) -> Report:
         if layout(level) == layout(base):
             report.failures.append(f"seed {seed}: level 0 itself")
         layouts.add(layout(level))
-        started = time.monotonic()
-        solution = solve(level)
-        if solution is None or time.monotonic() - started > SOLVE_S:
+        solution, in_time = _timed(SOLVE_S, solve, level)
+        if not in_time or solution is None:
             report.failures.append(f"seed {seed}: not solved within {SOLVE_S:.0f} s")
             continue
         if not replay(game, level, solution):
@@ -227,6 +278,7 @@ def check(generator: Any, seeds: int = SEEDS) -> Report:
     report.distinct = len(layouts)
     if report.kept and report.distinct < DISTINCT_SHARE * report.kept:
         report.failures.append(f"{report.distinct} distinct layouts of {report.kept}")
-    if report.draws and (report.draws - report.kept) > REDRAW_SHARE * report.draws:
-        report.failures.append(f"{report.draws - report.kept} draws gave no level")
+    rejected, drawn = report.draws - report.kept + report.redraws, report.draws + report.redraws
+    if drawn and rejected > REDRAW_SHARE * drawn:
+        report.failures.append(f"{rejected} of {drawn} layouts drawn were rejected")
     return report
