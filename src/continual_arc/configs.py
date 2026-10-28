@@ -180,7 +180,10 @@ class BenchmarkConfig:
         return _HELD_OUT_SOURCE[self.dataset]
 
     def to_json(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        if self.held_out_per_task == 1:
+            del d["held_out_per_task"]   # a grid track's schedule files are unchanged by the field
+        return d
 
 
 CONFIGS: dict[str, BenchmarkConfig] = {
