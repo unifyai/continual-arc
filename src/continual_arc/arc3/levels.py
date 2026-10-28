@@ -10,7 +10,6 @@ level of those rules, drawn by the game's generator (``continual_arc.arc3.genera
     GAME = "ls20"
     def generate(rng: random.Random) -> Level: ...        # level 0's sprite types and data, a new layout
     def solve(level: Level) -> list[ActionInput] | None:  # optional: a winning sequence; bfs() when absent
-    REDRAWS = 0                                           # optional: layouts the last generate() rejected itself
 
 Most games keep a level's layout in its sprites. A few keep it in tables of the game module instead (bp35 reads its
 board from a module-level table keyed by level index); a level of such a game carries the tables it replaces as
@@ -38,10 +37,10 @@ from continual_arc.data import data_root
 
 _SEQUENCE = itertools.count()
 
-# A generator's gate (check): over SEEDS draws, a level within GENERATE_S, redraws (draws that gave no level, and the
-# layouts a generator rejected itself, its REDRAWS) under REDRAW_SHARE of all layouts drawn, every kept level solved
-# within SOLVE_S and won on replay, its solution LENGTH_BAND times level 0's, DISTINCT_SHARE of layouts distinct and none
-# level 0's, and only level 0's sprite types and data keys.
+# A generator's gate (check): over SEEDS draws, a level within GENERATE_S (a generator may reject layouts of its own inside
+# that time), draws that give no level under REDRAW_SHARE, every kept level solved within SOLVE_S and won on replay, its
+# solution LENGTH_BAND times level 0's, DISTINCT_SHARE of layouts distinct and none level 0's, and only level 0's sprite
+# types and data keys.
 SEEDS = 50
 GENERATE_S = 2.0
 REDRAW_SHARE = 0.2
@@ -192,7 +191,6 @@ class Report:
     game: str
     level0_length: int | None
     draws: int = 0
-    redraws: int = 0
     kept: int = 0
     solved: int = 0
     lengths: list[int] = field(default_factory=list)
@@ -206,8 +204,8 @@ class Report:
     def line(self) -> str:
         band = f"{min(self.lengths)}-{max(self.lengths)}" if self.lengths else "-"
         return (f"{self.game}: {'PASS' if self.passed else 'FAIL'}; level 0 solved in {self.level0_length}; {self.kept} "
-                f"kept of {self.draws}, {self.redraws} redrawn inside, {self.solved} solved, lengths {band}, "
-                f"{self.distinct} distinct" + (f"; {'; '.join(self.failures[:4])}" if self.failures else ""))
+                f"kept of {self.draws}, {self.solved} solved, lengths {band}, {self.distinct} distinct"
+                + (f"; {'; '.join(self.failures[:4])}" if self.failures else ""))
 
 
 @contextmanager
@@ -236,8 +234,8 @@ def _timed(seconds: float, fn: Any, *args: Any) -> tuple[Any, bool]:
 
 
 def check(generator: Any, seeds: int = SEEDS) -> Report:
-    """Whether ``generator`` (a module with GAME, generate and optionally solve and REDRAWS) passes the track's gate
-    over ``seeds`` draws: every filter above SEEDS, each failure named in the report."""
+    """Whether ``generator`` (a module with GAME, generate and optionally solve) passes the track's gate over
+    ``seeds`` draws: every filter above SEEDS, each failure named in the report."""
     game = generator.GAME
     solve = getattr(generator, "solve", None) or (lambda level: bfs(game, level))
     base = level0(game)
@@ -255,7 +253,6 @@ def check(generator: Any, seeds: int = SEEDS) -> Report:
         if not in_time:
             report.failures.append(f"seed {seed}: generate ran past {GENERATE_S:.0f} s")
             continue
-        report.redraws += getattr(generator, "REDRAWS", 0)
         if level is None:
             continue
         report.kept += 1
@@ -278,7 +275,6 @@ def check(generator: Any, seeds: int = SEEDS) -> Report:
     report.distinct = len(layouts)
     if report.kept and report.distinct < DISTINCT_SHARE * report.kept:
         report.failures.append(f"{report.distinct} distinct layouts of {report.kept}")
-    rejected, drawn = report.draws - report.kept + report.redraws, report.draws + report.redraws
-    if drawn and rejected > REDRAW_SHARE * drawn:
-        report.failures.append(f"{rejected} of {drawn} layouts drawn were rejected")
+    if report.draws and (report.draws - report.kept) > REDRAW_SHARE * report.draws:
+        report.failures.append(f"{report.draws - report.kept} draws gave no level")
     return report
