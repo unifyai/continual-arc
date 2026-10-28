@@ -13,6 +13,17 @@ needs_data = pytest.mark.skipif(not data_available(), reason="pinned data not fe
 needs_arc2 = pytest.mark.skipif(not data_available("arc2"), reason="the second track's pinned data not fetched")
 
 
+def arc3_available() -> bool:
+    try:
+        import arcengine  # noqa: F401
+    except ImportError:
+        return False
+    return data_available("arc3")
+
+
+needs_arc3 = pytest.mark.skipif(not arc3_available(), reason="arcengine or the pinned ARC-AGI-3 games missing")
+
+
 @pytest.fixture
 def fake_source():
     return FakeSource(n_tasks=12)

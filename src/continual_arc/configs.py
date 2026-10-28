@@ -1,10 +1,12 @@
-"""Named benchmark configurations, the track they belong to, and the schedules built
+"""Named benchmark configurations, the tracks they belong to, and the schedules built
 from them.
 
 Continual-ARC has a track for each ARC-AGI edition (:data:`TRACKS`): ARC-AGI-1 (``arc1``), its stream fresh
-instances of the ARC-AGI-1 training tasks from Re-ARC's generators, and ARC-AGI-2 (``arc2``), its stream fresh
-instances of the ARC-AGI-2 training tasks new to the second edition from ARC-GEN's generators (``docs/arc2.md``).
-Every configuration name carries its track (``arc1-small``), so a bare size such as ``small`` names nothing. Each
+instances of the ARC-AGI-1 training tasks from Re-ARC's generators; ARC-AGI-2 (``arc2``), its stream fresh instances
+of the ARC-AGI-2 training tasks new to the second edition from ARC-GEN's generators (``docs/arc2.md``); and ARC-AGI-3
+(``arc3``), its stream fresh levels of its stream games' first-level rules from generators of our own
+(:mod:`continual_arc.arc3`, ``docs/arc3.md``). Every configuration name carries its track (``arc1-small``), so a bare
+size such as ``small`` names nothing. Each
 track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream and
 then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2, 4, 8 or 16 users
 (:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only on the same track at the same
@@ -60,7 +62,9 @@ from __future__ import annotations
 import random
 from dataclasses import asdict, dataclass, field, replace
 
-from continual_arc.data import DATASET_ARC1, DATASET_ARC2
+from continual_arc.arc3.env import Arc3Config
+from continual_arc.arc3.games import HELD_OUT_GAMES, SOURCE_ARC3, STREAM_GAMES
+from continual_arc.data import DATASET_ARC1, DATASET_ARC2, DATASET_ARC3
 from continual_arc.env import EnvConfig
 from continual_arc.schedule import (
     PHASE_SEEN_TEST,
@@ -80,10 +84,10 @@ from continual_arc.schedule import (
 from continual_arc.seeds import derive_seed
 from continual_arc.tasks import SOURCE_ARC2_EVAL, SOURCE_ARC_EVAL, SOURCE_ARCGEN, SOURCE_REARC
 
-TRACKS = (DATASET_ARC1, DATASET_ARC2)
+TRACKS = (DATASET_ARC1, DATASET_ARC2, DATASET_ARC3)
 # each track's sources: its stream's (and seen test's), and its held-out tasks'
-_STREAM_SOURCE = {DATASET_ARC1: SOURCE_REARC, DATASET_ARC2: SOURCE_ARCGEN}
-_HELD_OUT_SOURCE = {DATASET_ARC1: SOURCE_ARC_EVAL, DATASET_ARC2: SOURCE_ARC2_EVAL}
+_STREAM_SOURCE = {DATASET_ARC1: SOURCE_REARC, DATASET_ARC2: SOURCE_ARCGEN, DATASET_ARC3: SOURCE_ARC3}
+_HELD_OUT_SOURCE = {DATASET_ARC1: SOURCE_ARC_EVAL, DATASET_ARC2: SOURCE_ARC2_EVAL, DATASET_ARC3: SOURCE_ARC3}
 ORDER_WORKSTREAMS = "workstreams"  # the benchmark's stream
 ORDER_SEQUENTIAL = "sequential"
 ORDER_RANDOM = "random"
@@ -113,16 +117,26 @@ class BenchmarkConfig:
     checkpoints: tuple[int, ...] = ()
     """Stream horizons, in instances over all users, at which the score is also reported:
     prefix reads of the run, the same whatever horizon the run was carried to."""
-    env: EnvConfig = field(default_factory=EnvConfig)
+    env: EnvConfig | Arc3Config = field(default_factory=EnvConfig)
+    """:class:`EnvConfig` for ``arc1`` and ``arc2``, :class:`Arc3Config` for ``arc3``."""
     dataset: str = DATASET_ARC1
     """The track: ``arc1``, whose stream draws on Re-ARC generators over the ARC-AGI-1
-    training tasks and whose held-out tasks are the ARC-AGI-1 evaluation tasks, or ``arc2``, whose stream draws on
+    training tasks and whose held-out tasks are the ARC-AGI-1 evaluation tasks; ``arc2``, whose stream draws on
     ARC-GEN's generators over the ARC-AGI-2 training tasks new to the second edition that passed the screen and whose
-    held-out tasks are the ARC-AGI-2 evaluation tasks new to it."""
+    held-out tasks are the ARC-AGI-2 evaluation tasks new to it; or ``arc3``, whose stream draws on the track's
+    stream games and whose held-out tasks are its held-out games, every instance a fresh level of a game's first level
+    (:mod:`continual_arc.arc3.games`)."""
+    held_out_per_task: int = 1
+    """Instances of each held-out task in the epilogue and the held-out test: one of each ARC-AGI-1 or ARC-AGI-2
+    evaluation task, which has its own pairs alone, and several fresh levels of each held-out ARC-AGI-3 game, which
+    are few."""
 
     def __post_init__(self) -> None:
         if self.dataset not in TRACKS:
             raise ValueError(f"dataset must be one of {TRACKS}, got {self.dataset!r}")
+        want = Arc3Config if self.dataset == DATASET_ARC3 else EnvConfig
+        if not isinstance(self.env, want):
+            raise ValueError(f"track {self.dataset!r} needs env of type {want.__name__}")
         if self.stream_length % self.n_tasks:
             raise ValueError("stream_length must be a multiple of n_tasks so the sequential order gives every task the "
                              "same count")
@@ -228,6 +242,32 @@ CONFIGS: dict[str, BenchmarkConfig] = {
         ),
         dataset=DATASET_ARC2,
     ),
+    # ARC-AGI-3: the track's stream games, eight fresh levels each, as arc1-small serves its tasks, the stream's
+    # parameters scaled to its length; four fresh levels of each held-out game.
+    "arc3-smoke": BenchmarkConfig(
+        name="arc3-smoke",
+        n_tasks=2,
+        stream_length=4,
+        n_epilogue_tasks=1,
+        held_out_per_task=2,
+        workstreams=StreamParams(
+            concurrency=1, burst_mean=2.0, dormancy_median=2.0, dormancy_sigma=0.5, arrival_interval=1.0
+        ),
+        env=Arc3Config(),
+        dataset=DATASET_ARC3,
+    ),
+    "arc3-small": BenchmarkConfig(
+        name="arc3-small",
+        n_tasks=len(STREAM_GAMES),
+        stream_length=8 * len(STREAM_GAMES),
+        n_epilogue_tasks=len(HELD_OUT_GAMES),
+        held_out_per_task=4,
+        workstreams=StreamParams(
+            concurrency=3, burst_mean=3.0, dormancy_median=16.0, dormancy_sigma=1.0, arrival_interval=2.0
+        ),
+        env=Arc3Config(),
+        dataset=DATASET_ARC3,
+    ),
 }
 
 
@@ -271,7 +311,7 @@ def test_schedule(
 ) -> Schedule:
     """One of the two frozen tests after ``config``'s stream at ``seed`` (the module docstring).
 
-    ``held-out``: the held-out tasks, each once, at the instances user 0 meets in the epilogue
+    ``held-out``: the held-out tasks, each ``held_out_per_task`` times, at the instances user 0 meets in the epilogue
     (:func:`epilogue_for_users`), so the transfer references serve it as they are. ``seen``:
     :data:`SEEN_TEST_PER_TASK` new instances of each of the stream's tasks, at instance seeds of their
     own (``derive_seed(seed, "seen-test", i)``), which no stream slot draws, in a seeded order.
@@ -432,19 +472,24 @@ def config_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
 
 def stream_task_pool(cfg: BenchmarkConfig) -> list[str]:
     """Every task id the stream of ``cfg`` may draw on: on ``arc1`` the ARC-AGI-1 training tasks, through their
-    Re-ARC generators; on ``arc2`` the screened pool of ARC-AGI-2 training tasks, through their ARC-GEN generators."""
+    Re-ARC generators; on ``arc2`` the screened pool of ARC-AGI-2 training tasks, through their ARC-GEN generators;
+    on ``arc3`` the track's stream games."""
     if cfg.dataset == DATASET_ARC2:
         from continual_arc.arcgen import pool
 
         return pool()
+    if cfg.dataset == DATASET_ARC3:
+        return list(STREAM_GAMES)
     from continual_arc.rearc import ReArc
 
     return ReArc().task_ids
 
 
 def epilogue_task_pool(cfg: BenchmarkConfig) -> list[str]:
-    """Every task id the held-out tasks of ``cfg`` may be drawn from: the ARC-AGI-1 evaluation tasks, or the
-    ARC-AGI-2 evaluation tasks new to the second edition."""
+    """Every task id the held-out tasks of ``cfg`` may be drawn from: the ARC-AGI-1 evaluation tasks, the ARC-AGI-2
+    evaluation tasks new to the second edition, or the ARC-AGI-3 track's held-out games."""
+    if cfg.dataset == DATASET_ARC3:
+        return list(HELD_OUT_GAMES)
     from continual_arc.data import arc2_new_task_ids, arc_task_ids
 
     if cfg.dataset == DATASET_ARC2:
@@ -496,16 +541,16 @@ def build_schedule(
         """One user's own schedule: the stream process and the epilogue order at ``user_seed``,
         over the tasks and held-out tasks drawn at the configuration's ``seed``."""
         if order == FRESH:
-            # the transfer reference: the held-out tasks alone, a fresh learner before each
+            # the transfer reference: the held-out tasks alone, a fresh learner before each of their instances
             return epilogue_schedule(_held_out_tasks(cfg, seed, eval_task_ids), user_seed, cfg.epilogue_source,
-                                     reset_each=True, name=f"{cfg.name}-fresh")
+                                     cfg.held_out_per_task, reset_each=True, name=f"{cfg.name}-fresh").reset_each()
         one = stream_schedule(
             tasks, cfg.stream_length, user_seed, source, cfg.stream_params(order), order, name=f"{cfg.name}-{order}",
             instances_per_task=cfg.instances_per_task,
         )
         if epilogue and cfg.n_epilogue_tasks > 0:
             epi = epilogue_schedule(_held_out_tasks(cfg, seed, eval_task_ids), user_seed, cfg.epilogue_source,
-                                    reset_each=False, name="epilogue")
+                                    cfg.held_out_per_task, reset_each=False, name="epilogue")
             one = one.concat(epi, name=one.name)
         return one
 
@@ -566,8 +611,8 @@ def epilogue_for_users(
         eval_task_ids = epilogue_task_pool(cfg)
     held_out = _held_out_tasks(cfg, seed, eval_task_ids)
     user_seeds = _user_seeds(cfg, seed)[:users]
-    per_user = [epilogue_schedule(held_out, s, cfg.epilogue_source, reset_each=False, name="epilogue")
-                for s in user_seeds]
+    per_user = [epilogue_schedule(held_out, s, cfg.epilogue_source, cfg.held_out_per_task, reset_each=False,
+                                  name="epilogue") for s in user_seeds]
     sched = interleave_users(per_user, seed, name=f"{cfg.name}-epilogue-{users}")
     sched.meta = {
         "config": cfg.to_json(),

@@ -22,7 +22,9 @@ dependencies = []
 
 [project.optional-dependencies]
 plots = ["matplotlib>=3.7"]
-dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "matplotlib>=3.7"]
+# ARC-AGI-3, the third track: ARC Prize's game engine plays the pinned games, and its toolkit downloads them
+arc3 = ["arcengine==0.9.3; python_version >= '3.12'", "arc-agi==0.9.9; python_version >= '3.12'"]
+dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6", "matplotlib>=3.7", "continual-arc[arc3]"]
 
 [project.scripts]
 continual-arc = "continual_arc.cli:main"
@@ -37,7 +39,7 @@ packages = ["src/continual_arc"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-markers = ["data: tests that need the fetched Re-ARC / ARC-AGI data"]
+markers = ["data: tests that need the fetched Re-ARC / ARC-AGI data", "arc3: tests that need arcengine and the pinned ARC-AGI-3 games"]
 
 [tool.ruff]
 line-length = 100

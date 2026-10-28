@@ -14,9 +14,9 @@ The runner is the only place that calls ``learner.reset()``; it does so exactly
 when the schedule slot says so. It also guards against runaway learners with a
 per-instance action limit, after which the instance is force-abandoned.
 
-A learner is shown the instance alone (:class:`continual_arc.env.LearnerObservation`):
-the task under the run's alias, salted in the run directory's ``alias-salt``, and nothing
-about the schedule. Plug-ins, events and records see the slot
+A learner is shown the instance alone (:class:`continual_arc.env.LearnerObservation`,
+:class:`continual_arc.arc3.env.Arc3LearnerObservation`): the task under the run's alias,
+salted in the run directory's ``alias-salt``, and nothing about the schedule. Plug-ins, events and records see the slot
 (:class:`continual_arc.env.Observation`), real task id, phase and exposure included.
 
 Instances are served in rounds, one instance per user of the schedule. The runner
@@ -35,8 +35,9 @@ instance's resources are that user's counter deltas over its actions. Any other 
 is served one action at a time: one action on every open instance before a second on
 any, an instance's resources the learner's counter deltas over its own actions.
 
-The loop drives a :class:`continual_arc.env.ContinualArcEnv`, built from the schedule by
-:func:`build_env` or passed ready as ``env``.
+The same loop drives :class:`continual_arc.env.ContinualArcEnv` and
+:class:`continual_arc.arc3.env.Arc3Env`; :func:`build_env` picks one by the schedule's track,
+or pass a ready ``env``.
 """
 
 from __future__ import annotations
@@ -53,7 +54,9 @@ from pathlib import Path
 from continual_arc._version import __version__
 from continual_arc.addons import Addon, Plugin, PluginManager, PluginRuntime
 from continual_arc.aliases import TaskAliases
+from continual_arc.arc3.env import Arc3Config, Arc3Env, Arc3LearnerObservation, Arc3Observation
 from continual_arc.configs import protocol_of
+from continual_arc.data import DATASET_ARC3
 from continual_arc.env import (
     ContinualArcEnv,
     EnvConfig,
@@ -123,29 +126,56 @@ def _diff_resources(before: dict[str, float], after: dict[str, float]) -> dict[s
     return out
 
 
+def is_arc3(schedule: Schedule) -> bool:
+    """Whether ``schedule`` serves the ARC-AGI-3 track's games."""
+    return (schedule.meta or {}).get("dataset") == DATASET_ARC3
+
+
+def default_config(schedule: Schedule) -> EnvConfig | Arc3Config:
+    """The default environment settings of ``schedule``'s track."""
+    return Arc3Config() if is_arc3(schedule) else EnvConfig()
+
+
+def load_config(schedule: Schedule, d: dict) -> EnvConfig | Arc3Config:
+    """Environment settings saved as JSON (a run's ``config.json``), read as ``schedule``'s track's."""
+    return Arc3Config.from_json(d) if is_arc3(schedule) else EnvConfig.from_json(d)
+
+
 def build_env(
     schedule: Schedule,
-    config: EnvConfig | None = None,
+    config: EnvConfig | Arc3Config | None = None,
     registry: TaskRegistry | None = None,
-) -> ContinualArcEnv:
-    """The environment for ``schedule``, at ``config`` or the default settings."""
-    return ContinualArcEnv(schedule, registry=registry, config=config or EnvConfig())
+) -> ContinualArcEnv | Arc3Env:
+    """The environment for ``schedule``, at ``config`` or its track's default settings: the games of ARC-AGI-3, or
+    the grids of a task registry."""
+    config = config or default_config(schedule)
+    if is_arc3(schedule):
+        if not isinstance(config, Arc3Config):
+            raise TypeError("an ARC-AGI-3 schedule is played under an Arc3Config")
+        return Arc3Env(schedule, config=config)
+    if not isinstance(config, EnvConfig):
+        raise TypeError("a grid schedule is played under an EnvConfig")
+    return ContinualArcEnv(schedule, registry=registry, config=config)
 
 
-def learner_view(obs: Observation, aliases: TaskAliases) -> LearnerObservation:
+def learner_view(obs: Observation | Arc3Observation, aliases: TaskAliases) -> LearnerObservation | Arc3LearnerObservation:
     """The instance alone, as a learner is shown it: the task under the run's alias."""
-    return LearnerObservation.of(obs, aliases.alias(obs.task_id))
+    view = Arc3LearnerObservation if isinstance(obs, Arc3Observation) else LearnerObservation
+    return view.of(obs, aliases.alias(obs.task_id))
 
 
-def _default_max_actions(config: EnvConfig) -> int:
-    """Runaway guard: an instance can take at most the attempt and demo caps plus one."""
+def _default_max_actions(config: EnvConfig | Arc3Config) -> int:
+    """Runaway guard: an instance can take at most its caps' actions and demonstrations plus one (a game's instance
+    ends at its own action cap, at most ``max_actions``)."""
+    if isinstance(config, Arc3Config):
+        return config.max_actions + config.demo_cap + 2
     return config.attempt_cap + config.demo_cap + 2
 
 
 def run(
     learner: Learner,
     schedule: Schedule,
-    config: EnvConfig | None = None,
+    config: EnvConfig | Arc3Config | None = None,
     out_dir: str | Path | None = None,
     registry: TaskRegistry | None = None,
     max_actions_per_instance: int | None = None,
@@ -154,7 +184,7 @@ def run(
     learner_name: str | None = None,
     addon: Addon | None = None,
     plugins: list[Plugin] | tuple[Plugin, ...] | None = None,
-    env: ContinualArcEnv | None = None,
+    env: ContinualArcEnv | Arc3Env | None = None,
     resume: bool = False,
     alias_style: str = "hex",
     max_concurrent: int | None = None,
@@ -440,11 +470,11 @@ def whole_rounds(records: list[InstanceRecord], schedule: Schedule) -> list[Inst
     return records[:n]
 
 
-def load_run(out_dir: str | Path) -> tuple[Schedule, EnvConfig, list[InstanceRecord]]:
+def load_run(out_dir: str | Path) -> tuple[Schedule, EnvConfig | Arc3Config, list[InstanceRecord]]:
     """Load the schedule, config and records of a finished run directory."""
     out_path = Path(out_dir)
     schedule = Schedule.load(out_path / "schedule.json")
-    config = EnvConfig.from_json(json.loads((out_path / "config.json").read_text()))
+    config = load_config(schedule, json.loads((out_path / "config.json").read_text()))
     records = [
         InstanceRecord.from_json(json.loads(line))
         for line in (out_path / "records.jsonl").read_text().splitlines()

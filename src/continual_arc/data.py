@@ -19,6 +19,10 @@ second edition (:func:`arc2_new_task_ids`).
 All are cloned into ``$CONTINUAL_ARC_DATA`` (default ``~/.cache/continual-arc``)
 by :func:`fetch`. Nothing is vendored into this package, so the benchmark data is
 exactly what the upstream authors published.
+
+The ``arc3`` dataset is ARC-AGI-3's 25 public games, pinned by version and downloaded
+from the ARC Prize server into ``arc-agi-3/`` under the same root by
+:mod:`continual_arc.arc3.games`, to which :func:`fetch` and :func:`status` delegate.
 """
 
 from __future__ import annotations
@@ -47,7 +51,8 @@ ARC_SPLITS = ("training", "evaluation")
 
 DATASET_ARC1 = "arc1"
 DATASET_ARC2 = "arc2"
-DATASETS = (DATASET_ARC1, DATASET_ARC2)
+DATASET_ARC3 = "arc3"
+DATASETS = (DATASET_ARC1, DATASET_ARC2, DATASET_ARC3)
 
 # Upstream name -> (repo, commit, folder under the data root), and what each dataset needs.
 _UPSTREAMS = {
@@ -56,7 +61,8 @@ _UPSTREAMS = {
     "ARC-AGI-2": (ARC2_REPO, ARC2_COMMIT, "ARC-AGI-2"),
     "arc-gen": (ARCGEN_REPO, ARCGEN_COMMIT, "arc-gen"),
 }
-_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2", "arc-gen", "ARC-AGI")}
+_NEEDS = {DATASET_ARC1: ("re-arc", "ARC-AGI"), DATASET_ARC2: ("ARC-AGI-2", "arc-gen", "ARC-AGI"), DATASET_ARC3: ()}
+ARC3_STATUS_PREFIX = "arc-agi-3/"
 
 
 class DataNotFound(RuntimeError):
@@ -136,11 +142,17 @@ def fetch(force: bool = False, datasets: tuple[str, ...] = (DATASET_ARC1,)) -> d
             dest = data_root() / folder
             _clone_pinned(repo, commit, dest, force)
             out[name] = str(dest)
+        if dataset == DATASET_ARC3:
+            from continual_arc.arc3 import games
+
+            for game_id, folder in games.fetch(force=force).items():
+                out[ARC3_STATUS_PREFIX + game_id] = folder
     return out
 
 
 def status(datasets: tuple[str, ...] = (DATASET_ARC1,)) -> dict[str, dict[str, object]]:
-    """Report whether each upstream is present and at the pinned commit."""
+    """Report whether each upstream is present and at the pinned commit; for ``arc3`` one entry per game, keyed
+    ``arc-agi-3/<game id>``, its pinned version in place of a commit."""
     out: dict[str, dict[str, object]] = {}
     for dataset in datasets:
         for name in _NEEDS[dataset]:
@@ -154,6 +166,11 @@ def status(datasets: tuple[str, ...] = (DATASET_ARC1,)) -> dict[str, dict[str, o
                 "head": head,
                 "ok": head == commit,
             }
+        if dataset == DATASET_ARC3:
+            from continual_arc.arc3 import games
+
+            for game_id, st in games.status().items():
+                out[ARC3_STATUS_PREFIX + game_id] = st
     return out
 
 

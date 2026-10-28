@@ -9,10 +9,10 @@ import sys
 from pathlib import Path
 
 from continual_arc._version import __version__
-from continual_arc.env import EnvConfig
 from continual_arc.schedule import TEST_HELD_OUT, TESTS
 
 ENV_KEYS = ("attempt_cap", "demo_cap", "demo_cost", "demos_per_request", "diff_lb", "diff_ub")
+ARC3_KEYS = ("cap_multiplier", "max_actions", "demo_cap", "demo_cost")
 
 
 def _load_learner(spec: str, kwargs: dict):
@@ -42,17 +42,20 @@ def _load_plugins(specs: list[str], kwargs_values: list[str]) -> list:
     return plugins
 
 
-def _env_config(args, schedule) -> EnvConfig:
-    """The env config for a schedule: its config's ``env`` block, then CLI overrides."""
+def _env_config(args, schedule):
+    """The env config for a schedule, of its track's kind: its config's ``env`` block, then CLI overrides."""
+    from continual_arc.runner import is_arc3, load_config
+
+    keys = ARC3_KEYS if is_arc3(schedule) else ENV_KEYS
     base = {}
     cfg_meta = (schedule.meta or {}).get("config") or {}
     if cfg_meta.get("env"):
-        base = {k: v for k, v in cfg_meta["env"].items() if k in ENV_KEYS}
-    for key in ENV_KEYS:
+        base = {k: v for k, v in cfg_meta["env"].items() if k in keys}
+    for key in keys:
         val = getattr(args, key, None)
         if val is not None:
             base[key] = val
-    return EnvConfig(**base)
+    return load_config(schedule, base)
 
 
 # -- commands -----------------------------------------------------------------
@@ -216,6 +219,32 @@ def cmd_learned(args) -> int:
     return 0
 
 
+def cmd_precompute(args) -> int:
+    from continual_arc.arc3.instances import LevelSource, precompute
+    from continual_arc.configs import build_schedule, test_schedule, with_users
+    from continual_arc.runner import is_arc3
+    from continual_arc.schedule import TESTS, Schedule
+
+    if args.schedule:
+        schedules = [Schedule.load(path) for path in args.schedule]
+    else:
+        config = with_users(args.config, args.users)
+        schedules = [build_schedule(config, args.seed), *(test_schedule(config, args.seed, t) for t in TESTS)]
+    for sched in schedules:
+        if not is_arc3(sched):
+            raise SystemExit(f"{sched.name} is not an ARC-AGI-3 schedule: only a game's levels need solving ahead")
+    demo_cap = args.demos if args.demos is not None else _env_config(args, schedules[0]).demo_cap
+    instances = {(slot.task_id, slot.instance_seed) for sched in schedules for slot in sched.slots}
+
+    def progress(done, total, game):
+        if not args.quiet and (done % 10 == 0 or done == total):
+            print(f"[{done}/{total}] {game}", file=sys.stderr)
+
+    n = precompute(LevelSource(), instances, demo_cap, workers=args.workers, progress=progress)
+    print(f"{n} instances and their first {demo_cap} demonstrations solved and cached")
+    return 0
+
+
 def cmd_rescore(args) -> int:
     from continual_arc.runner import rescore
 
@@ -234,19 +263,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     d = sub.add_parser("data", help="fetch or inspect the pinned upstream data")
     dsub = d.add_subparsers(dest="data_cmd", required=True)
-    df = dsub.add_parser("fetch", help="clone the pinned upstreams a track needs")
+    df = dsub.add_parser("fetch", help="clone the pinned upstreams a track needs, or download ARC-AGI-3's pinned games")
     df.add_argument("--force", action="store_true", help="re-clone even if present")
     df.add_argument("--datasets", nargs="+",
                     help="arc1 (the default), the first track: Re-ARC and ARC-AGI; arc2, the second: ARC-AGI-2, "
-                         "ARC-GEN and ARC-AGI")
+                         "ARC-GEN and ARC-AGI; arc3, the third: ARC-AGI-3's pinned games (needs the arc3 extra)")
     ds = dsub.add_parser("status", help="show whether the data is present and pinned")
-    ds.add_argument("--datasets", nargs="+", help="arc1 (the default) and arc2")
+    ds.add_argument("--datasets", nargs="+", help="arc1 (the default), arc2 and arc3")
     d.set_defaults(func=cmd_data)
 
     s = sub.add_parser("schedule", help="build or inspect schedules")
     ssub = s.add_subparsers(dest="schedule_cmd", required=True)
     sm = ssub.add_parser("make", help="build a schedule from a named config")
-    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, arc2-{smoke,small}")
+    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, "
+                                                    "arc2-{smoke,small}, arc3-{smoke,small}")
     sm.add_argument("--order", help="unset for the benchmark's stream; sequential or random serve its visits in another "
                                     "order, only for the check that the order does not change a finding (the paper's "
                                     "Appendix I), and fresh the held-out tasks alone, the learner wiped before each")
@@ -289,9 +319,22 @@ def build_parser() -> argparse.ArgumentParser:
     for key, typ in (
         ("attempt_cap", int), ("demo_cap", int), ("demo_cost", float),
         ("demos_per_request", int), ("diff_lb", float), ("diff_ub", float),
+        ("cap_multiplier", float), ("max_actions", int),
     ):
         r.add_argument(f"--{key.replace('_', '-')}", type=typ, default=None, dest=key)
     r.set_defaults(func=cmd_run)
+
+    pc = sub.add_parser("precompute", help="solve and cache an ARC-AGI-3 configuration's every instance and "
+                                           "demonstration ahead of a run, so that the run never waits on a solver")
+    pc.add_argument("--config", help="arc3-smoke or arc3-small: its stream and both frozen tests at --seed")
+    pc.add_argument("--seed", type=int, default=0)
+    pc.add_argument("--users", type=int, default=1, help="the users the configuration is served to (with_users)")
+    pc.add_argument("--schedule", action="append", help="a schedule file to precompute instead of --config; repeat")
+    pc.add_argument("--demos", type=int, help="demonstrations of each instance to solve (default its demo cap)")
+    pc.add_argument("--workers", type=int, default=4,
+                    help="solver processes at once (a game's search may hold a few GB)")
+    pc.add_argument("--quiet", action="store_true")
+    pc.set_defaults(func=cmd_precompute)
 
     rp = sub.add_parser("report", help="print the report for a run directory")
     rp.add_argument("run_dir")
