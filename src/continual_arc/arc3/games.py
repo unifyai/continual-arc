@@ -34,7 +34,7 @@ GAMES: dict[str, str] = {
 # The games whose generator modules (continual_arc.arc3.generators.<game>) pass the gate at 50 seeds: the track.
 TRACK_GAMES: tuple[str, ...] = (
     "ar25", "bp35", "cd82", "cn04", "dc22", "ft09", "g50t", "ka59", "lf52", "lp85", "ls20", "m0r0", "r11l", "re86",
-    "s5i5", "sb26", "sp80", "su15", "tn36", "tr87", "tu93", "vc33", "wa30",
+    "s5i5", "sb26", "sc25", "sk48", "sp80", "su15", "tn36", "tr87", "tu93", "vc33", "wa30",
 )
 SPLIT_SEED = 0
 STREAM_SHARE = 0.6
@@ -80,7 +80,7 @@ def status() -> dict[str, dict[str, object]]:
 
 def fetch(force: bool = False) -> dict[str, str]:
     """Download every game at its pinned version, through the toolkit in its ``NORMAL`` mode, which fetches an
-    anonymous key and the game's source from the ARC Prize server (``ARC_API_KEY`` is honoured). Games already present
+    anonymous key and the game's source from the ARC Prize server (``ARC_API_KEY`` is honored). Games already present
     are skipped unless ``force``. Returns game id -> folder."""
     import arc_agi
 

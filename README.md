@@ -28,7 +28,7 @@ Learning on the job can mean two things: remembering the rule of a task met befo
 met. So after the stream we freeze the learner and give it two tests. Each is one round in which every instance starts
 from the learner's state at the end of the stream, so nothing learnt on one test instance reaches another. The seen
 test serves fresh instances of the tasks the learner met, which measures memorisation. The held-out test serves 100
-ARC-AGI-1 evaluation tasks it never met, which measures generalisation, and it is the headline. We read each test as T,
+ARC-AGI-1 evaluation tasks it never met, which measures generalization, and it is the headline. We read each test as T,
 the points of the budget a learner saves against itself reset before each instance, in its own harness and on the
 same instances, so a stronger model scores no higher for being stronger. A learner may keep anything at all between
 instances, which puts an agent harness keeping notes and a model updating its weights on the same scale.
@@ -95,7 +95,7 @@ After the stream the learner plays two tests, each built by `configs.test_schedu
 
 | test | instances on `arc1-small` | what it reads |
 |---|---|---|
-| `held-out` | one instance of each of the configuration's 100 held-out ARC-AGI-1 evaluation tasks, which the stream never serves | generalisation: whether the stream made the learner better at tasks it never met; the headline |
+| `held-out` | one instance of each of the configuration's 100 held-out ARC-AGI-1 evaluation tasks, which the stream never serves | generalization: whether the stream made the learner better at tasks it never met; the headline |
 | `seen` | four fresh instances of each of the stream's 25 tasks, at instance seeds no stream draws | memorisation: what the learner kept of the rules it met |
 
 Each test is one round in which every instance is a user of its own, so every instance meets the learner as the
@@ -285,15 +285,17 @@ play them from its state at any round that was kept, as from the end of the stre
 `protocol_of` lists a cut stream as a deviation from the canonical protocol ("stream cut at
 round 20"); `meta.config` is kept, so the label stays readable.
 
-## The track and the canonical number
+## The tracks and the canonical number
 
-Continual-ARC is one track, ARC-AGI-1 (`arc1`), and every configuration name carries it:
+Continual-ARC has a track for each ARC-AGI edition, and every configuration name carries its track:
 
 | track | configs | stream and seen test | held-out test |
 |---|---|---|---|
 | `arc1` | `arc1-smoke`, `arc1-small`, `arc1-medium`, `arc1-full` | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
+| `arc2` | `arc2-smoke`, `arc2-small` | ARC-GEN generators over the ARC-AGI-2 training tasks new to the second edition that pass the screen, 117 of them ([docs/arc2.md](docs/arc2.md)) | the 114 ARC-AGI-2 evaluation tasks new to the second edition |
+| `arc3` | `arc3-smoke`, `arc3-small` | fresh levels of the first-level rules of 15 of ARC-AGI-3's 25 public games, each game's from a generator and solver of our own ([docs/arc3.md](docs/arc3.md)) | fresh levels of the other 10 games |
 
-The track has one canonical protocol: its `small` configuration's stream and then its two
+Each track has one canonical protocol: its `small` configuration's stream and then its two
 frozen tests, at the default environment settings, at each canonical number
 of users. Its number is T on the held-out test, with T on the seen test and the share learned
 over the stream beside it. Seeds 0, 1 and 2 are all canonical; the paper reports seed 0, and
@@ -370,7 +372,7 @@ against these rules:
   [`baselines/`](baselines). The
   share learned and T read the learner against itself reset, on the same models. A
   model that only teaches it, such as a
-  stronger model labelling its games for training, is part of its training: those calls
+  stronger model labeling its games for training, is part of its training: those calls
   count in its training compute, shown beside the score.
 * **Learning only from what it was shown.** A learner learns from its observations and
   feedback. The records, with their real ids and exposures, are the benchmark's.
@@ -419,9 +421,11 @@ uv run continual-arc run \
 ```
 src/continual_arc/
   grids.py       grid validation and equality
-  data.py        pinned fetch of Re-ARC and ARC-AGI-1, and of ARC-AGI-2 on request, whose public tasks new rules are screened against
+  data.py        pinned fetch of each track's upstreams: Re-ARC and ARC-AGI-1; ARC-AGI-2, ARC-GEN and ARC-AGI-1; ARC-AGI-3's games
   rearc.py       seeded, verified access to the Re-ARC generators
-  tasks.py       task sources (generative Re-ARC, fixed ARC JSON) and registry
+  arcgen.py      seeded access to ARC-GEN's generators and the screened ARC-AGI-2 pool (arcgen_screen.json)
+  tasks.py       task sources (generative Re-ARC and ARC-GEN, fixed ARC JSON) and registry
+  arc3/          the ARC-AGI-3 track: the pinned games, a generator and solver per game, levels served fresh by Arc3Env
   schedule.py    Slot/Schedule, the one stream generator and its order presets, the phases and tests
   configs.py     named configurations, build_schedule() and test_schedule()
   env.py         the environment: observations (the slot's, and the learner's view of the instance), actions, feedback, cost accounting
@@ -548,7 +552,7 @@ configuration, and every one of their streams is the one `arc1-small` builds tod
 }
 ```
 
-## Licence
+## License
 
 Apache-2.0. Re-ARC is MIT and ARC-AGI is Apache-2.0; both are fetched, not vendored.
 

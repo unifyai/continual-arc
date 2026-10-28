@@ -23,10 +23,10 @@ caching outputs pointless.
 | demos | on request, at a cost equal to one wrong attempt | makes remembering an economic decision |
 | score | mean cost per instance = wrong attempts + demo requests | one number; compute/tokens/memory are plotted, not scored |
 | headline | T on the held-out test: the budget a learner saves there against itself reset before each instance, on the same instances; T on the seen test and the share learned on the stream, against the learner reset on its own stream, beside it (20, 21 and 22 Oct 2026, below) | no cache helps on a task never seen, and the reset plays the learner's own model in its own harness, the environment the learner learns in |
-| track | one, ARC-AGI-1 (`arc1`), named in every config (`arc1-small`); a bare size names nothing | its Re-ARC generators give every stream task fresh, verified instances without end, so a return is never a lookup; one track gives a learner one number, and the held-out season that verifies results streams as `arc1-small` does. ARC-AGI-2 has no generators, so its stream rested on augmentation, and ARC-AGI-3 serves levels, not fresh instances of a rule (Dan, 19 Oct 2026) |
-| canonical protocol | the `arc1-small` config's stream, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labelled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
+| track | one for each ARC-AGI edition, `arc1`, `arc2` and `arc3`, named in every config (`arc1-small`); a bare size names nothing | every track serves fresh, verified instances without end, so a return is never a lookup: Re-ARC's generators on ARC-AGI-1, Google's ARC-GEN on the ARC-AGI-2 training tasks new to the second edition (`docs/arc2.md`), and on ARC-AGI-3 a generator and solver of our own for each public game, whose instances are fresh levels of the game's first-level rules (`docs/arc3.md`). A game's later levels change its rules, so they wait for a mode in which rules drift. The held-out season that verifies results streams as `arc1-small` does (Dan, 27 Oct 2026, for the arXiv version: all three tracks, static first; on 19 Oct the second and third had been dropped, when ARC-AGI-2 had no generators and ARC-AGI-3 served fixed levels) |
+| canonical protocol | the `arc1-small` config's stream, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labeled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
-| frozen tests | after the stream, two tests, each one round in which every instance is a user of its own from the learner's state at the stream's end: the held-out test, one instance of each of 100 never-seen evaluation tasks on `arc1-small` (25 until 20 Oct 2026), and the seen test, four fresh instances of each of the stream's 25 tasks (21 Oct 2026, below) | the held-out test reads generalisation and the seen test memorisation; a test during which the learner keeps learning would mix what it built on the stream with what it builds on the test |
+| frozen tests | after the stream, two tests, each one round in which every instance is a user of its own from the learner's state at the stream's end: the held-out test, one instance of each of 100 never-seen evaluation tasks on `arc1-small` (25 until 20 Oct 2026), and the seen test, four fresh instances of each of the stream's 25 tasks (21 Oct 2026, below) | the held-out test reads generalization and the seen test memorisation; a test during which the learner keeps learning would mix what it built on the stream with what it builds on the test |
 | add-ons | optional run-time auxiliary episodes, tagged separately | permits adaptive interventions such as spaced review without making them part of the learner protocol |
 
 ## What a learner is shown
@@ -34,7 +34,7 @@ caching outputs pointless.
 The task id, the input and the instance's own counters, and nothing about the stream: no position, no
 length, no phase and no exposure count. Neither test is announced: a test instance looks like a stream instance.
 Why (Dan, 20 Sep 2026): the stream simulates a new worker in an office, who is not told they are in a
-fixed-length evaluation; showing the position invited end-game behaviour, and an exposure count did
+fixed-length evaluation; showing the position invited end-game behavior, and an exposure count did
 the learner's remembering for it. Whether a task was met before is for the learner's own memory to say.
 
 `Observation` still carries `step`, `n_steps`, `phase` and `exposure_index`: the runner and the
@@ -68,7 +68,7 @@ held-out test's reset reference.
 Why these three (Dan, 21 Sep 2026): the first design's `isolated` mode wiped the learner's state at task
 boundaries, an intervention on the system dressed as a schedule, with no analogue in any job; it became
 `sequential` with state kept, and the transfer reference became a run of its own. `batch` (every task
-live from the first step) was an epoch, a training-loop artefact whose constant gap cannot produce the
+live from the first step) was an epoch, a training-loop artifact whose constant gap cannot produce the
 retention-by-gap curve; `random` replaced it. The workstreams streams are frozen by
 `tests/fixtures/stream-golden.json`, because running cells were launched on those exact orders.
 

@@ -39,7 +39,8 @@ class EnvConfig:
     """Wrong submissions allowed before the instance is marked failed."""
     demo_cap: int = 8
     """Demo requests allowed per instance; further requests are refused at no cost. Each request
-    buys one more pair (``demos_per_request``): a fresh Re-ARC pair on the stream; in the epilogue, whose
+    buys one more pair (``demos_per_request``): a fresh pair from the track's generators on the stream (Re-ARC's
+    on arc1, ARC-GEN's on arc2); in the epilogue, whose
     tasks have no generators, the task's own pairs and nothing after them, so there an instance's cap is the
     number of pairs its task has left. With eight attempts and eight requests the cost bound is 16 (26 Sep;
     one request buying the whole set, bound 9, from 23 Sep; own pairs only in the epilogue from 27 Sep)."""
