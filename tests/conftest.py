@@ -21,7 +21,13 @@ def arc3_available() -> bool:
     return data_available("arc3")
 
 
-needs_arc3 = pytest.mark.skipif(not arc3_available(), reason="arcengine or the pinned ARC-AGI-3 games missing")
+_arc3_skip = pytest.mark.skipif(not arc3_available(), reason="arcengine or the pinned ARC-AGI-3 games missing")
+
+
+def needs_arc3(test):
+    """Skipped without arcengine or the pinned games, and marked ``arc3``, so that ``-m "not arc3"`` leaves out every
+    test that plays a level."""
+    return pytest.mark.arc3(_arc3_skip(test))
 
 
 @pytest.fixture
