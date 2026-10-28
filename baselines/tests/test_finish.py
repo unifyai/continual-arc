@@ -153,26 +153,44 @@ def test_the_ask_to_store_follows_the_verdict_only_in_row_ha(tmp_path):
         Scripted([], end="storage", ask_to_store=True)
 
 
-def test_the_program_library_row_states_the_procedure_and_asks_for_the_program(tmp_path):
-    """Row HPL (program_library): the finish protocol's rules gain row PL's method as a procedure, with the
-    library's folder, and the verdict is followed by the ask to save the task's program to its file; a stateless row
-    gets the same messages; the option needs the finish protocol and does not go beside ask_to_store."""
+def test_expert_guidance_states_the_whole_procedure_and_asks_for_the_pairs_the_program_and_the_memory(tmp_path):
+    """Expert guidance (program_library): the finish protocol's rules gain the program library's whole method as a
+    procedure, with the library's folder: the pairs kept beside the program, the kept program checked on them first, a
+    memory naming the task's files; the verdict is followed by the ask to save this task's pairs, program and memory; a
+    stateless row gets the same messages; the option needs the finish protocol and does not go beside ask_to_store."""
     import re
 
     import pytest
 
     s = Scripted([CORRECT, FINISH], end="finish", program_library=True)
     play(s, tmp_path / "hpl")
-    assert "How to work, in every instance (follow this exactly): keep a program library in the folder programs," in s.sent[0]
-    assert "4. After the verdict, save the program that reproduced all the pairs" in s.sent[0]
-    label = re.search(r"Task id: (task-[0-9a-f]+)", s.sent[0]).group(1)
-    assert s.sent[1].startswith("Your submission was CORRECT. Instance solved with 0 wrong attempt(s).\n\nNow save your "
-                                f"program for this task to programs/{label}.py:")
-    assert s.sent[1].endswith('reply with {"action": "finish"}.')
+    rules = s.sent[0]
+    assert "How to work, in every instance (follow this exactly): keep a library in the folder programs, two files" in rules
+    assert "programs/<task id>.json, every demonstration pair received for the task" in rules
+    assert "Kept pairs count as demonstration pairs you have" in rules
+    assert "look for the task's memory (step 4) among those you are shown, and if there is none, for its files" in rules
+    assert "run it on every kept pair, and if it reproduces them all, run it on the test input" in rules
+    assert "keep one memory for the task that lasts between instances, named for its task id" in rules
+    label = re.search(r"Task id: (task-[0-9a-f]+)", rules).group(1)
+    ask = s.sent[1]
+    assert ask.startswith("Your submission was CORRECT. Instance solved with 0 wrong attempt(s).\n\nNow save this "
+                          "task's library, in one Python call if you can.")
+    assert f"to programs/{label}.json; save to programs/{label}.py the transform(grid)" in ask
+    assert f"keep the task's memory, named {label}," in ask
+    assert ask.endswith('reply with {"action": "finish"}.')
     assert s.stats["library_asks"] == 1 and s.stats["store_asks"] == 0 and s.describe()["program_library"] is True
+    teacher = s.teacher_lesson(label)
+    assert teacher.startswith("You are keeping the notes of a student who will meet this task again")
+    assert f"programs/{label}.json, every demonstration pair received in the game above" in teacher
+    assert f"named {label}, which the student is shown when each instance starts" in teacher
+    assert "Add anything else you judge will help the student." in teacher and "{" not in teacher.replace('{"', "")
+    told = Scripted([CORRECT, FINISH], end="finish", program_library=True, rules_page="THE PLAYING RULES")
+    play(told, tmp_path / "told")
+    assert told.sent[0].index("THE PLAYING RULES") < told.sent[0].index("How to work, in every instance")
+    assert "THE PLAYING RULES" not in told.sent[1] and told.describe()["rules_page"] is True
     h0 = Scripted([CORRECT, FINISH], end="finish", program_library=True, stateless=True)
     play(h0, tmp_path / "hpl0")
-    assert "keep a program library" in h0.sent[0] and "Now save your program" in h0.sent[1]
+    assert "keep a library in the folder" in h0.sent[0] and "Now save this task's library" in h0.sent[1]
     with pytest.raises(ValueError):
         Scripted([], end="finish", program_library=True, ask_to_store=True)
     with pytest.raises(ValueError):

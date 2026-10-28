@@ -104,7 +104,8 @@ class SystemLearner(BaseLearner):
     def __init__(self, *, max_reprompts: int = 2, refine_every: int = 0, demo_cost: float = 1.0,
                  max_cost: float = 16.0, max_restarts: int = 2, session_per_instance: bool = True, instance_gap_s: float = 0.0,
                  stateless: bool = False, storage_turn: bool = False, end: str = "", empty_reply: str = "restart",
-                 archive_wipes: bool = False, ask_to_store: bool = False, program_library: bool = False):
+                 archive_wipes: bool = False, ask_to_store: bool = False, program_library: bool = False,
+                 rules_page: str = ""):
         self.max_reprompts = max_reprompts
         # every refine_every instances (0: never), the system's own refinement after the instance (refine): prime-agent's
         # global refinement, openclaw's /learn; never for a stateless row
@@ -129,14 +130,19 @@ class SystemLearner(BaseLearner):
         if ask_to_store and self.end != "finish":
             raise ValueError("ask_to_store is an addition to the finish protocol (end='finish')")
         self.ask_to_store = ask_to_store
-        # The ablation row HPL: a harness-driven program library. The finish protocol's rules gain row PL's
-        # method as a procedure (protocol.PROGRAM_LIBRARY_RULES: a program per task in a folder of the workspace, run
-        # first when the task returns, checked on every pair before a submission, saved after the verdict) and the
-        # verdict is followed by the ask to save the task's program (PROGRAM_LIBRARY_ASK). A
-        # stateless row gets the same messages, so that HPL0 would differ from HPL only in what survives.
+        # Expert guidance, the rows H-E: the finish protocol's rules gain the program library's whole method as a
+        # procedure (protocol.PROGRAM_LIBRARY_RULES: each task's pairs and program kept as two files of a folder of the
+        # workspace, the program checked on the kept pairs and run first when the task returns, every program
+        # checked on every pair before a submission, and a memory naming the task's files), and the verdict is followed
+        # by the ask to save them (library_ask). A stateless row gets the same messages, so that H-E0 differs from H-E
+        # only in what survives.
         if program_library and (self.end != "finish" or ask_to_store):
             raise ValueError("program_library is an addition to the finish protocol, and not beside ask_to_store")
         self.program_library = program_library
+        # A page of playing rules the system is told, such as the trained rows' labeller's c1 for the rows given expert
+        # guidance: shown after the storage note and before the procedure at the start of every conversation, and in
+        # none of the asks that quote the storage note, so that a row is told it once an instance.
+        self.rules_page = rules_page
         # An empty reply to an observation or a re-prompt. "restart": the system is taken for dead and restarted, state
         # intact, the rule the paper's earliest cells ran under (scripts/paper-grid.txt marks them). "reprompt": it is an
         # unusable reply like any other, re-prompted in the same conversation within the same max_reprompts; the system
@@ -257,7 +263,8 @@ class SystemLearner(BaseLearner):
         return {"system": self.name, "max_restarts": self.max_restarts,
                 "session_per_instance": self.session_per_instance, "instance_gap_s": self.instance_gap_s, "stateless": self.stateless, "storage_turn": self.storage_turn,
                 "end": self.end, "empty_reply": self.empty_reply, "archive_wipes": self.archive_wipes,
-                "ask_to_store": self.ask_to_store, "program_library": self.program_library}
+                "ask_to_store": self.ask_to_store, "program_library": self.program_library,
+                "rules_page": bool(self.rules_page)}
 
     def system_usage(self) -> dict[str, float]:
         """What the system itself reports about its usage (secondary to the proxy)."""
@@ -439,9 +446,8 @@ class SystemLearner(BaseLearner):
         self._begin_instance(obs)
         pending = self.transcript.take()
         finish = self.end == "finish"
-        note = self.storage_note
-        if self.program_library:
-            note = "\n".join(x for x in (note, protocol.PROGRAM_LIBRARY_RULES.format(programs=self.programs_dir())) if x)
+        procedure = protocol.PROGRAM_LIBRARY_RULES.format(programs=self.programs_dir()) if self.program_library else ""
+        note = "\n\n".join(x for x in (self.storage_note, self.rules_page, procedure) if x)
         extra = {"finish": True, "rules_note": note} if finish else {}
 
         def observation(fresh: bool) -> str:
@@ -500,6 +506,24 @@ class SystemLearner(BaseLearner):
             if self.session_per_instance:
                 self._session_pending = True
 
+    def library_files(self, task_id: str) -> dict[str, str]:
+        """The expert guidance's two files for ``task_id`` (protocol.PROGRAM_LIBRARY_RULES), its program and its kept
+        pairs, with the task's id as the agent sees it, which names the task's memory."""
+        return {"program": f"{self.programs_dir()}/{task_id}.py", "pairs": f"{self.programs_dir()}/{task_id}.json",
+                "task": task_id}
+
+    def library_ask(self, task_id: str) -> str:
+        """The ask after each verdict for a row given expert guidance (protocol.PROGRAM_LIBRARY_ASK): save this task's
+        pairs, its program and its memory."""
+        return protocol.PROGRAM_LIBRARY_ASK.format(note=f" {self.storage_note}" if self.storage_note else "",
+                                                   **self.library_files(task_id))
+
+    def teacher_lesson(self, task_id: str) -> str:
+        """The teacher's page for ``task_id`` (protocol.TEACHER_LIBRARY_LESSON), for a teacher keeping this harness's
+        notes."""
+        return protocol.TEACHER_LIBRARY_LESSON.format(note=f" {self.storage_note}" if self.storage_note else "",
+                                                      programs=self.programs_dir(), **self.library_files(task_id))
+
     def programs_dir(self) -> str:
         """Row HPL's program library: a folder of the harness's workspace (every harness adapter has one, kept between
         instances except in a stateless row), named by its absolute path so that no harness has to guess its cwd."""
@@ -555,7 +579,7 @@ class SystemLearner(BaseLearner):
             message += "\n\n" + protocol.ASK_TO_STORE.format(note=f" {self.storage_note}" if self.storage_note else "")
             self.stats["store_asks"] += 1
         if self.program_library:
-            message += "\n\n" + protocol.PROGRAM_LIBRARY_ASK.format(path=f"{self.programs_dir()}/{obs.task_id}.py")
+            message += "\n\n" + self.library_ask(obs.task_id)
             self.stats["library_asks"] += 1
         try:
             for attempt in range(self.max_reprompts + 1):

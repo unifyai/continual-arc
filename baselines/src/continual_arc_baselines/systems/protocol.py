@@ -703,29 +703,61 @@ ASK_TO_STORE = (
     '{{"action": "finish"}}.'
 )
 
-# The ablation row HPL, a harness-driven program library (a system's program_library: the model instructed exactly
-# how to behave, in the manner of the program library): the finish protocol's facts-only rules, then
-# row PL's method as a procedure the harness carries out itself with its own tools (PL's scaffold writes, checks, keeps
-# and replays the program; here the harness does). {programs}: the library's folder, in the harness's workspace, which
-# only a stateless row wipes.
+# Expert guidance, the rows H-E (a system's program_library: the model instructed exactly how to behave, in the manner
+# of the program library): the finish protocol's facts-only rules, then the program
+# library's whole method as a procedure the harness carries out itself with its own tools. The program library is the
+# demo-cache floor in which every submission is a program: it keeps each task's bought pairs, shows them again free when
+# the task returns, runs the program that reproduced them first, and checks every program on every pair before it is
+# submitted. Here the harness keeps the pairs and the program as two files of a folder in its workspace, checks the kept
+# program on the kept pairs before submitting its answer, and names each task's files in a memory of its own, which the
+# harness shows the agent when each instance starts, so that nothing it kept waits in a folder it is never told to open.
+# {programs}: the folder, which only a stateless row wipes.
 PROGRAM_LIBRARY_RULES = (
-    "How to work, in every instance (follow this exactly): keep a program library in the folder {programs}, one Python "
-    "file per task, named for its task id ({programs}/<task id>.py), defining transform(grid), which takes an input grid "
-    "as a list of lists of integers and returns the output grid.\n"
-    "1. When an instance starts, look for the task's file. If it exists, run its transform on the test input and submit "
-    "the result before anything else.\n"
-    "2. If there is no file, or its answer was wrong, request demonstration pairs as you judge necessary, write or fix "
-    "transform, and run it on every pair you have received until it reproduces all of them; then submit its output for "
-    "the test input. Checking a program on the pairs is free.\n"
+    "How to work, in every instance (follow this exactly): keep a library in the folder {programs}, two files per task, "
+    "named for its task id: {programs}/<task id>.py, defining transform(grid), which takes an input grid as a list of "
+    "lists of integers and returns the output grid; and {programs}/<task id>.json, every demonstration pair received for "
+    "the task, as a list of {{\"input\": grid, \"output\": grid}}. Kept pairs count as demonstration pairs you have, and "
+    "reading them is free.\n"
+    "1. When an instance starts, look for the task's memory (step 4) among those you are shown, and if there is none, for "
+    "its files in the folder. If the task has kept pairs, load them; if it has a program, run it on every kept pair, and "
+    "if it reproduces them all, run it on the test input and submit the result before anything else.\n"
+    "2. Otherwise, or if that answer was wrong, request demonstration pairs as you judge necessary, write or fix "
+    "transform, and run it on every pair you have, kept and new, until it reproduces all of them; then submit its output "
+    "for the test input. Checking a program on the pairs is free.\n"
     "3. Submit only grids that your program produced.\n"
-    "4. After the verdict, save the program that reproduced all the pairs to the task's file, replacing any older "
-    "version, then finish."
+    "4. After the verdict, in one Python call if you can: add every pair you received to the task's .json file, save the "
+    "program that reproduced all the pairs to its .py file, replacing any older version, and keep one memory for the task "
+    "that lasts between instances, named for its task id, saying where its two files are and whether its program "
+    "reproduces every kept pair. Then finish."
 )
 
+# The ask after each verdict for a row given expert guidance: the procedure's step 4 for this task's own files.
+# {note}: what the harness keeps, in its own terms (storage_note); {task}: the task's id as the agent sees it.
 PROGRAM_LIBRARY_ASK = (
-    "Now save your program for this task to {path}: the transform(grid) that reproduced every demonstration pair you "
-    "received, replacing any older version. If no program of yours reproduced them all, leave the file as it was. Then "
-    'reply with {{"action": "finish"}}.'
+    "Now save this task's library, in one Python call if you can.{note} Add every demonstration pair you received to "
+    "{pairs}; save to {program} the transform(grid) that reproduced every pair, replacing any older version (if no "
+    "program of yours reproduced them all, leave that file as it was); and keep the task's memory, named {task}, saying "
+    "where its two files are and whether its program reproduces every kept pair. Then reply with "
+    '{{"action": "finish"}}.'
+)
+
+# The teacher's page, for the rows whose teacher keeps the student's notes and is given expert guidance (H-T-E, H-E-T-E):
+# the same method written for a teacher, who must leave what it keeps where the student is shown it when each instance
+# starts, since a student never told of the folder never opens it, and who may keep anything else it judges will
+# help, so that the guidance only adds to what the teacher would keep unguided (H-T).
+TEACHER_LIBRARY_LESSON = (
+    "You are keeping the notes of a student who will meet this task again and plays every move itself.{note} Keep for "
+    "the task, in the folder {programs}: {pairs}, every demonstration pair received in the game above, added to those "
+    "kept, as a list of {{\"input\": grid, \"output\": grid}}; and {program}, a program defining transform(grid), which "
+    "takes an input grid as a list of lists of integers and returns the output grid, and reproduces every kept pair: the "
+    "student's if it does, otherwise one you write and check on the pairs. Then keep one memory for the task that lasts "
+    "between instances, named {task}, which the student is shown when each instance starts, saying where the two files "
+    "are, whether the program reproduces every kept pair, and what to do with them: load the pairs, which count as "
+    "demonstration pairs it has and cost nothing; run the program on every one; if it reproduces them all, run it on the "
+    "test input and submit the result before anything else; otherwise request demonstrations as needed, and fix the "
+    "program until it reproduces every pair, kept and new, before submitting its output. Write the two files and the "
+    "memory in one Python call if you can. Add anything else you judge will help the student. Then reply with "
+    '{{"action": "finish"}}.'
 )
 
 BUDGET_NOTICE = (

@@ -19,16 +19,21 @@ Both send a harness's developer prompt as a system one and every earlier reply's
 setting is the one that applies.
 
 The harness rows (:data:`REFERENCE_ROWS`): h, prime-agent with its memory kept; h0, wiped before every instance; hpl,
-row h with the baselines' ``program_library`` (``PROGRAM_LIBRARY_RULES``: a program per task in the workspace's
-``programs`` folder, run first when the task returns, checked on every pair and saved after the verdict, and every
-verdict followed by ``PROGRAM_LIBRARY_ASK``), the procedure the trained rows' oracle labels under while their student is
-never told it; ha, row h asked after every verdict to save liberally what could help with the task's later instances;
+row h given expert guidance: c1, the page of playing rules the labeller is told (:data:`TOLD_ROWS`), then the
+baselines' ``program_library``, the program library's whole method as a procedure (``PROGRAM_LIBRARY_RULES``: each
+task's pairs and program kept as two files of the workspace's ``programs`` folder, the kept program checked on the kept
+pairs and run first when the task returns, every program checked on every pair before a submission, and a memory naming
+the task's files, which the harness shows when each instance starts), and every verdict followed by the ask to save
+them (``PROGRAM_LIBRARY_ASK``); ha, row h asked after every verdict to save liberally what could help with the task's later instances;
 hpl0, row hpl wiped before every instance; hg, row h with its storage handed to GLM: from the verdict on, in the finish
 protocol's turn in which the harness saves what it wants before it finishes, the storer drives the same session, its
 request fields in place of the player's (:func:`hand_storage`), so it reads the player's whole game and keeps in the
-harness what it judges will help the player later; hplg, row hpl with its storage handed to GLM, both told the
-procedure; and hgpl, row hg with the storer alone told it, the procedure and the ask to save the task's program
-following the verdict in the turn the storer takes (:func:`library_lesson`), which the player never sees.
+harness what it judges will help the player later; hplg, row hpl with its storage handed to GLM, both given the
+guidance; and hgpl, row hg with the storer alone given it, which the player never sees. Both storers read the guidance
+written for a teacher (the baselines' ``TEACHER_LIBRARY_LESSON``), following the verdict in the turn the storer takes in
+place of the player's own ask (:func:`hand_storage`): keep the task's pairs and a program that reproduces them, a memory
+the player is shown when each instance starts saying where they are and how to use them, and anything else it judges
+will help.
 
 The bare-model rows (:data:`BARE_ROWS`, :func:`play_bare_round`), the bare model behind the harness protocol at the
 player's request settings: dc, the demo-cache floor, the demonstrations it bought for a task shown again when the task
@@ -72,9 +77,12 @@ STATELESS_ROWS: tuple[str, ...] = (*play.STATELESS_ROWS, "hpl0")
 BARE_ROWS: dict[str, tuple[str, dict[str, Any]]] = {
     "dc": ("BareSharedDemoCacheLearner", {}), "f": ("BareModelLearner", {}),
     "m": ("BareProgramLibraryLearner", {}), "m0": ("BareProgramLibraryLearner", {"stateless": True})}
-# the rows whose turn after each verdict another player takes, and the rows whose storer alone is told the procedure
+# the rows whose turn after each verdict another player takes, and the rows whose storer reads the teacher's page
 STORERS: dict[str, str] = {"hg": "glm", "hplg": "glm", "hgpl": "glm"}
-TOLD_STORERS: tuple[str, ...] = ("hgpl",)
+TOLD_STORERS: tuple[str, ...] = ("hgpl", "hplg")
+# the rows given expert guidance, each told a page of playing rules ahead of the procedure: c1, the labeller's page, so
+# that telling the student and training it start from the same playing rules
+TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1", "hplg": "c1"}
 
 
 def overrides_of(player: str) -> dict[str, Any]:
@@ -82,31 +90,29 @@ def overrides_of(player: str) -> dict[str, Any]:
     return {"model": PLAYERS[player]["model"], **PLAYERS[player]["body"]}
 
 
-def library_lesson(system: Any, obs: Any) -> str:
-    """Row hgpl's storer's lesson: the program library's procedure and the ask to save the task's program, as row hpl's
-    player reads them for ``obs``'s task."""
-    from continual_arc_baselines.systems.protocol import PROGRAM_LIBRARY_ASK, PROGRAM_LIBRARY_RULES
-
-    programs = system.programs_dir()
-    return (PROGRAM_LIBRARY_RULES.format(programs=programs) + "\n\n"
-            + PROGRAM_LIBRARY_ASK.format(path=f"{programs}/{obs.task_id}.py"))
+def rules_page(name: str) -> str:
+    """rules/``name``.md, a page of playing rules (c1 is the labeller's)."""
+    return (Path(__file__).resolve().parent / "rules" / f"{name}.md").read_text().strip()
 
 
 def hand_storage(user: Any, storer: dict[str, Any], *, told: bool = False) -> None:
     """``user``'s harness takes its turn after each verdict, the finish protocol's storage, with ``storer``'s request
     fields on the user's own proxy in place of the player's, which the next instance's play has again; every call the
-    harness makes in that turn is the storer's. ``told`` follows the verdict with the program library's lesson
-    (:func:`library_lesson`), which only the storer reads."""
+    harness makes in that turn is the storer's. ``told`` follows the verdict with the teacher's page for the task (the
+    baselines' ``teacher_lesson``), which only the storer reads, in place of the player's own ask after the verdict,
+    which a player given the guidance would otherwise have there too."""
     system, proxy = user.system, user.proxy
     finish = system._finish_instance
 
     def stored(obs: Any, pending: list[str]) -> None:
-        player = proxy.body_overrides
+        player, library = proxy.body_overrides, system.program_library
         proxy.body_overrides = dict(storer)
+        system.program_library = library and not told
         try:
-            finish(obs, [*pending, "", library_lesson(system, obs)] if told else pending)
+            finish(obs, [*pending, "", system.teacher_lesson(obs.task_id)] if told else pending)
         finally:
             proxy.body_overrides = player
+            system.program_library = library
 
     system._finish_instance = stored
 
@@ -134,9 +140,11 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: 
         {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "stateless": row in STATELESS_ROWS,
          "model": spec["model"], "harness": {**play.HARNESS, **REFERENCE_ROWS[row]},
          "harness_budget": {"name": "block", **play.BLOCK}, "overrides": overrides,
+         **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {}),
          **({"storer": {"player": STORERS[row], "overrides": storer, "told": row in TOLD_STORERS}} if storer else {})},
         indent=1))
-    learner = CollectiveHarnessLearner(lambda user: PrimeAgentLearner(**kwargs), run_dir, schedule=schedule,
+    told = {"rules_page": rules_page(TOLD_ROWS[row])} if row in TOLD_ROWS else {}
+    learner = CollectiveHarnessLearner(lambda user: PrimeAgentLearner(**kwargs, **told), run_dir, schedule=schedule,
                                        upstream=OPENROUTER, api_key=api_key, body_overrides=overrides,
                                        body_drop=("reasoning_effort",), role_map={"developer": "system"},
                                        thinking_field="reasoning", declared_context_length=play.CONTEXT_WINDOW,
