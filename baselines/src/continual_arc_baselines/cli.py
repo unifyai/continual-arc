@@ -46,12 +46,14 @@ def import_object(spec: str, what: str) -> Any:
         raise SystemExit(f"{module_name} has no attribute {attr!r}") from None
 
 
-def launch_settings(args) -> tuple[Any, dict[str, Any], Any, str]:
-    """What a launch's arguments set: the environment's configuration, the learner's keyword arguments, the task
-    registry (None for the benchmark's own) and the learner's display name."""
-    from continual_arc.env import EnvConfig
+def launch_settings(args, schedule) -> tuple[Any, dict[str, Any], Any, str]:
+    """What a launch's arguments set for ``schedule``: the environment's configuration (its track's kind, the defaults
+    unless ``--env-config`` names a file), the learner's keyword arguments, the task registry (None for the benchmark's
+    own) and the learner's display name."""
+    from continual_arc.runner import default_config, load_config
 
-    config = EnvConfig.from_json(json.loads(Path(args.env_config).read_text())) if args.env_config else EnvConfig()
+    config = (load_config(schedule, json.loads(Path(args.env_config).read_text())) if args.env_config
+              else default_config(schedule))
     kwargs = json.loads(args.learner_kwargs) if args.learner_kwargs else {}
     registry = import_object(args.registry, "registry")() if args.registry else None
     return config, kwargs, registry, args.name or args.learner.rsplit(":", 1)[-1]
@@ -223,7 +225,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     from continual_arc_baselines.systems.base import SystemLearner
     from continual_arc_baselines.tracking import JournalSink, PilotStop, TrackedLearner, Tracker
 
-    config, kwargs, registry, name = launch_settings(args)
+    config, kwargs, registry, name = launch_settings(args, schedule)
     if args.resume and not args.out:
         raise SystemExit("--resume needs --out: the run directory to continue")
     prior = prior_records(args.out) if args.resume else []
@@ -411,7 +413,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--learner", required=True, help="import path, e.g. continual_arc_baselines.systems.prime_agent:PrimeAgentLearner")
     r.add_argument("--learner-kwargs", help="JSON object of constructor kwargs")
     r.add_argument("--schedule", help="schedule JSON from `continual-arc schedule make`")
-    r.add_argument("--config", help="named config to build a schedule from: <track>-<size>, e.g. arc1-small, arc1-medium, arc2-small (no default track)")
+    r.add_argument("--config", help="named config to build a schedule from: <track>-<size>, e.g. arc1-small, arc1-medium, arc2-small, arc3-small (no default track)")
     r.add_argument("--order", default="workstreams",
                    help="workstreams, the benchmark's stream; sequential or random serve its visits in another order, "
                         "only for the check that the order does not change a finding (the paper's Appendix I), and "
@@ -420,7 +422,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--no-epilogue", action="store_true",
                    help="with --config, the stream alone, as `continual-arc schedule make --no-epilogue` builds it: "
                         "the run a harness's frozen tests follow (arc-baselines test)")
-    r.add_argument("--env-config", help="EnvConfig JSON file (default: benchmark defaults)")
+    r.add_argument("--env-config", help="the environment's settings as JSON, an EnvConfig's or, on ARC-AGI-3, an Arc3Config's (default: the track's)")
     r.add_argument("--registry", help="import path of a zero-arg TaskRegistry factory (testing)")
     r.add_argument("--out", help="run directory (default: <attempt dir>/continual-arc)")
     r.add_argument("--name", help="learner display name")

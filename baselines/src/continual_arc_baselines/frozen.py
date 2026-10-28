@@ -448,7 +448,7 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
         return out
     launch = first_launch(run_dir)
     started = seed(run_dir, out, test.users)
-    config, kwargs, registry, learner_name = launch_settings(launch)
+    config, kwargs, registry, learner_name = launch_settings(launch, test)
     defaults = json.loads(launch.llm_defaults or "{}")
     defaults.setdefault("session_id", f"{run_dir.name}-{test.meta['test']}")
     (out / PLAYED_FROM).write_text(json.dumps({"run": str(run_dir), "test": test.meta["test"], "schedule": test.name,

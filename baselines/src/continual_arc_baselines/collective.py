@@ -56,6 +56,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from continual_arc.arc3.env import DemonstrationFeedback
 from continual_arc.env import Action, DemosFeedback, Feedback, LearnerObservation, SubmitFeedback
 from continual_arc.learner import BaseLearner
 from continual_arc.schedule import Schedule
@@ -149,6 +150,16 @@ def _jsonable(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_jsonable(v) for v in obj]
     return obj
+
+
+def _slim(feedback: Any) -> Any:
+    """``feedback`` as an instance's trace keeps it: without the demonstration pairs or the game's demonstration it
+    carried, which the run's events and the system's own transcripts hold."""
+    if isinstance(feedback, DemosFeedback):
+        return dataclasses.replace(feedback, pairs=[])
+    if isinstance(feedback, DemonstrationFeedback):
+        return dataclasses.replace(feedback, demonstration=None)
+    return feedback
 
 
 def snapshot_state(src: Path, dst: Path, *, exclude: tuple[str, ...] = SNAPSHOT_EXCLUDE,
@@ -469,8 +480,7 @@ class CollectiveHarnessLearner(BaseLearner):
         ended = instance_ended(feedback)
         with u.lock:
             if trace.turns:
-                trace.turns[-1]["feedback"] = _jsonable(
-                    dataclasses.replace(feedback, pairs=[]) if isinstance(feedback, DemosFeedback) else feedback)
+                trace.turns[-1]["feedback"] = _jsonable(_slim(feedback))
                 if isinstance(feedback, DemosFeedback):
                     trace.turns[-1]["feedback"]["pairs_served"] = len(feedback.pairs)
             if isinstance(feedback, SubmitFeedback) and feedback.correct:

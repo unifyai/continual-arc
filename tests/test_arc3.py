@@ -276,7 +276,7 @@ def test_a_solved_instance_costs_its_play_in_baselines_plus_its_demonstrations(s
     solution = env._open[0].drawn.solution
     for act in solution:
         res = env.step(act)
-        assert isinstance(res.feedback, ActFeedback) and res.feedback.valid and res.feedback.frames
+        assert isinstance(res.feedback, ActFeedback) and res.feedback.valid and res.feedback.rendered
     assert res.instance_done and res.feedback.level_completed and res.record.solved
     rec = res.record
     assert rec.cost == pytest.approx(len(solution) / obs.baseline_actions) == pytest.approx(SP80_LEVEL0 / SP80_BASELINE)
@@ -326,7 +326,7 @@ def test_invalid_actions_are_charged_and_counted_and_the_demo_cap_refuses_at_no_
     bad = [Act(0), Act(9), Act(7), Act(6), Act(6, x=64, y=0), Act(6, x=1, y=-1)]
     for i, act in enumerate(bad):
         res = env.step(act)
-        assert not res.feedback.valid and not res.feedback.ignored and res.feedback.frames == []
+        assert not res.feedback.valid and not res.feedback.ignored and res.feedback.rendered == 0
         assert res.observation.actions_used == i + 1
     env.step(RequestDemos())
     refused = env.step(RequestDemos())
@@ -356,7 +356,7 @@ def test_a_game_over_is_ignored_by_the_engine_until_a_reset(source):
             break
     assert res.feedback.state == "GAME_OVER" and not res.instance_done
     res = env.step(Act(4))
-    assert res.feedback.ignored and not res.feedback.valid and res.observation.frames
+    assert res.feedback.ignored and not res.feedback.valid and not res.feedback.rendered and res.observation.frames
     res = env.step(ResetLevel())
     assert res.feedback.state == "NOT_FINISHED"
     for act in env._open[0].drawn.solution:

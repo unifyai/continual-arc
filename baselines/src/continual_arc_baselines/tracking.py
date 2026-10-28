@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
 
+from continual_arc.arc3.env import ActFeedback, ResetFeedback
 from continual_arc.env import GiveUpFeedback, SubmitFeedback
 
 from continual_arc_baselines.costs import TOKEN_FIELDS, CostJournal
@@ -31,9 +32,12 @@ log = logging.getLogger(__name__)
 
 def instance_ended(feedback: Any) -> bool:
     """Whether ``feedback`` ends its instance: a give-up; a correct submission, or the one that
-    reaches the attempt cap."""
+    reaches the attempt cap; a game action that completes its level, or a game action or reset
+    that reaches the action cap."""
     return isinstance(feedback, GiveUpFeedback) or (
         isinstance(feedback, SubmitFeedback) and (feedback.correct or feedback.failed)
+    ) or (isinstance(feedback, ActFeedback) and (feedback.level_completed or feedback.failed)) or (
+        isinstance(feedback, ResetFeedback) and feedback.failed
     )
 
 

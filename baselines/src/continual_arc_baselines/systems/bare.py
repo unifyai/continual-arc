@@ -14,8 +14,9 @@ reasoning, as chat templates render a past turn.
 The two floors of row F are built on it: :class:`BareModelLearner`, the stateless floor, is the model itself, choosing
 whatever actions it wants rather than following a policy of ours, and :class:`BareDemoCacheLearner`, the demo-cache
 floor, is the same model with a cache of the pairs it bought for each task, shown again at no cost when the task
-returns (:class:`BareSharedDemoCacheLearner`: one cache for a team of users). :class:`BareProgramLibraryLearner` is the
-program library, row PL (named M in the run records). All of them take ``end="finish"`` in the grid, so their rules are
+returns (:class:`BareSharedDemoCacheLearner`: one cache for a team of users); on an ARC-AGI-3 game it keeps the
+demonstrations it bought, the solver's plays of other levels of the game. :class:`BareProgramLibraryLearner` is the
+program library, row PL (named M in the run records), which plays the grid tracks alone. All of them take ``end="finish"`` in the grid, so their rules are
 the harness rows' (protocol.RULES_FINISH); the verdict is still not sent.
 """
 
@@ -32,6 +33,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from continual_arc.arc3.env import Arc3LearnerObservation, DemonstrationFeedback
+from continual_arc.arc3.instances import Demonstration
 from continual_arc.env import (
     Action,
     DemosFeedback,
@@ -45,7 +48,7 @@ from continual_arc.grids import InvalidGrid, normalize_grid
 from continual_arc.tasks import Pair
 
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
-from continual_arc_baselines.systems import protocol
+from continual_arc_baselines.systems import arc3_protocol, protocol
 from continual_arc_baselines.systems.base import SystemLearner, SystemUnavailable
 from continual_arc_baselines.systems.protocol import objects_from_end, render_grid, shape
 from continual_arc_baselines.systems.sandbox import (
@@ -150,7 +153,8 @@ class BareDemoCacheLearner(BareModelLearner):
     """The demo-cache floor: the bare model, plus a cache of the demonstration pairs it has bought for each
     task, up to ``cache_cap`` a task (the per-instance demo cap). When a task returns, the first message of the
     instance shows its cached pairs again at no cost, before the instance; the model may still request more, and they
-    join the cache. Nothing else is kept: no answers, no verdicts, no conversation."""
+    join the cache. On an ARC-AGI-3 game the cache keeps its demonstrations, the solver's plays of other levels, shown
+    again as they were bought. Nothing else is kept: no answers, no verdicts, no conversation."""
 
     name = "bare-demo-cache"
     # The cache, and the program library's programs, live in memory; they reach the state directory only for the
@@ -171,10 +175,13 @@ class BareDemoCacheLearner(BareModelLearner):
         kept = self.cache.setdefault(task_id, [])
         kept.extend(pairs[: max(self.cache_cap - len(kept), 0)])
 
-    def instance_preface(self, obs: LearnerObservation) -> str:
+    def instance_preface(self, obs: LearnerObservation | Arc3LearnerObservation) -> str:
         pairs = self.cached_pairs(obs.task_id)
         if not pairs:
             return ""
+        if isinstance(obs, Arc3LearnerObservation):
+            shown = "\n\n".join(arc3_protocol.render_demonstration(d, k) for k, d in enumerate(pairs, 1))
+            return f"Demonstrations of game {obs.task_id} that you received before, shown again at no cost:\n\n{shown}"
         shown = "\n\n".join(f"Earlier pair {k} input ({shape(p.input)}):\n{render_grid(p.input)}\n"
                              f"Earlier pair {k} output ({shape(p.output)}):\n{render_grid(p.output)}"
                              for k, p in enumerate(pairs, 1))
@@ -183,6 +190,8 @@ class BareDemoCacheLearner(BareModelLearner):
     def observe(self, obs: LearnerObservation, action: Any, feedback: Any) -> None:
         if isinstance(feedback, DemosFeedback) and not feedback.refused and feedback.pairs:
             self.keep_pairs(obs.task_id, list(feedback.pairs))
+        if isinstance(feedback, DemonstrationFeedback) and not feedback.refused:
+            self.keep_pairs(obs.task_id, [feedback.demonstration])
         super().observe(obs, action, feedback)
 
     def wipe_state(self) -> None:
@@ -198,7 +207,8 @@ class BareDemoCacheLearner(BareModelLearner):
     def load_state(self) -> None:
         path = self.state_dir / "cache.json"
         if path.exists():
-            self.cache = {task: [Pair.from_json(p) for p in pairs] for task, pairs in json.loads(path.read_text()).items()}
+            self.cache = {task: [Demonstration.from_json(p) if "steps" in p else Pair.from_json(p) for p in pairs]
+                          for task, pairs in json.loads(path.read_text()).items()}
 
     def resources(self) -> dict[str, float]:
         out = super().resources()

@@ -183,8 +183,9 @@ Arc3Action = Act | ResetLevel | RequestDemos | GiveUp
 
 @dataclass(frozen=True)
 class ActFeedback:
-    frames: list[Frame]
-    """The frames the action rendered: none when it was not valid or the engine ignored it."""
+    """The verdict on one action. The board it left is the next observation's, as a grid track's feedback is the
+    verdict alone, so that the run's event log does not hold every frame twice."""
+
     state: str
     level_completed: bool
     actions_used: int
@@ -192,11 +193,12 @@ class ActFeedback:
     ignored: bool
     failed: bool = False
     """The action cap is reached on this action."""
+    rendered: int = 0
+    """Frames the action rendered: several when it animates, none when it was not valid or the engine ignored it."""
 
 
 @dataclass(frozen=True)
 class ResetFeedback:
-    frames: list[Frame]
     state: str
     actions_used: int
     resets_used: int
@@ -441,7 +443,7 @@ class Arc3Env:
             frames = list(out.frame)
             ignored = not frames   # the level is over (game over) and the engine did nothing
             if frames:
-                cur.frames = frames
+                cur.frames = frames   # else the board stays as it was
             cur.state = out.state.value
             cur.available = [int(a) for a in out.available_actions]
             completed = levels.won(out)
@@ -449,7 +451,7 @@ class Arc3Env:
         if not valid or ignored:
             cur.invalid += 1
         failed = not completed and cur.used >= cur.cap
-        feedback = ActFeedback(frames, cur.state, completed, cur.actions, valid and not ignored, ignored, failed)
+        feedback = ActFeedback(cur.state, completed, cur.actions, valid and not ignored, ignored, failed, len(frames))
         return self._result(cur, feedback, solved=completed, failed=failed)
 
     def _reset_level(self, cur: _Current) -> StepResult:
@@ -461,7 +463,7 @@ class Arc3Env:
         cur.available = [int(a) for a in out.available_actions]
         cur.resets += 1
         failed = cur.used >= cur.cap
-        feedback = ResetFeedback(list(out.frame), cur.state, cur.actions, cur.resets, failed)
+        feedback = ResetFeedback(cur.state, cur.actions, cur.resets, failed)
         return self._result(cur, feedback, failed=failed)
 
     def _request_demo(self, cur: _Current) -> StepResult:
