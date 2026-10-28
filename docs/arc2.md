@@ -2,12 +2,11 @@
 
 ## Why
 
-ARC-AGI-2's rules are harder than ARC-AGI-1's and were calibrated on people (each of its evaluation tasks was solved
-by at least two human testers), so frontier models are far from saturating it, where they are close to it on the
-first edition. A first
-ARC-AGI-2 track, removed on 19 Oct 2026, had no generators and so rested on augmentation: a task's own pairs under
-the rotations, reflections and recolorings its rule survives, which gives a few dozen frames of one task and no fresh
-instance. ARC-GEN (Moffitt 2025, github.com/google/arc-gen) has published generators for 500 ARC-AGI-2 training tasks
+ARC-AGI-2's rules are harder than ARC-AGI-1's, and its evaluation tasks were calibrated on people (each was solved by
+at least two human testers), so frontier models are far from saturating it, where they are close to it on the first
+edition. A first ARC-AGI-2 track, removed on 19 Oct 2026, had no generators and so rested on augmentation: a
+task's own pairs under the rotations, reflections and recolorings its rule survives, which gives a few dozen frames
+of one task and no fresh instance. ARC-GEN (Moffitt 2025, github.com/google/arc-gen) has published generators for 500 ARC-AGI-2 training tasks
 since 25 Mar 2026, so the second track keeps the first's protocol unchanged: a stream of fresh instances of tasks that
 return after gaps, demonstrations on request, and the two frozen tests after it (Dan, 27 Oct 2026: "For now, we just
 need to get the static variant working. For each of the 3 tracks.").
@@ -39,10 +38,10 @@ what ARC-GEN's own `random.seed(s)` and `generate()` draw.
 Many generators redraw inside one call until a layout fits, and on some seeds some never stop. A call is therefore
 stopped once it has taken ten million random numbers, counted rather than timed, so that it stops at the same point
 on every machine. A call takes hundreds as a rule; the most any pool generator took in one of the screen's draws is
-7.7 million (`342ae2ed`), and the most any took on average 0.36 million (`20fb2937`). A call that
-stops, raises or makes a grid the benchmark refuses is drawn again at the next derived seed, as Re-ARC's are: the
-pool's generators did none of these in any of the screen's draws, but a run draws far more pairs than the screen,
-and a draw that failed every time a run resumed would stop that run for good.
+7.7 million (`342ae2ed`), and the most any took on average 0.36 million (`20fb2937`). A call that stops, raises or
+makes a grid the benchmark refuses is drawn again at the next derived seed, as Re-ARC's are: the pool's generators
+did none of these in any of the screen's draws, but a run draws far more pairs than the screen, and a draw that
+failed every time a run resumed would stop that run for good.
 
 ## The screen
 
@@ -115,9 +114,12 @@ reads names no edition.
 
 ## What stays open
 
-No person has solved the generated instances. ARC-AGI-2's testers solved each published pair, and the screen shows
-that a generator reproduces those pairs and keeps what they share, not that every draw is as clear as they are. The
-calibration sample (`scripts/arc2_calibration_sample.py`) measures how often a model solves the stream's instances at
-first sight, so that the paper can say how much is left to learn. The pool is frozen as the streams are: a new pool,
+The stream's tasks are ARC-AGI-2 training tasks, since ARC-GEN covers none of the evaluation tasks, and the training
+set was not calibrated on people as the evaluation sets were ("very easy to very difficult", in ARC Prize's words),
+so the stream need not be as hard as the held-out test, which is the calibrated evaluation tasks. No person has
+solved the generated instances either: the screen shows that a generator reproduces its task's published pairs and
+keeps what they share, not that every draw is as clear as they are. The calibration sample
+(`scripts/arc2_calibration_sample.py`) measures how often a model solves the stream's instances at first sight, so
+that the paper can say how much is left to learn. The pool is frozen as the streams are: a new pool,
 from a new ARC-GEN commit or a changed screen, is a new track. The drift mode, rules that change along a stream,
 comes later.
