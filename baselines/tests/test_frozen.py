@@ -749,6 +749,9 @@ def test_a_logged_runs_test_is_played_as_a_round_of_users_from_the_command_line(
         main(["test", str(run), "--schedule", str(tmp_path / "seen-1.json"), "--collective"])
     with pytest.raises(SystemExit, match="as one round of users with --collective"):
         main(["test", str(run), "--schedule", str(tmp_path / "seen.json")])
+    replace(test, meta={**test.meta, "stream_users": 2}).save(tmp_path / "seen-after-two.json")
+    with pytest.raises(SystemExit, match="the seen test after 2 users' stream"):   # each user's tasks are their own
+        main(["test", str(run), "--schedule", str(tmp_path / "seen-after-two.json"), "--collective"])
     assert not (run / "frozen").exists()
     assert main(["test", str(run), "--schedule", str(tmp_path / "seen.json"), "--collective"]) == 0
     out = run / "frozen" / "seen" / "play"

@@ -96,7 +96,7 @@ After the stream the learner plays two tests, each built by `configs.test_schedu
 | test | instances on `arc1-small` | what it reads |
 |---|---|---|
 | `held-out` | one instance of each of the configuration's 100 held-out ARC-AGI-1 evaluation tasks, which the stream never serves | generalization: whether the stream made the learner better at tasks it never met; the headline |
-| `seen` | four fresh instances of each of the stream's 25 tasks, at instance seeds no stream draws | memorisation: what the learner kept of the rules it met |
+| `seen` | four fresh instances of each of the stream's 25 tasks, at instance seeds no stream draws; after a stream of several users, the same 100 spread over every user's own tasks, and one of each task once they bring more than 100 ([regimes](#regimes)) | memorisation: what the learner kept of the rules it met |
 
 Each test is one round in which every instance is a user of its own, so every instance meets the learner as the
 stream left it, and nothing learnt on one test instance reaches another, since a learner changes what it carries only
@@ -233,18 +233,28 @@ updates. It is a setting of the run, not of the configuration (`with_users(confi
 or trains its weights, and learners are compared only at the same number. The canonical
 numbers are the powers of two from 1 to 16 (`CANONICAL_USERS`): a low-data regime by design,
 every update seeing at most 16 new instances, so that a learner that trains its weights between
-rounds finishes a whole stream on one machine in days, not weeks.
+rounds finishes a whole stream on one machine in days, not weeks. A track serves as many users
+as its pool gives tasks of their own: 16 on ARC-AGI-1, 4 on ARC-AGI-2 and 1 on ARC-AGI-3.
 
 | regime       | users          | picture                                                                 |
 |--------------|----------------|-------------------------------------------------------------------------|
 | `individual` | 1              | one system walking one person's stream, one instance at a time          |
 | `collective` | 2, 4, 8 or 16  | one system serving a team at once and learning from all of them (`arc1-small` at 16 users: 200 rounds of 16 instances) |
 
-In the collective regime every user walks a stream of their own over the same tasks (the
-same process as the individual regime, each user their own draw of it; user 0 at seed `s`
-walks exactly the individual stream at seed `s`, and user `u`'s stream does not depend on how
-many users there are, so a run at fewer users is a run at more cut to its first users), and
-the two frozen tests after the stream are the same at every number of users. The users are deliberately concurrent: a **round** is one instance per
+In the collective regime every user brings tasks of their own (Dan, 28 Oct 2026: "one user has
+25 puzzles, two users has 50, and four users have 100"): user `k` plays block `k` of the
+track's nested task order (`configs.task_order`, `configs.user_tasks`), which on ARC-AGI-1 is
+`arc1-small`'s 25 tasks sorted, then the 75 `arc1-medium` adds sorted, then the 300 `arc1-full`
+adds sorted, so that users 0 to 3 bring `arc1-medium`'s 100 and users 0 to 15 all 400. Each user
+walks the individual regime's process over their own tasks with their own draw of it: user 0
+at seed `s` walks exactly the individual stream at seed `s`, and user `u`'s tasks and stream do
+not depend on how many users there are, so a run at fewer users is a run at more cut to its
+first users. Every user meets the same held-out tasks, in an order of their own. The held-out
+test is the same at every number of users; the seen test covers every user's tasks, 100 new
+instances spread evenly over them (two of each of 50 at two users, one of each of 100 at four)
+and one of every task at eight and sixteen, instance `i` a task of user `i mod U`, whose state
+test user `i` starts from, so it is made for the run's number of users (`schedule make --test
+seen --users U`). So more users bring more tasks as well as more instances at once. The users are deliberately concurrent: a **round** is one instance per
 user, all open at once, the round's records are committed together, and the learner's
 `begin_round` and `end_round` hooks bracket it. The contract is that whatever the learner
 carries between instances changes only in `end_round`, so every user of a round meets the
@@ -258,7 +268,7 @@ on every open instance before a second on any. With one user every instance is a
 one and both are the serial loop.
 
 Exposure index and gap are counted in rounds over the whole team (two users meeting a
-task in the same round share both), and each record also carries the user's own count
+held-out task in the same round share both; a stream task is one user's alone), and each record also carries the user's own count
 (`user_exposure_index`, `user_gap`); with one user the two agree, the times a task was
 seen before and the steps since it was last seen. A round never spans a phase, so the
 epilogue starts on a round boundary and a test is a round of its own. `records.jsonl` only ever holds whole rounds, and a
@@ -508,7 +518,7 @@ tasks, and 25 held out. To have a learner verified on it:
    the repository with pip, implementing `continual_arc.learner`, and built with no arguments, so its settings are its
    class's defaults), the OpenRouter model it plays with and its reasoning effort, any other models it calls, and the
    encrypted key. A harness adapter on the baselines' `SystemLearner` depends on
-   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.4.0#subdirectory=baselines` alone,
+   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.5.0#subdirectory=baselines` alone,
    which brings the benchmark with it.
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,

@@ -8,7 +8,8 @@ of the ARC-AGI-2 training tasks new to the second edition from ARC-GEN's generat
 (:mod:`continual_arc.arc3`, ``docs/arc3.md``). Every configuration name carries its track (``arc1-small``), so a bare
 size such as ``small`` names nothing. Each
 track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream and
-then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2, 4, 8 or 16 users
+then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2, 4, 8 or 16 users on
+ARC-AGI-1, 1, 2 or 4 on ARC-AGI-2 and 1 on ARC-AGI-3, as far as each track's pool gives every user tasks of their own
 (:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only on the same track at the same
 number of users. Every other configuration, order, seed, number of users or setting is an ablation and is labeled
 as such in run metadata and reports (:func:`protocol_of`).
@@ -39,13 +40,18 @@ read against the same two references as transfer (:func:`continual_arc.metrics.t
 A configuration is served to a number of users (:func:`with_users`): how many people the
 system serves at once, and so how much experience arrives between two updates. One user is
 the individual regime, one system walking one person's stream one instance at a time. More
-is the collective regime: one system serving a team, every user walking a stream of their
-own over the same tasks, and every round one instance per user, served concurrently and
-acted on with the state the system had when the round began, with updates between rounds.
+is the collective regime: one system serving a team, every user bringing tasks of their own
+(Dan, 28 Oct 2026: "one user has 25 puzzles, two users has 50, and four users have 100"), user
+k's the k-th block of the track's nested task order (:func:`task_order`, :func:`user_tasks`),
+and every round one instance per user, served concurrently and acted on with the state the
+system had when the round began, with updates between rounds. So more users bring more
+tasks as well as more instances at once, and the seen test covers every user's tasks.
 The canonical numbers of users are the powers of two from 1 to 16 (Dan, 18 Oct 2026): a
 low-data regime by design, every update seeing at most 16 new instances, so that a learner
 that trains its weights between rounds finishes a whole stream on one machine in days, not
-weeks.
+weeks. A track serves as many of them as its pool has blocks: ARC-AGI-1's 400 tasks are 16
+blocks of ``arc1-small``'s 25, ARC-AGI-2's screened pool of 117 holds 4 of ``arc2-small``'s 25,
+and ARC-AGI-3's 15 stream games are ``arc3-small``'s one block.
 
 A configuration's ``stream_length`` is an observation window, not a ceiling on
 what a learner may learn from: the generators produce fresh instances forever.
@@ -276,9 +282,10 @@ CONFIGS: dict[str, BenchmarkConfig] = {
 
 CANONICAL_SEEDS = (0, 1, 2)
 CANONICAL_SIZE = "small"
-# The numbers of users a canonical score is read at, each a number of its own: powers of two up to 16, a low-data
-# regime by design that one machine finishes in days (Dan, 18 Oct 2026)
-CANONICAL_USERS = (1, 2, 4, 8, 16)
+# The numbers of users a canonical score is read at, each a number of its own, by track: powers of two up to 16, a
+# low-data regime by design that one machine finishes in days (Dan, 18 Oct 2026), as far as the track's pool gives
+# every user a block of tasks of their own (task_order)
+CANONICAL_USERS = {DATASET_ARC1: (1, 2, 4, 8, 16), DATASET_ARC2: (1, 2, 4), DATASET_ARC3: (1,)}
 
 
 def canonical_config_name(track: str) -> str:
@@ -293,7 +300,7 @@ def canonical_protocol(track: str) -> dict:
         "track": track,
         "config": canonical_config_name(track),
         "mode": ORDER_WORKSTREAMS,
-        "users": list(CANONICAL_USERS),
+        "users": list(CANONICAL_USERS[track]),
         "tests": list(TESTS),
         "seeds": list(CANONICAL_SEEDS),
         "env": get_config(canonical_config_name(track)).env.to_json(),
@@ -315,9 +322,12 @@ def test_schedule(
     """One of the two frozen tests after ``config``'s stream at ``seed`` (the module docstring).
 
     ``held-out``: the held-out tasks, each ``held_out_per_task`` times, at the instances user 0 meets in the epilogue
-    (:func:`epilogue_for_users`), so the transfer references serve it as they are. ``seen``:
-    :data:`SEEN_TEST_PER_TASK` new instances of each of the stream's tasks, at instance seeds of their
-    own (``derive_seed(seed, "seen-test", i)``), which no stream slot draws, in a seeded order.
+    (:func:`epilogue_for_users`), so the transfer references serve it as they are, the same at any number of users.
+    ``seen``: new instances of the users' own tasks (:func:`seen_instances`), :data:`SEEN_TEST_PER_TASK` of each of
+    the configuration's tasks at one user, the same number spread evenly over every user's tasks at more, and one of
+    each task once the users bring more tasks than that, at instance seeds of their own (``derive_seed(seed,
+    "seen-test", i)``), which no stream slot draws, in a seeded order. Instance i is a task of user i mod U, of the
+    stream's U users, whose state test user i starts from.
 
     Every instance is played from the system's state at the stream's end and nothing passes from one
     to another. ``width`` users play at once, every instance by default: one round, each user's own
@@ -330,12 +340,10 @@ def test_schedule(
         drawn = [(s.task_id, s.instance_seed) for s in epilogue.slots]
         sources = dict(epilogue.sources)
     elif test == TEST_SEEN:
-        tasks = sorted(config_tasks(cfg, rearc_task_ids if rearc_task_ids is not None else stream_task_pool(cfg),
-                                    seed))
-        order = [tid for tid in tasks for _ in range(SEEN_TEST_PER_TASK)]
-        random.Random(derive_seed(seed, PHASE_SEEN_TEST)).shuffle(order)
-        drawn = [(tid, derive_seed(seed, PHASE_SEEN_TEST, i)) for i, tid in enumerate(order)]
-        sources = {tid: cfg.stream_source for tid in tasks}
+        pool = rearc_task_ids if rearc_task_ids is not None else stream_task_pool(cfg)
+        tasks = [config_tasks(cfg, pool, seed)] if cfg.users == 1 else user_tasks(cfg, pool, seed)
+        drawn = seen_instances(tasks, seed, SEEN_TEST_PER_TASK * cfg.n_tasks)
+        sources = {tid: cfg.stream_source for own in tasks for tid in own}
     else:
         raise ValueError(f"test must be {TEST_HELD_OUT!r} or {TEST_SEEN!r}, got {test!r}")
     n = len(drawn)
@@ -344,9 +352,34 @@ def test_schedule(
         raise ValueError(f"width must divide the test's {n} instances, got {width}")
     slots = [Slot(tid, instance_seed, TEST_PHASE[test], reset_before=width < n, user=i % width)
              for i, (tid, instance_seed) in enumerate(drawn)]
-    return Schedule(name=f"{cfg.name}-{test}-test", seed=seed, slots=slots, sources=sources, users=width,
-                    meta={"config": cfg.to_json(), "seed": seed, "dataset": cfg.dataset, "track": cfg.track,
-                          "test": test, "width": width})
+    meta = {"config": cfg.to_json(), "seed": seed, "dataset": cfg.dataset, "track": cfg.track, "test": test,
+            "width": width}
+    name = f"{cfg.name}-{test}-test"
+    if test == TEST_SEEN and cfg.users > 1:   # a one-user test is left as it was before users brought tasks
+        meta |= {"stream_users": cfg.users, "tasks": tasks}
+        name += f"-u{cfg.users}"
+    return Schedule(name=name, seed=seed, slots=slots, sources=sources, users=width, meta=meta)
+
+
+def seen_instances(tasks: list[list[str]], seed: int, least: int) -> list[tuple[str, int]]:
+    """The seen test's instances over each of U users' ``tasks``, as (task id, instance seed). With N tasks in all,
+    the test has max(``least``, N) instances, each task the same number of times, refused unless that is whole (so
+    ``arc1-small``'s 4 of each of 25 at one user, 2 of each of 50 at two, and one of every task from four). Each
+    user's tasks are sorted, each repeated that many times, and shuffled in place by one
+    ``random.Random(derive_seed(seed, "seen-test"))``, user 0's list first, then user 1's and so on; instance i is
+    entry i // U of user i mod U's list, at instance seed ``derive_seed(seed, "seen-test", i)``."""
+    n = sum(map(len, tasks))
+    size = max(least, n)
+    each, left = divmod(size, n)
+    if left:
+        raise ValueError(f"the seen test's {size} instances do not spread evenly over {n} tasks")
+    rng = random.Random(derive_seed(seed, PHASE_SEEN_TEST))
+    dealt = []
+    for own in tasks:
+        order = [tid for tid in sorted(own) for _ in range(each)]
+        rng.shuffle(order)
+        dealt.append(order)
+    return [(dealt[i % len(tasks)][i // len(tasks)], derive_seed(seed, PHASE_SEEN_TEST, i)) for i in range(size)]
 
 
 def protocol_of(schedule, env_config=None) -> dict:
@@ -382,8 +415,8 @@ def protocol_of(schedule, env_config=None) -> dict:
     deviations: list[str] = []
     if name != canonical_config_name(track):
         deviations.append(f"configuration {name} is not {canonical_config_name(track)}")
-    if users not in CANONICAL_USERS:
-        deviations.append(f"{users} users is not one of the canonical numbers of users {CANONICAL_USERS}")
+    if users not in CANONICAL_USERS[track]:
+        deviations.append(f"{users} users is not one of {track}'s canonical numbers of users {CANONICAL_USERS[track]}")
     if not epilogue_only and order != ORDER_WORKSTREAMS:
         deviations.append(f"order {order} is not the stream's own, {ORDER_WORKSTREAMS}")
     if seed not in CANONICAL_SEEDS:
@@ -421,10 +454,10 @@ def get_config(name_or_config: str | BenchmarkConfig) -> BenchmarkConfig:
 
 
 def with_users(config: str | BenchmarkConfig, users: int) -> BenchmarkConfig:
-    """``config`` served to ``users`` people at once: every user walks a stream of their own over the
-    configuration's tasks, and user ``u`` walks the same stream whatever the number of users (user 0 at
-    seed ``s`` exactly the stream one user alone walks at ``s``), so a run at fewer users is a run at more
-    cut to its first users. Its checkpoints, horizons in instances over all users, scale with them."""
+    """``config`` served to ``users`` people at once: every user walks a stream of their own over tasks of their
+    own (:func:`user_tasks`), and user ``u`` walks the same stream whatever the number of users (user 0 at seed
+    ``s`` exactly the stream one user alone walks at ``s``), so a run at fewer users is a run at more cut to its first
+    users. Its checkpoints, horizons in instances over all users, scale with them."""
     cfg = get_config(config)
     return replace(cfg, users=users, checkpoints=tuple(k // cfg.users * users for k in cfg.checkpoints))
 
@@ -471,6 +504,41 @@ def select_nested(pool: list[str], n: int, seed: int, label: str, chain: list[in
 def config_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
     """The stream task set of ``cfg`` at ``seed`` from ``pool``: nested across the sizes of its track."""
     return select_nested(pool, cfg.n_tasks, seed, "tasks", _size_chain(cfg, "n_tasks"))
+
+
+def task_order(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
+    """Every task of ``pool`` that ``cfg``'s users may bring, in the order whose blocks of ``cfg.n_tasks`` are the
+    users' own (:func:`user_tasks`). The sizes are the track's nested task sets (its configurations', as
+    :func:`config_tasks` draws them, or a smoke configuration's own), then, while the pool lasts, further steps of the
+    smallest; for each in turn its set at ``seed`` (:func:`select_nested`) less the tasks already in the order is
+    sorted by task id and appended. So on ARC-AGI-1 the order is ``arc1-small``'s 25 sorted, then the 75
+    ``arc1-medium`` adds sorted, then the 300 ``arc1-full`` adds sorted: its first 25 are ``arc1-small``'s, its first
+    100 ``arc1-medium``'s and all 400 ``arc1-full``'s. ARC-AGI-2 has one configuration of 25 tasks, so its screened
+    pool of 117 continues in draws of 25 to 100; ARC-AGI-3's 15 stream games are ``arc3-small``'s alone."""
+    chain = _size_chain(cfg, "n_tasks")
+    if cfg.n_tasks not in chain:   # a smoke configuration's tasks are drawn on their own, so its order starts there
+        chain = [cfg.n_tasks]
+    size = len(set(pool))
+    chain = [n for n in chain if n <= size] or [cfg.n_tasks]
+    while chain[-1] + chain[0] <= size:
+        chain.append(chain[-1] + chain[0])
+    order: list[str] = []
+    for n in chain:
+        order += sorted(set(select_nested(pool, n, seed, "tasks", chain)) - set(order))
+    return order
+
+
+def user_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[list[str]]:
+    """Each of ``cfg``'s users' own tasks at ``seed``, by user: user k's are block k of :func:`task_order`, positions
+    ``k * cfg.n_tasks`` to ``(k + 1) * cfg.n_tasks - 1``, so user 0's are the configuration's own task set
+    (:func:`config_tasks`), and on ARC-AGI-1 users 0-3 together bring ``arc1-medium``'s 100 and users 0-15
+    ``arc1-full``'s 400. A configuration served to more users than its pool has blocks is refused."""
+    order = task_order(cfg, pool, seed)
+    blocks = len(order) // cfg.n_tasks
+    if cfg.users > blocks:
+        raise ValueError(f"{cfg.name}'s pool of {len(set(pool))} tasks holds {blocks} blocks of {cfg.n_tasks}, so it "
+                         f"serves at most {blocks} user{'s' * (blocks != 1)} tasks of their own, not {cfg.users}")
+    return [order[k * cfg.n_tasks:(k + 1) * cfg.n_tasks] for k in range(cfg.users)]
 
 
 def stream_task_pool(cfg: BenchmarkConfig) -> list[str]:
@@ -528,21 +596,22 @@ def build_schedule(
     :data:`FRESH`, the held-out tasks alone with the learner wiped before each. ``rearc_task_ids`` (the
     stream pool) and ``eval_task_ids`` default to the full pinned pools and are only overridable for
     testing. The same ``config``/``seed`` pair selects the same task set in every order, so a check's
-    run meets the same visits as the stream's.
+    run meets the same visits as the stream's. Served to several users (:func:`with_users`), user k walks the one-user
+    process over their own tasks (:func:`user_tasks`) at their own seed (:func:`_user_seeds`), and every user meets
+    the same held-out tasks, in an order of their own; round r is every user's r-th instance.
     """
     cfg = get_config(config)
     if order not in (*ORDERS, FRESH):
         raise ValueError(f"order must be one of {ORDERS} or {FRESH!r}, got {order!r}")
     if rearc_task_ids is None:
         rearc_task_ids = stream_task_pool(cfg)
-    tasks = config_tasks(cfg, rearc_task_ids, seed)
     source = cfg.stream_source
     if eval_task_ids is None:
         eval_task_ids = epilogue_task_pool(cfg)
 
-    def one_user(user_seed: int) -> Schedule:
-        """One user's own schedule: the stream process and the epilogue order at ``user_seed``,
-        over the tasks and held-out tasks drawn at the configuration's ``seed``."""
+    def one_user(user_seed: int, tasks: list[str]) -> Schedule:
+        """One user's own schedule: the stream process over ``tasks`` and the epilogue order at ``user_seed``, the
+        held-out tasks drawn at the configuration's ``seed``."""
         if order == FRESH:
             # the transfer reference: the held-out tasks alone, a fresh learner before each of their instances
             return epilogue_schedule(_held_out_tasks(cfg, seed, eval_task_ids), user_seed, cfg.epilogue_source,
@@ -559,17 +628,18 @@ def build_schedule(
 
     user_meta: dict = {}
     if cfg.users == 1:
-        sched = one_user(seed)
+        sched = one_user(seed, config_tasks(cfg, rearc_task_ids, seed))
         parts = sched.meta.get("parts", [sched.meta])
     else:
-        # User 0 keeps the configuration's own seed, so it walks exactly the stream one user alone
-        # would; every other user draws the same process with a seed of their own.
+        # User 0 keeps the configuration's own seed and tasks, so it walks exactly the stream one user alone
+        # would; every other user draws the same process over tasks of their own with a seed of their own.
         user_seeds = _user_seeds(cfg, seed)
-        per_user = [one_user(s) for s in user_seeds]
+        tasks = user_tasks(cfg, rearc_task_ids, seed)
+        per_user = [one_user(s, own) for s, own in zip(user_seeds, tasks, strict=True)]
         sched = interleave_users(per_user, seed, name=f"{cfg.name}-{order}")
         parts = []  # each user's own parts (spells included) are under "users"
         user_meta = {"users": {"n": cfg.users, "seeds": user_seeds,
-                               "parts": [x.meta.get("parts", [x.meta]) for x in per_user]}}
+                               "parts": [x.meta.get("parts", [x.meta]) for x in per_user], "tasks": tasks}}
     sched.meta = {
         "config": cfg.to_json(),
         "mode": order,

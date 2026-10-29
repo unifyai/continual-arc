@@ -41,8 +41,9 @@ Three loops on one GPU node hand each other files in the run's folder ([how a ru
    5 steps and the phase stopped once 2 measurements in a row have not improved on the best.
 
 After the 200 rounds `frozen.sh` serves the run's last phase and plays the held-out test (one instance of each of 100
-tasks the stream never uses) and the seen test (four new instances of each stream task), every test user starting from
-the end-of-stream memory. The settings and the reason for each are in [settings](docs/settings.md).
+tasks the stream never uses) and the seen test (four new instances of each stream task at one user, the same 100 spread
+over every user's own tasks at two and four, one of each task at eight and sixteen), every test user starting from the
+end-of-stream memory. The settings and the reason for each are in [settings](docs/settings.md).
 
 A trained run is started on its node with:
 

@@ -1,10 +1,12 @@
 """The two frozen tests after a run's stream, both played frozen and at once: a trained run's (its model on the node's
 vLLM), played on its own node once its stream has ended (frozen.sh), or a reference row's (its model on OpenRouter,
 continual_arc_training.references), played where the row's memory is (ref-tests.sh). The benchmark defines them
-(``configs.test_schedule``; the two for ``arc1-small`` at seed 0 are in this package's ``schedules/``): the held-out
-test, one instance of each of the 100 held-out tasks, and the seen test, four new instances of each of the stream's
-25 tasks. Each is one round of 100 users, every user starting from the end-of-stream state, so that nothing one test
-instance does reaches another and nothing is learnt:
+(``configs.test_schedule``; those for ``arc1-small`` at seed 0 are in this package's ``schedules/``): the held-out
+test, one instance of each of the 100 held-out tasks, the same at any number of users, and the seen test, new
+instances of the stream's users' own tasks, four of each of 25 at one user, two of each of 50 at two, and one of every
+task from four users (100 at four, 200 at eight, 400 at sixteen), a file for each. Each is one round, every instance a
+user of its own starting from the end-of-stream state, so that nothing one test instance does reaches another and
+nothing is learnt:
 
   * the model: a trained run's last phase, trained on every round the stream played, or another adapter given; or a
     reference row's player, or another given; or the base model, for the trained runs' references, rows h0 (the
@@ -65,8 +67,11 @@ SQLITE = b"SQLite format 3\0"
 Found = tuple[list[str], list[tuple[str, str]], list[str]]
 
 
-def schedule_path(test: str) -> Path:
-    """The test's schedule, ``arc1-small`` at seed 0 (the benchmark's ``configs.test_schedule``)."""
+def schedule_path(test: str, users: int = 1) -> Path:
+    """The test's schedule after a stream of ``arc1-small`` at seed 0 served to ``users`` (the benchmark's
+    ``configs.test_schedule``): the held-out test is one at any number of users, the seen test one for each."""
+    if test == "seen" and users > 1:
+        return SCHEDULES / f"arc1-small-seen-test-seed0-u{users}.json"
     return SCHEDULES / f"arc1-small-{test}-test-seed0.json"
 
 
@@ -248,9 +253,13 @@ def cmd_play(o: argparse.Namespace) -> None:
     out = Path(o.out).expanduser() if o.out else run / FROZEN
     name = f"{o.test}-reference" if reference else f"{o.test}-weights" if o.no_memory else o.test
     play_dir = out / (o.name or name) / "play"
-    schedule = Schedule.load(o.schedule or schedule_path(o.test))
+    users = stream_users(run) if run is not None and (run / "play" / "schedule.json").exists() else 1
+    schedule = Schedule.load(o.schedule or schedule_path(o.test, users))
     if schedule.meta.get("test") != o.test or set(schedule.rounds()) != {0}:
         raise SystemExit(f"{o.schedule} is not one round of the {o.test} test")
+    if o.test == "seen" and run is not None and schedule.meta.get("stream_users", 1) != users:
+        raise SystemExit(f"{o.schedule} is the seen test after {schedule.meta.get('stream_users', 1)} users' stream, "
+                         f"and {run} served {users}: each user's tasks are their own")
     if play.round_recorded(play_dir, schedule):
         print(json.dumps({"test": o.test, "played": True}), flush=True)
         return

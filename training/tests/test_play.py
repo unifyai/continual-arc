@@ -20,7 +20,7 @@ from continual_arc_training import play
 
 def test_a_cut_is_a_literal_prefix_of_the_whole_schedule():
     full = play.full_schedule()
-    assert full.users == play.SCHEDULE_USERS == 100
+    assert full.users == play.SCHEDULE_USERS == 16
     cut2 = play.schedule_cut(1)   # rounds 0 and 1
     assert cut2.rounds()[-1] == 1 and cut2.slots == full.slots[:len(cut2)]   # a true slice, not a shorter rebuild
     cut1 = play.schedule_cut(0)
@@ -30,9 +30,9 @@ def test_a_cut_is_a_literal_prefix_of_the_whole_schedule():
 def test_the_schedule_is_arc1_small_served_to_that_many_users():
     from continual_arc.configs import CANONICAL_USERS
 
-    assert play.served().users == 100 and play.served().name == "arc1-small"
+    assert play.served().users == 16 and play.served().name == "arc1-small"
     eight = play.served(8)
-    assert eight.users == 8 and eight.name == "arc1-small" and 8 in CANONICAL_USERS
+    assert eight.users == 8 and eight.name == "arc1-small" and 8 in CANONICAL_USERS["arc1"]
 
 
 def test_a_smaller_user_count_gives_exactly_a_larger_ones_first_users_round_by_round():

@@ -73,7 +73,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from continual_arc.aliases import SALT_FILE
-from continual_arc.schedule import PHASE_STREAM, TESTS, Schedule
+from continual_arc.schedule import PHASE_STREAM, TEST_SEEN, TESTS, Schedule
 
 from continual_arc_baselines.statelog import GIT_ENV, _git, commit_of, restore
 
@@ -166,7 +166,17 @@ def check(run_dir: Path, test: Schedule, name: str) -> int:
     if made_for(test) != made_for(stream):
         raise SystemExit(f"{name} is the test of {made_for(test)[1]} at seed {made_for(test)[0]}, and {run_dir}'s "
                          f"stream is {made_for(stream)[1]} at seed {made_for(stream)[0]}")
+    seen_for(test, stream, name, run_dir)
     return played
+
+
+def seen_for(test: Schedule, stream: Schedule, name: str, run_dir: Path) -> None:
+    """Refuse the seen test ``test`` unless it was made for as many users as ``stream`` serves: each user brings tasks
+    of their own (``continual_arc.configs.user_tasks``), so the seen test after U users' stream is over their tasks."""
+    if test.meta.get("test") == TEST_SEEN and test.meta.get("stream_users", 1) != stream.users:
+        raise SystemExit(f"{name} is the seen test after {test.meta.get('stream_users', 1)} users' stream, and "
+                         f"{run_dir}'s stream serves {stream.users}: make it with `continual-arc schedule make "
+                         f"--test seen --users {stream.users}`")
 
 
 def system_of(run_dir: Path) -> Path:
@@ -444,6 +454,8 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
     if set(test.rounds()) != {0}:
         raise SystemExit(f"{schedule} is not one round, every instance a user of its own: make the test at its full "
                          "width, or play it one instance at a time without --collective")
+    if stream_end(run_dir):
+        seen_for(test, Schedule.load(run_dir / "schedule.json"), str(schedule), run_dir)
     if (out / "records.jsonl").exists() and len(prior_records(out)) >= len(test.slots):
         return out
     launch = first_launch(run_dir)

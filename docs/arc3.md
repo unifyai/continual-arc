@@ -34,7 +34,7 @@ the drift mode, which comes later.
 | reproducibility | every solve is bounded by states expanded, never by time, and replayed in a fresh game before it is kept | a level is solved, or not, the same way on every machine |
 | the cache | only solutions are kept on disk, one file a draw, keyed by game, pinned version, a digest of the generator module's source and the draw's seed, with a digest of the layout drawn; levels are drawn again from their seeds | generating is deterministic and under 2 s, solving can take a minute; the layout's digest catches a generator that is not deterministic before a stale solution is served |
 | precompute | `continual-arc precompute --config arc3-small --seed 0` solves a configuration's every instance and its three demonstrations ahead of a run, in processes of its own | a run never waits on a solver |
-| users | rounds of users as on track 1, every open instance a game of its own, so a frozen test is one round | the frozen tests need it; a collective stream works the same way |
+| users | one: users bring tasks of their own, and the 15 stream games are `arc3-small`'s one block, so the track is individual alone; a frozen test is still one round of users, every open instance a game of its own | the frozen tests need rounds of users; a second user would need 15 more games |
 
 ## The protocol
 

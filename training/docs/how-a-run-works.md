@@ -149,9 +149,13 @@ its start.
 
 After the stream's 200 rounds the system is tested twice, frozen, both tests played at once: the **held-out test**, one
 instance of each of the 100 held-out tasks (ARC-AGI-1 evaluation tasks the stream never uses), and the **seen test**,
-four new instances of each of the stream's 25 tasks. The benchmark defines both (`configs.test_schedule`; the two for
-`arc1-small` at seed 0 are in `src/continual_arc_training/schedules/`). Each is one round of 100 users, every user
-starting from the end-of-stream state, so nothing one test instance does reaches another and nothing is learnt.
+four new instances of each of the stream's 25 tasks at one user. At several users each user brings tasks of their own
+(user k block k of the benchmark's nested task order, `configs.user_tasks`), and the seen test covers all of them: two
+new instances of each of 50 tasks at two users, one of each of 100 at four, one of every task at eight and sixteen.
+The benchmark defines both (`configs.test_schedule`); those for `arc1-small` at seed 0 are in
+`src/continual_arc_training/schedules/`, the seen test's one for each number of users, and `frozen.sh` plays a run's
+own. Each is one round, every instance a user of its own starting from the end-of-stream state, so nothing one test
+instance does reaches another and nothing is learnt.
 Transfer, the benchmark's headline, is the budget a run saves on the held-out test against the learner reset on the
 same instances (row H0).
 

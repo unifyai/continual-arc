@@ -324,16 +324,16 @@ def test_the_summary_counts_each_tests_solves_and_cost(tmp_path):
         "seen": {"test": "seen", "served": "pg-u2-lag1-p0002", "instances": 1, "solved": 1, "mean_cost": 1.0}}
 
 
-@pytest.mark.parametrize("test", frozen.TESTS)
-def test_the_schedules_are_the_benchmarks_own(test):
+@pytest.mark.parametrize("test,users,size", [("held-out", 1, 100), ("seen", 1, 100), ("seen", 2, 100), ("seen", 4, 100),
+                                             ("seen", 8, 200), ("seen", 16, 400)])
+def test_the_schedules_are_the_benchmarks_own(test, users, size):
     from continual_arc import configs
     from continual_arc.schedule import Schedule
-    if not hasattr(configs, "test_schedule"):
-        pytest.skip("the installed benchmark predates the frozen tests")
-    kept = Schedule.load(frozen.schedule_path(test))
-    made = configs.test_schedule(configs.get_config("arc1-small"), 0, test)
+    kept = Schedule.load(frozen.schedule_path(test, users))
+    made = configs.test_schedule(configs.with_users("arc1-small", users), 0, test)
     assert kept.to_json() == json.loads(json.dumps(made.to_json()))   # as saved: a tuple is a list in JSON
-    assert (kept.users, len(kept.slots), set(kept.rounds())) == (100, 100, {0})
+    assert (kept.users, len(kept.slots), set(kept.rounds())) == (size, size, {0})
+    assert frozen.schedule_path("held-out", users) == frozen.schedule_path("held-out")   # one at any number of users
 
 
 # -- frozen.sh end to end ----------------------------------------------------------------------------------------

@@ -13,7 +13,10 @@
 # reference from nothing on the base model instead, into OUT/TEST-reference/play, with no run to wait for: RUN then
 # names its folder, RUNS/paper/RUN, OUT defaulting to its frozen/. MEMORY=none plays the adapter (the run's last phase,
 # or ADAPTER) from an empty harness memory under the run's own task names instead, its weights alone, into
-# OUT/TEST-weights, OUT defaulting to RUNS/rt/RUN/weights. SCHEDULES (default the package's) holds the tests' schedules.
+# OUT/TEST-weights, OUT defaulting to RUNS/rt/RUN/weights. SCHEDULES (default the package's) holds the tests' schedules:
+# the seen test is over the stream's users' own tasks, a schedule for each number of users, the run's own read from its
+# play/schedule.json, and a reference played from nothing (ROW) plays the one for USERS (1 unless set), the users of
+# the runs it is read against.
 # POLL is how often it looks, in seconds (60). Paths: lib.sh's.
 # Usage (on the node):
 #   cd ~ && (setsid -f nohup bash ~/continual-arc/training/scripts/frozen.sh pg-u2-lag1 0,1,2,3,4,5,6,7 > /dev/null 2>&1 < /dev/null)
@@ -26,6 +29,11 @@ R=$RUNS/rt/$RUN
 [ -n "$ROW" ] && R=$RUNS/paper/$RUN
 FOLDER=frozen; [ "$MEMORY" = none ] && FOLDER=weights
 OUT=${OUT:-$R/$FOLDER} ADAPTER=${ADAPTER:-} SERVED=${SERVED:-}
+if [ -z "${USERS:-}" ]; then
+    USERS=1
+    [ -z "$ROW" ] && [ -f "$R/play/schedule.json" ] \
+        && USERS=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["users"])' "$R/play/schedule.json")
+fi
 TESTS=(held-out seen) NAMES=(held-out seen)
 [ -n "$ROW" ] && NAMES=(held-out-reference seen-reference)
 [ "$MEMORY" = none ] && NAMES=(held-out-weights seen-weights)
@@ -102,6 +110,7 @@ py() { (cd "$PRIME_RL" && uv run --no-sync python -m continual_arc_training.froz
     scheds=() wants=() tries=(0 0)
     for t in "${TESTS[@]}"; do
         sched=$SCHEDULES/arc1-small-$t-test-seed0.json
+        [ "$t" = seen ] && [ "$USERS" != 1 ] && sched=$SCHEDULES/arc1-small-seen-test-seed0-u$USERS.json
         scheds+=("$sched")
         wants+=("$(python3 -c "import json, sys; print(len(json.load(open(sys.argv[1]))['slots']))" "$sched")")
     done
