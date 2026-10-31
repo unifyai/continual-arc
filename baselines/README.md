@@ -1,4 +1,4 @@
-<!-- ARXIV_ID_PENDING: replace every ARXIV_ID_PENDING in this file with the paper's arXiv id once its listing is out, the evening before the launch on 27 October 2026, then delete this line -->
+<!-- ARXIV_ID_PENDING: replace every ARXIV_ID_PENDING in this file with the paper's arXiv id once its listing is out, the evening before the launch, then delete this line -->
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/continual-arc-readme-banner-dark.png">
