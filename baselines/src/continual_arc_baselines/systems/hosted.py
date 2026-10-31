@@ -39,6 +39,7 @@ import tempfile
 import threading
 import time
 from datetime import UTC, datetime
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +72,10 @@ from continual_arc_baselines.systems.sandbox import (
 log = logging.getLogger(__name__)
 
 HOST = Path(__file__).with_name("learner_host.py")
-PUBLIC_BENCHMARK = "git+https://github.com/unifyai/continual-arc@v0.1.0"
+PUBLIC_BENCHMARK = next(url for name, _, url in (r.partition(" @ ") for r in metadata.requires("continual-arc-baselines"))
+                        if name.split("[")[0] == "continual-arc")
+"""The benchmark the baselines themselves depend on (their pyproject's URL), installed for a submission that does not
+bring ``continual-arc`` itself."""
 SUBMISSION_RECORD = "arc-submission.json"
 """What :func:`install_submission` installed, written into the virtual environment once the install is done."""
 INHERITED_ENV = ("LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
