@@ -4,20 +4,22 @@
 
 A submitted run is the directory the benchmark's runner wrote for the learner's stream (`records.jsonl`,
 `summary.json`, `schedule.json`, `config.json`, `meta.json`) with a `submission.json` beside them. `submission.json`
-names what the leaderboard shows, the learner reset on the same stream (`reset`: `schedule make --reset-each`), which
-the share learned is read against, and the frozen tests played after the stream (`tests`): for the held-out test and,
-if it was played, the seen test, the learner's own test, played from where its stream left it, the same learner reset
-before each instance, which T is read against, and the bare model (the stateless floor), shown beside T, each played
-on its own. Every directory is relative to this repository.
+names what the leaderboard shows: the learning method (`name`, `learner`, `code`), the model that plays (`student`, an
+OpenRouter model id) at its reasoning `effort`, the model that teaches it (`teacher`, or null), the learner reset on
+the same stream (`reset`: `schedule make --reset-each`), which the share learned is read against, and the two frozen
+tests played after the stream (`tests`): for each, the learner's own test, played from where its stream left it, the
+same learner reset before each instance, which the test is read against, and the bare model (the stateless floor),
+shown beside it, each played on its own. Every directory is relative to this repository.
 
 The check passes when every run's schedule is the one the benchmark builds for its configuration, order or test, and
 seed, its records cover every slot of it, its summary is the one its records give, the learner's tests were played
 under its stream's task names (`alias-salt`), the resets are runs of the same learner and the bare runs of the
-stateless floor. It then prints the leaderboard's numbers: T on the held-out test first (the points of the budget saved
-against the learner reset, higher is better), flagged when the reset plays below the bare model, T on the seen test,
-the share learned over the stream (the share of the learnable budget saved over the reset) and the budget used and
-share solved on the stream (100 times the mean charge over the cap, lower is better). Nothing here calls a model or
-the network.
+stateless floor. It then prints the leaderboard's numbers: the learner's place on the plane of the two tests, the
+share of its reset's spend it saves on the seen test (memorization) and on the held-out test (generalization), each
+with its 95 percent interval, the points saved (T) and the budget used and share solved by the learner and its reset
+beside it, flagged when the reset uses more of the budget than the bare model; then the share learned over the stream
+(the share of the learnable budget saved over the reset) and the budget used and share solved on the stream (100 times
+the mean charge over the cap, lower is better). Nothing here calls a model or the network.
 """
 
 from __future__ import annotations
@@ -30,12 +32,12 @@ from continual_arc.aliases import SALT_FILE
 from continual_arc.configs import build_schedule, protocol_of, test_schedule, with_users
 from continual_arc.metrics import share_learned, summarize, transfer
 from continual_arc.runner import load_run
-from continual_arc.schedule import TEST_HELD_OUT, TESTS
+from continual_arc.schedule import TEST_HELD_OUT, TEST_SEEN, TESTS
 
 ROOT = Path(__file__).resolve().parent.parent
 
 RUN_FILES = ("records.jsonl", "summary.json", "schedule.json", "config.json", "meta.json")
-SUBMISSION_FIELDS = ("name", "learner", "model", "code", "contact")
+SUBMISSION_FIELDS = ("name", "learner", "student", "effort", "code", "contact")
 BARE = "BareModelLearner"
 ROLES = ("run", "reset", "bare")
 
@@ -82,9 +84,10 @@ def check_run(run_dir: Path, expected, label: str) -> tuple[list[str], tuple]:
 
 def check_test(test: str, dirs: dict, run_dir: Path, protocol: dict,
                learner: str) -> tuple[list[str], tuple[dict, dict] | None]:
-    """One frozen test's three runs; returns the problems and T, with the bare model read against the same reset (a
-    positive T there is a reset that uses more of the budget than the bare model, so plays below it), or None if they
-    cannot be read."""
+    """One frozen test's three runs; returns the problems and the learner's reading against its reset
+    (``metrics.transfer``: the share saved, T and both sides' budget and share solved), with the bare model read against
+    the same reset (a positive T there is a reset that uses more of the budget than the bare model, so plays below it),
+    or None if they cannot be read."""
     problems, loaded = [], {}
     for role in ROLES:
         if not dirs.get(role):
@@ -126,6 +129,9 @@ def check(run_dir: Path) -> list[str]:
     for field in SUBMISSION_FIELDS:
         if not isinstance(submission.get(field), str) or not submission[field].strip():
             problems.append(f"submission.json needs a {field}")
+    teacher = submission.get("teacher", "")
+    if teacher is not None and (not isinstance(teacher, str) or not teacher.strip()):
+        problems.append("submission.json needs a teacher: the model that teaches the student, or null for none")
     learned = None
     reset_dir = ROOT / str(submission.get("reset", ""))
     if not submission.get("reset") or not (reset_dir / "records.jsonl").exists():
@@ -139,27 +145,32 @@ def check(run_dir: Path) -> list[str]:
         if reset_records:
             learned = share_learned(records, reset_records, config)
     tests = submission.get("tests") or {}
-    if TEST_HELD_OUT not in tests:
-        problems.append("submission.json's tests name no held-out test, whose T is the headline")
     results = {}
     for test in TESTS:
-        if test in tests:
-            found, results[test] = check_test(test, tests[test], run_dir, protocol, learner_of(run_dir))
-            problems += found
+        if test not in tests:
+            problems.append(f"submission.json's tests name no {test} test: the headline is the plane of both")
+            continue
+        found, results[test] = check_test(test, tests[test], run_dir, protocol, learner_of(run_dir))
+        problems += found
 
     stream = budget([r for r in records if r.episode_type == "benchmark" and r.phase == "stream"], config.max_cost)
     line = f"{run_dir}: {protocol['config']} {protocol['mode']} seed {protocol['seed']}, "
     line += "canonical" if protocol["canonical"] else "not canonical (" + "; ".join(protocol["deviations"]) + ")"
     print(line)
-    for test, read in results.items():
-        if read and read[0]["transfer"] is not None:
-            t, bare = read
-            lo, hi = t["ci95"] or (float("nan"), float("nan"))
-            print(f"  {test} test: T {t['transfer']:+.1f} points (95% interval {lo:+.1f} to {hi:+.1f}) against the "
-                  f"learner reset, budget used {t['run_budget']:.1f}, solved {100 * t['solved']['run']:.1f}%")
-            if bare["transfer"] is not None:
-                flag = ": flagged, the reset plays below the bare model" if bare["transfer"] > 0 else ""
-                print(f"    the reset used {bare['reset_budget']:.1f} and the bare model {bare['run_budget']:.1f}{flag}")
+    for test in (TEST_SEEN, TEST_HELD_OUT):
+        read = results.get(test)
+        if not read or read[0]["share"] is None:
+            continue
+        t, bare = read
+        lo, hi = t["share_ci95"] or (float("nan"), float("nan"))
+        t_lo, t_hi = t["ci95"] or (float("nan"), float("nan"))
+        print(f"  {test} test: share saved {t['share']:+.3f} (95% interval {lo:+.3f} to {hi:+.3f}) of the learner "
+              f"reset's spend, T {t['transfer']:+.1f} points ({t_lo:+.1f} to {t_hi:+.1f})")
+        print(f"    budget used {t['run_budget']:.1f}, solved {100 * t['solved']['run']:.1f}%; the reset's "
+              f"{t['reset_budget']:.1f}, solved {100 * t['solved']['reset']:.1f}%")
+        if bare["transfer"] is not None:
+            flag = ": flagged, the reset plays below the bare model" if bare["transfer"] > 0 else ""
+            print(f"    the bare model used {bare['run_budget']:.1f}{flag}")
     if learned and learned["share_learned"] is not None:
         lo, hi = learned["ci95"] or (float("nan"), float("nan"))
         print(f"  share learned {learned['share_learned']:+.2f} ±{learned['se']:.2f} (95% interval {lo:+.2f} to {hi:+.2f}), "

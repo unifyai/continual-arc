@@ -70,18 +70,30 @@ def text_report(summary: dict, title: str = "Continual-ARC run") -> str:
 
 
 def transfer_report(transfer: dict) -> str:
-    title = f"Transfer on the {transfer['test']} test, against the learner reset before each instance"
-    lines = [title, "-" * len(title), f"matched instances: {transfer['n']}"]
+    title = f"The {transfer['test']} test, against the learner reset before each instance"
+    plays = transfer.get("plays")
+    lines = [title, "-" * len(title), f"matched instances: {transfer['n']}"
+             + (f" over {transfer.get('tasks')} tasks" if transfer["n"] else "")]
+    if plays and (plays["run"] > 1 or plays["reset"] > 1):
+        lines.append(f"each side's charge on an instance is the mean of its plays: run {plays['run']}, "
+                     f"reset {plays['reset']}")
     if not transfer["n"]:
         return "\n".join(lines + ["no instance of the test was played by both runs"]) + "\n"
+    reps = f", {transfer['reps']} task resamples" if transfer["ci95"] else ""
+    if transfer["share"] is None:
+        lines.append("share saved: undefined, since the reset spent nothing")
+    else:
+        ci = transfer["share_ci95"]
+        span = f"  (95% interval {_fmt(ci[0], 3)} to {_fmt(ci[1], 3)}{reps})" if ci else ""
+        lines.append(f"share saved: {_fmt(transfer['share'], 3)} of the reset's spend{span}")
+    ci = transfer["ci95"]
+    span = f"  (95% interval {_fmt(ci[0], 1)} to {_fmt(ci[1], 1)})" if ci else ""
     solved = transfer["solved"]
     lines += [
+        f"saved: {_fmt(transfer['transfer'], 1)} points of the budget (T){span}",
         f"budget used:  run {_fmt(transfer['run_budget'], 1)}   reset {_fmt(transfer['reset_budget'], 1)}",
-        f"share solved:  run {_fmt(solved['run'])}   reset {_fmt(solved['reset'])}",
+        f"share solved: run {_fmt(100 * solved['run'], 1)}%   reset {_fmt(100 * solved['reset'], 1)}%",
     ]
-    ci = transfer["ci95"]
-    span = f"  (95% interval {_fmt(ci[0], 1)} to {_fmt(ci[1], 1)}, {transfer['reps']} task resamples)" if ci else ""
-    lines.append(f"transfer: {_fmt(transfer['transfer'], 1)} points{span}")
     return "\n".join(lines) + "\n"
 
 

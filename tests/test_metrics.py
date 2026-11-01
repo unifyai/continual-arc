@@ -2,6 +2,7 @@ from continual_arc.env import EnvConfig, InstanceRecord
 from continual_arc.metrics import (
     cost_by_exposure,
     learning_curve,
+    mean_plays,
     retention_by_gap,
     score,
     share_learned,
@@ -83,8 +84,9 @@ def test_the_seen_test_reads_new_instances_of_the_streams_tasks_and_clusters_by_
     run, reset = seen([1, 1, 3, 3]), seen([5, 5, 5, 5])
     t = transfer(run, reset, CFG, test="seen", reps=200)
     assert t["test"] == "seen" and t["n"] == 4 and t["tasks"] == 2 and t["transfer"] == 100 * (5 - 2) / 16
-    assert transfer_report(t).startswith("Transfer on the seen test")
+    assert transfer_report(t).startswith("The seen test")
     assert t["ci95"] == [100 * 2 / 16, 100 * 4 / 16]   # a draw takes each task's two instances together
+    assert t["share"] == 1 - 2 / 5 and t["share_ci95"] == [1 - 3 / 5, 1 - 1 / 5]   # from the same task resamples
     assert transfer(run, reset, CFG, reps=0)["n"] == 0   # none of them is a held-out instance
 
 
@@ -104,6 +106,33 @@ def test_transfer_matches_instances_and_bootstraps_over_tasks():
     assert t["n"] == 5 and t["transfer"] == 100 * 2 / 16
     assert t["ci95"][0] == t["ci95"][1] == t["transfer"]  # every task transfers alike, so every draw agrees
     assert transfer(run, [], CFG)["transfer"] is None
+    assert transfer(run, [], CFG)["share"] is None
+
+
+def test_the_share_saved_is_the_share_of_the_resets_own_spend_so_a_small_spend_reads_no_smaller():
+    # two learners save the same share of what their resets spend, one on a reset that spends four times the other's:
+    # the same share, while T, in points of the budget, is four times as large, and the report shows both
+    small, large = transfer(held([1, 1]), held([2, 2]), CFG, reps=0), transfer(held([4, 4]), held([8, 8]), CFG, reps=0)
+    assert small["share"] == large["share"] == 0.5
+    assert large["transfer"] == 4 * small["transfer"]
+    assert large["reset_budget"] == 4 * small["reset_budget"]
+    text = transfer_report(transfer(held([4, 4]), held([8, 8]), CFG, reps=100))
+    assert "share saved: 0.500 of the reset's spend" in text and "saved: 25.0 points" in text
+    assert "budget used:  run 25.0   reset 50.0" in text
+    # a run worse than its reset saves a negative share; a reset that spends nothing leaves the share undefined
+    assert transfer(held([3, 3]), held([2, 2]), CFG, reps=0)["share"] == 1 - 3 / 2
+    zero = transfer(held([0, 0]), held([0, 0]), CFG, reps=50)
+    assert zero["share"] is None and zero["share_ci95"] is None and zero["transfer"] == 0
+
+
+def test_several_plays_of_a_side_read_as_their_mean_on_the_instances_every_play_holds():
+    first, second = held([2, 4, 6]), held([4, 8])   # the second play is one instance short
+    mean = mean_plays([first, second], ("held-out-test",))
+    assert sorted((r.task_id, r.cost, r.solved) for r in mean) == [("e0", 3.0, 1.0), ("e1", 6.0, 1.0)]
+    assert mean_plays([first, held([16], phase="epilogue")], ("held-out-test",)) == []   # phases filter each play
+    reset = mean_plays([held([8, 8]), held([16, 16])], ("held-out-test", "epilogue"))
+    t = transfer(mean, reset, CFG, reps=0)
+    assert t["share"] == 1 - (3 + 6) / (12 + 12) and t["solved"] == {"run": 1.0, "reset": 0.5}
 
 
 def test_checkpoint_scores_read_the_stream_prefix():
@@ -175,3 +204,19 @@ def test_share_learned_reads_a_run_in_progress_on_the_slots_it_reached_and_a_res
     assert partial["n"] == 6 and partial["share_learned"] == 0
     ahead = share_learned(reset, reset[:6], CFG, reps=0)   # the reset has played each task's first two visits
     assert ahead["n"] == 12 and ahead["same_instances"] == 6
+
+
+def test_the_transfer_command_reads_each_sides_plays_as_their_mean_and_reports_the_share(monkeypatch, capsys):
+    import json
+
+    from continual_arc import cli
+
+    plays = {"run": held([2, 2]), "run-2": held([4, 4]), "reset": held([8, 8]), "reset-2": held([16, 16])}
+    monkeypatch.setattr("continual_arc.runner.load_run", lambda d: (None, CFG, plays[d]))
+    cli.main(["transfer", "run", "reset", "--also-run", "run-2", "--also-reset", "reset-2", "--reps", "50", "--json"])
+    out = capsys.readouterr().out
+    assert "mean of its plays: run 2, reset 2" in out and "share saved: 0.750 of the reset's spend" in out
+    result = json.loads(out[out.index("{"):])
+    assert result["share"] == 1 - 3 / 12 and result["plays"] == {"run": 2, "reset": 2}
+    assert result["run_budget"] == 100 * 3 / 16 and result["reset_budget"] == 100 * 12 / 16
+    assert result["solved"] == {"run": 1.0, "reset": 0.5}

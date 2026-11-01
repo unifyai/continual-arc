@@ -22,7 +22,7 @@ caching outputs pointless.
 | task identity | task id always exposed | isolates memory from recognition; recognition can be a later track |
 | demos | on request, at a cost equal to one wrong attempt | makes remembering an economic decision |
 | score | mean cost per instance = wrong attempts + demo requests | one number; compute/tokens/memory are plotted, not scored |
-| headline | T on the held-out test: the budget a learner saves there against itself reset before each instance, on the same instances; T on the seen test and the share learned on the stream, against the learner reset on its own stream, beside it (20, 21 and 22 Oct 2026, below) | no cache helps on a task never seen, and the reset plays the learner's own model in its own harness, the environment the learner learns in |
+| headline | the plane of the two frozen tests: the share of its reset's spend a learner saves on the seen test (across, memorization) and on the held-out test (up, generalization), its reset being itself wiped before each instance on the same instances, with the budget used and share solved of the learner and its reset beside each; the share learned on the stream, against the learner reset on its own stream, is secondary (20, 21, 22 and 31 Oct 2026, below) | memory and generalization are different skills, and one plane shows both; a share does not read a strong system as having gained less for having less to save, and the absolute view beside it shows when a large share is of a small spend; the reset plays the learner's own model in its own harness, the environment the learner learns in |
 | track | one for each ARC-AGI edition, `arc1`, `arc2` and `arc3`, named in every config (`arc1-small`); a bare size names nothing | every track serves fresh, verified instances without end, so a return is never a lookup: Re-ARC's generators on ARC-AGI-1, Google's ARC-GEN on the ARC-AGI-2 training tasks new to the second edition (`docs/arc2.md`), and on ARC-AGI-3 a generator and solver of our own for each public game, whose instances are fresh levels of the game's first-level rules (`docs/arc3.md`). A game's later levels change its rules, so they wait for a mode in which rules drift. The held-out season that verifies results streams as `arc1-small` does (Dan, 27 Oct 2026, for the arXiv version: all three tracks, static first; on 19 Oct the second and third had been dropped, when ARC-AGI-2 had no generators and ARC-AGI-3 served fixed levels) |
 | canonical protocol | the `arc1-small` config's stream, then its two frozen tests, default environment settings, seeds 0 to 2; everything else is an ablation and is labeled so in run metadata | researchers need one number to quote, and the knobs must not let a non-standard run pass as it |
 | stream shape | bursty workstreams over a growing task set | mimics an office worker; tests retention across long gaps and re-activation |
@@ -82,11 +82,13 @@ findings.
 
 ## Metrics
 
-* headline, T on the held-out test: `U(reset) − U(run)` over the test's instances, where U is the budget used,
-  `100 · mean_cost / max_cost`, `run` is the learner's own frozen test and `reset` the same learner reset before each
-  instance, played on the same instances apart from the run's own test, with a bootstrap over tasks and the share
-  solved of both beside it (`metrics.transfer`, `continual-arc transfer`); the seen test is read the same way
-  (`--test seen`)
+* headline, the share saved on each frozen test: `1 − U(run) / U(reset)` over the test's instances, where U is the
+  budget used, `100 · mean_cost / max_cost`, `run` is the learner's own frozen test and `reset` the same learner reset
+  before each instance, played on the same instances apart from the run's own test; T, `U(reset) − U(run)`, is the
+  same saving in points. Both have a 95 percent interval from a bootstrap over tasks, from the same resamples, and the
+  budget used and share solved of both sides stand beside them (`metrics.transfer`, `continual-arc transfer`, `--test
+  seen` for the seen test; several plays of a side read as their mean on each instance, `metrics.mean_plays`). The
+  seen test's share is the x of the plane and the held-out test's the y
 * score: `100 · (1 − mean_cost / max_cost)`, `max_cost = attempt_cap + demo_cost · demo_cap`
 * cost of an instance: its wrong attempts plus `demo_cost` per demo request when it is solved, and `max_cost` when it
   is not. Until 20 Oct 2026 an unsolved instance was charged the attempt cap plus its demo requests, so failing
@@ -107,18 +109,31 @@ exposure indices and gaps are preserved when an add-on inserts an episode. An
 add-on may schedule a fresh task instance, but it must not inspect or mutate
 learner state; that boundary keeps interventions comparable across harnesses.
 
-## Why transfer is the headline
+## Why the two tests' shares are the headline
 
-Settled 20 Oct 2026, on 100 held-out tasks so that it can resolve a few points (25 tasks met once could not). The
-share learned has two flaws that model progress makes worse. Each stream task recurs under its alias, and its
+Settled 31 Oct 2026 (Dan: the leaderboard is based on the paper's central figure): a learner is placed on the plane of
+the two frozen tests by the share of its reset's spend it saves on each, the seen test across and the held-out test
+up, with the budget used and share solved of the learner and of its reset beside each point. Remembering a rule met
+before and getting better at rules never met are different skills, and neither test alone says which a learner has:
+a program library remembers every rule it met and carries nothing to a new one, while a learner that gets better at
+driving its harness may do the reverse. The plane shows both at once. Each axis is a share rather than points because
+a system whose reset already spends little has less to save, and in points it would read as having gained less for
+being stronger. A share has the opposite blind spot, since a large share of a small spend is a small gain, so the
+absolute view stands beside it. On the seen test every task was met in the stream, so perfect memory would spend
+nothing there and the share is the share learned of what the test leaves to learn.
+
+The stream's share learned is secondary. Until 31 Oct 2026 T on the held-out test was the headline alone, settled on
+20 Oct, on 100 held-out tasks so that it can resolve a few points (25 tasks met once could not), because the share
+learned has two flaws that model progress makes worse. Each stream task recurs under its alias, and its
 demonstrations hold everything needed to solve it, so writing one program per alias and keeping it is close to
 optimal: the naive program library saves about two thirds of the learnable budget at every effort on GPT-6 Luna. And
-a strong model leaves little to learn: the learnable budget falls from 38.6 points at low effort to 15.0 at high.
-Transfer avoids both. A held-out task was never seen, so no cached program or answer helps on it, and the reference
-plays the learner's own model, so the score is the learning, not the model.
+a strong model leaves little to learn: the learnable budget falls from 38.6 points at low effort to 15.0 at high. The
+held-out axis avoids both: a held-out task was never seen, so no cached program or answer helps on it, and the
+reference plays the learner's own model, so the score is the learning, not the model. The seen axis reads the same
+memory as the share learned, but at the end of the stream and on instances the stream never served.
 
 Settled 22 Oct 2026: each learner is read against itself reset, and the bare model is no reference. From 20 to 22 Oct
-T was read against the stronger of the reset and the bare model, and the share learned against the demo-cache floor,
+the held-out test was read against the stronger of the reset and the bare model, and the share learned against the demo-cache floor,
 the bare model shown again the pairs it bought. Both put a model without the learner's harness in the baseline, and
 the harness is where a harness-based system learns: Qwen3.5-9B solves 31 of the 100 held-out tasks alone and 13 in
 prime-agent, so its rows were read against what the model does without its harness, while GLM-5.3 Flash, whose
@@ -131,8 +146,8 @@ transfer by holding back whenever its memory is empty: answer garbage until it h
 one stream instance and wins every comparison, since the reset copy's memory is always empty. A design that keeps its
 best strategy for after a warm-up earns the same without meaning to, and on the public held-out tasks a learner could
 also look answers up after its stream and play dumb before it; the private season has nothing to look up. So every
-result also shows the bare model on its test instances, and a reset that plays below it is flagged beside its T, for
-review of its public code. A placebo reference, the same learner after a stream of equal length that teaches nothing,
+result also shows the bare model on its test instances, and a reset that plays below it is flagged beside that test,
+for review of its public code. A placebo reference, the same learner after a stream of equal length that teaches nothing,
 would close the gap without the bare model; it was declined on 20 Oct 2026.
 
 Settled 21 Oct 2026: both tests are frozen, and the learning-on epilogue they replace is discarded. A learner that
@@ -144,8 +159,8 @@ change, so it reads what was kept of each rule at the end, while the stream's sh
 it is built. The stream is the learning curve and the tests are its end points; a test from an earlier round is
 possible wherever that round's state was kept.
 
-Transfer has a ceiling of its own: a model that already solves the held-out tasks with no stream behind it leaves
-nothing to transfer to. When cheap models outgrow it, a later version is needed, not a different number.
+The held-out test has a ceiling of its own: a model that already solves the held-out tasks with no stream behind it
+leaves nothing to transfer to. When cheap models outgrow it, a later version is needed, not a different number.
 
 ## Plug-in interface
 

@@ -2,14 +2,17 @@
 
 Every measure starts from the charge of each instance: wrong attempts plus demonstrations,
 against a cap. The budget used is 100 times the mean charge over the cap (lower is better);
-``summary.json`` carries its complement as ``score``. The headline is transfer
-(:func:`transfer`): the budget a run saves on held-out tasks it meets after its stream, against
-the same learner reset before each of them. Second comes the share learned
-(:func:`share_learned`): the budget a run saves on its stream against the same learner reset
-before every instance, as a share of the learnable budget. Both read a system against itself,
-in its own harness and on its own model, so a stronger model does not score higher for being
-stronger, and the harness, the environment the system learns in, is part of the baseline
-rather than measured against a model without it (Dan, 22 Oct 2026).
+``summary.json`` carries its complement as ``score``. The headline is the plane of the two
+frozen tests (:func:`transfer`): on each, the share of its reset's spend that a run no longer
+pays after its stream, the reset being the same learner wiped before each test instance, the
+seen test across (memorization) and the held-out test up (generalization), each read beside the
+budget used and share solved of the run and its reset, since a large share of a small spend is a
+small gain. Second comes the share learned (:func:`share_learned`): the budget a run saves on its
+stream against the same learner reset before every instance, as a share of the learnable budget.
+Every measure reads a system against itself, in its own harness and on its own model, so a
+stronger model does not score higher for being stronger, and the harness, the environment the
+system learns in, is part of the baseline rather than measured against a model without it (Dan,
+22 Oct 2026).
 
 Diagnostics, all derived from the same per-instance records:
 
@@ -36,6 +39,7 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
+from dataclasses import replace
 
 from continual_arc.env import EnvConfig, InstanceRecord
 from continual_arc.schedule import (
@@ -283,6 +287,19 @@ def summarize(
     }
 
 
+def mean_plays(plays: Sequence[Sequence[InstanceRecord]], phases: Sequence[str]) -> list[InstanceRecord]:
+    """One record for each instance that every one of ``plays`` holds in ``phases``, matched by task and instance
+    seed, its charge and its solve the means of the plays': several plays of the same test on the same instances read
+    as one, so that no one play's luck decides a side of :func:`transfer`."""
+    by: dict[tuple[str, int], list[InstanceRecord]] = defaultdict(list)
+    for play in plays:
+        for r in play:
+            if r.phase in phases:
+                by[(r.task_id, r.instance_seed)].append(r)
+    return [replace(rs[0], cost=sum(r.cost for r in rs) / len(rs), solved=sum(r.solved for r in rs) / len(rs))
+            for rs in by.values() if len(rs) == len(plays)]
+
+
 def transfer(
     run_records: Sequence[InstanceRecord],
     reset_records: Sequence[InstanceRecord],
@@ -291,25 +308,33 @@ def transfer(
     reps: int = 2000,
     seed: int = 0,
 ) -> dict:
-    """The headline: the budget ``run`` saves on a frozen test after its stream (``test``: the held-out
-    tasks, or new instances of the stream's own; :func:`continual_arc.configs.test_schedule`), against
-    the same learner reset before each test instance, which never had the stream::
+    """What ``run`` saves on a frozen test after its stream (``test``: the held-out tasks, or new
+    instances of the stream's own; :func:`continual_arc.configs.test_schedule`), against the same
+    learner reset before each test instance, which never had the stream. The headline is the share
+    saved, ``share``, the share of the reset's spend the run no longer pays::
 
-        transfer = U(reset) - U(run)
+        share = 1 - U(run) / U(reset) = T / U(reset)
+        T = U(reset) - U(run)
 
     where U is the budget used, 100 times the mean charge over the cap, over the test instances
-    both played; positive is better. Only ``run``'s records of the test's own phase count, so an
-    epilogue it played while still learning never does. ``reset`` is the same system, its model
-    and harness, with its state wiped before each instance and played apart from the run's own
-    test (its reference play, or a fresh run's epilogue, which wipes the learner before each and
-    so is frozen by construction), so what transfers is what the stream left in the system, and a
-    stronger model is not credited for being stronger. The bare model is not a reference: a
-    learner is read in the harness it learns in (Dan, 22 Oct 2026). A learner that played worse
-    whenever its memory was empty would score here for it, so a verified run is also played bare
-    on the same instances, and a reset that falls below the bare model is flagged beside its T
-    (docs/HELD-OUT.md). The 95 percent interval is a bootstrap over the test's tasks, since a task's
-    instances rise and fall together. Both runs must serve the same test: instances are matched by
-    task and instance seed."""
+    both played, and T the same saving in points; positive is better. The two tests' shares place a
+    learner on the plane of memorization (seen) and generalization (held-out). The share reads a
+    learner whose reset already spends little as having gained no less, so the budget used and
+    share solved of both sides are reported beside it, since a large share of a small spend is a
+    small gain. On the seen test every task was met in the stream, so perfect memory spends nothing
+    there and the share is the share learned of what the test leaves to learn. Only ``run``'s
+    records of the test's own phase count, so an epilogue it played while still learning never
+    does. ``reset`` is the same system, its model and harness, with its state wiped before each
+    instance and played apart from the run's own test (its reference play, or a fresh run's
+    epilogue, which wipes the learner before each and so is frozen by construction), so what
+    transfers is what the stream left in the system, and a stronger model is not credited for being
+    stronger. The bare model is not a reference: a learner is read in the harness it learns in
+    (Dan, 22 Oct 2026). A learner that played worse whenever its memory was empty would score here
+    for it, so a result also shows the bare model on the same instances, and a reset that uses more
+    of the budget than the bare model is flagged beside it. The 95 percent intervals are a bootstrap
+    over the test's tasks, since a task's instances rise and fall together, the share and T read
+    from the same resamples. Both runs must serve the same test: instances are matched by task and
+    instance seed (several plays of a side are read as one by :func:`mean_plays`)."""
     runs = {"run": run_records, "reset": reset_records}
     phases = {"run": (TEST_PHASE[test],), "reset": TEST_REFERENCE_PHASES[test]}
     held = {
@@ -318,7 +343,7 @@ def transfer(
     }
     keys = sorted(set(held["run"]) & set(held["reset"]))
     if not keys:
-        return {"test": test, "n": 0, "transfer": None}
+        return {"test": test, "n": 0, "transfer": None, "share": None}
     cells: dict[str, list[float]] = defaultdict(lambda: [0.0, 0.0, 0.0])  # run, reset, count
     for key in keys:
         c = cells[key[0]]
@@ -339,6 +364,8 @@ def transfer(
         "tasks": len(tasks),
         "run_budget": run,
         "reset_budget": reset,
+        "share": 1.0 - run / reset if reset > 0 else None,
+        "share_ci95": None,
         "transfer": reset - run,
         "solved": {name: sum(held[name][k].solved for k in keys) / len(keys) for name in runs},
         "ci95": None,
@@ -348,15 +375,24 @@ def transfer(
     if reps < 10:
         return out
     rng = random.Random(seed)
-    draws = []
+    draws, shares = [], []
     for _ in range(reps):
         b_run, b_reset = point([tasks[rng.randrange(len(tasks))] for _ in tasks])
         draws.append(b_reset - b_run)
+        if b_reset > 0:
+            shares.append(1.0 - b_run / b_reset)
     draws.sort()
+    shares.sort()
     mean = sum(draws) / len(draws)
-    out["ci95"] = [draws[int(0.025 * len(draws))], draws[min(len(draws) - 1, int(0.975 * len(draws)))]]
+    out["ci95"] = _interval(draws)
     out["se"] = (sum((x - mean) ** 2 for x in draws) / (len(draws) - 1)) ** 0.5
+    out["share_ci95"] = _interval(shares) if shares and out["share"] is not None else None
     return out
+
+
+def _interval(draws: Sequence[float]) -> list[float]:
+    """The 2.5th and 97.5th percentiles of sorted bootstrap ``draws``."""
+    return [draws[int(0.025 * len(draws))], draws[min(len(draws) - 1, int(0.975 * len(draws)))]]
 
 
 def share_learned(
@@ -444,6 +480,6 @@ def share_learned(
             draws.append((b_reset - b_run) / (b_reset - b_first))
     draws.sort()
     mean = sum(draws) / len(draws)
-    out["ci95"] = [draws[int(0.025 * len(draws))], draws[min(len(draws) - 1, int(0.975 * len(draws)))]]
+    out["ci95"] = _interval(draws)
     out["se"] = (sum((x - mean) ** 2 for x in draws) / (len(draws) - 1)) ** 0.5
     return out

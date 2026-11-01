@@ -192,13 +192,19 @@ def cmd_report(args) -> int:
 
 
 def cmd_transfer(args) -> int:
-    from continual_arc.metrics import transfer
+    from continual_arc.metrics import mean_plays, transfer
     from continual_arc.report import transfer_report
     from continual_arc.runner import load_run
+    from continual_arc.schedule import TEST_PHASE, TEST_REFERENCE_PHASES
 
     _, config, run_records = load_run(args.run_dir)
-    _, _, reset_records = load_run(args.reset_dir)
+    runs = [run_records, *(load_run(d)[2] for d in args.also_run)]
+    resets = [load_run(d)[2] for d in (args.reset_dir, *args.also_reset)]
+    if len(runs) > 1:
+        run_records = mean_plays(runs, (TEST_PHASE[args.test],))
+    reset_records = mean_plays(resets, TEST_REFERENCE_PHASES[args.test]) if len(resets) > 1 else resets[0]
     result = transfer(run_records, reset_records, config, test=args.test, reps=args.reps)
+    result["plays"] = {"run": len(runs), "reset": len(resets)}
     print(transfer_report(result))
     if args.json:
         print(json.dumps(result, indent=1))
@@ -342,12 +348,18 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--window", type=int, default=50)
     rp.set_defaults(func=cmd_report)
 
-    t = sub.add_parser("transfer", help="the headline: what a run saves on a frozen test after its stream, against "
-                                        "the same learner reset before each instance")
+    t = sub.add_parser("transfer", help="the headline: the share of its reset's spend a run saves on a frozen test "
+                                        "after its stream, and the points it saves, against the same learner reset "
+                                        "before each instance, with the budget used and share solved of both")
     t.add_argument("run_dir", help="the run's frozen test (configs.test_schedule)")
     t.add_argument("reset_dir", help="the same learner on the same instances with its state wiped before each")
     t.add_argument("--test", choices=TESTS, default=TEST_HELD_OUT, help="which frozen test: held-out (default) or seen")
-    t.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% interval")
+    t.add_argument("--also-run", action="append", default=[], metavar="DIR",
+                   help="another play of the run's test on the same instances; repeat. Each side's charge on an "
+                        "instance is the mean of its plays, read on the instances every play holds")
+    t.add_argument("--also-reset", action="append", default=[], metavar="DIR",
+                   help="another play of the reset on the same instances; repeat")
+    t.add_argument("--reps", type=int, default=2000, help="task resamples behind the 95%% intervals")
     t.add_argument("--json", action="store_true")
     t.set_defaults(func=cmd_transfer)
 
