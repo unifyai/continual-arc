@@ -104,10 +104,13 @@ class Schedule:
     ``users`` is the regime. One user is the individual regime: one person's stream,
     one instance at a time, every slot a round of its own. Many users is the collective
     regime: one system serving a team at once. Every user walks a stream of their own
-    over the same tasks, and a round is one instance per user, served concurrently and
-    acted on with the state the system had when the round began. The slots are stored
-    round by round, a round's ``users`` slots consecutive and in user order, and a round
-    never spans a phase, so the epilogue starts on a round boundary.
+    over tasks of their own, none shared (user k plays block k of the track's nested
+    task order, configs.user_tasks: 25 tasks a user on ARC-AGI-1, so 50 at two users,
+    100 at four, 200 at eight and 400 at sixteen), and a round is one instance per user,
+    served concurrently and acted on with the state the system had when the round began.
+    The slots are stored round by round, a round's ``users`` slots consecutive and in
+    user order, and a round never spans a phase, so the epilogue starts on a round
+    boundary.
     """
 
     name: str
