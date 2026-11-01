@@ -4,8 +4,10 @@
 
 A submitted run is the directory the benchmark's runner wrote for the learner's stream (`records.jsonl`,
 `summary.json`, `schedule.json`, `config.json`, `meta.json`) with a `submission.json` beside them. `submission.json`
-names what the leaderboard shows: the learning method (`name`, `learner`, `code`), the model that plays (`student`, an
-OpenRouter model id) at its reasoning `effort`, the model that teaches it (`teacher`, or null), the learner reset on
+names what the leaderboard shows: the learning method (`name`, `learner`, `code`), the model that plays (`student`) at
+its reasoning `effort` and the model that teaches it (`teacher`, or null), each a published checkpoint used unchanged
+and named exactly, an OpenRouter model id or open weights as their Hugging Face repository at a commit
+(`org/name@commit`), since a result is compared only with others on the same student and teacher; the learner reset on
 the same stream (`reset`: `schedule make --reset-each`), which the share learned is read against, and the two frozen
 tests played after the stream (`tests`): for each, the learner's own test, played from where its stream left it, the
 same learner reset before each instance, which the test is read against, and the bare model (the stateless floor),
@@ -25,6 +27,7 @@ the mean charge over the cap, lower is better). Nothing here calls a model or th
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -37,6 +40,11 @@ from continual_arc.schedule import TEST_HELD_OUT, TEST_SEEN, TESTS
 ROOT = Path(__file__).resolve().parent.parent
 
 RUN_FILES = ("records.jsonl", "summary.json", "schedule.json", "config.json", "meta.json")
+# A published checkpoint, named exactly: an OpenRouter model id (vendor/model, with an optional :variant), or open
+# weights as their Hugging Face repository at a commit (org/name@commit). A model changed before the stream is another
+# student, compared only with results on it, since one made to start badly would save a large share by recovering
+# alone; this checks the name's form, and a verified run checks an OpenRouter id against OpenRouter's list.
+PUBLISHED = re.compile(r"[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*(?::[\w.-]+|@[0-9a-f]{7,40})?")
 SUBMISSION_FIELDS = ("name", "learner", "student", "effort", "code", "contact")
 BARE = "BareModelLearner"
 ROLES = ("run", "reset", "bare")
@@ -132,6 +140,10 @@ def check(run_dir: Path) -> list[str]:
     teacher = submission.get("teacher", "")
     if teacher is not None and (not isinstance(teacher, str) or not teacher.strip()):
         problems.append("submission.json needs a teacher: the model that teaches the student, or null for none")
+    for role, name in (("student", submission.get("student")), ("teacher", teacher)):
+        if isinstance(name, str) and name.strip() and not PUBLISHED.fullmatch(name):
+            problems.append(f"submission.json's {role} ({name}) is not a published checkpoint named exactly: an OpenRouter "
+                            "model id, or open weights as their Hugging Face repository at a commit (org/name@commit)")
     learned = None
     reset_dir = ROOT / str(submission.get("reset", ""))
     if not submission.get("reset") or not (reset_dir / "records.jsonl").exists():

@@ -390,6 +390,13 @@ against these rules:
   answers or solvers inside the learner, its prompts or its starting memory, and no
   rebuilding of the schedule. What a model learned in pretraining is its prior, which
   the learner's own reset on the same model already carries.
+* **A published student and teacher, used unchanged.** The student, and the teacher if there
+  is one, are published checkpoints used as published and named exactly: an OpenRouter model
+  id, or open weights as their Hugging Face repository at a commit (`org/name@commit`). A
+  result is compared only with others on the same student and teacher, so a model changed
+  before the stream is another student, standing alone: one made to start badly would save
+  a large share of its reset's spend by recovering alone. Read every share beside the budgets
+  it comes from, since a large share of a small spend is a small gain.
 * **Every model named.** Every model the learner calls is named in the submission and
   reached through the tracking proxy of
   [`baselines/`](baselines). Every
@@ -484,8 +491,9 @@ which nobody outside unify has seen ([verified results](#verified-results)).
    test, which is flagged if your reset plays below them. The bare model's tests of every model the paper ran are in the
    run records.
 3. Copy every run directory the runner wrote to `results/<track>/<name>/`, and add a `submission.json` to your
-   learner's stream, naming your learner, the model that plays (`student`, its OpenRouter id) at its reasoning
-   `effort`, the model that teaches it (`teacher`, or `null`), your reset's stream and each test's three runs:
+   learner's stream, naming your learner, the model that plays (`student`, its OpenRouter id, or `org/name@commit` for
+   open weights on Hugging Face) at its reasoning `effort`, the model that teaches it (`teacher`, named the same way, or
+   `null`), your reset's stream and each test's three runs:
 
    ```json
    {
