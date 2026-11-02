@@ -2,12 +2,16 @@
 
 This package trains Continual-ARC's trained rows and plays the rows they are read against. A small open model,
 **Qwen3.5-9B**, plays the `arc1-small` stream in the prime-agent harness under the benchmark's rules, while a LoRA
-adapter is trained between rounds on what it played. Three updates are compared:
+adapter is trained between rounds on what it played. Three updates are built:
 
 - **DAgger**: imitate a stronger model's reply (the oracle's) at every state the student met.
 - **OPSD**: SDFT's self-distillation, the student's own fresh replies moved toward the frozen base model reading the
   oracle's reply as a demonstration.
 - **PG**: policy gradient on the games the student won.
+
+The paper's trained row is DAgger. OPSD and PG trained on the same games under the same schedule, but neither learned
+reliably: PG picked up how to play from its few early wins and then stalled, and OPSD's student learned to take the
+oracle's move as one already made. The paper does not report them.
 
 The same package plays the reference rows on the open models, the two frozen tests after the stream, and DAgger's
 "training once at the end".
@@ -16,7 +20,7 @@ The same package plays the reference rows on the open models, the two frozen tes
 
 | Script (`scripts/`) | What it runs | Rows |
 | --- | --- | --- |
-| `realtime.sh` | A trained row on one 8-GPU node: the player, the labeller and the trainer side by side, round r played by the adapter trained on rounds 0..r-2 | DAgger, OPSD and PG at 1, 2 and 4 users, the stream's 200 rounds |
+| `realtime.sh` | A trained row on one 8-GPU node: the player, the labeller and the trainer side by side, round r played by the adapter trained on rounds 0..r-2 | DAgger at 1, 2 and 4 users, the stream's 200 rounds, and the OPSD and PG runs the paper does not report |
 | `frozen.sh` | A trained run's two frozen tests on its own node once its stream has ended | The trained rows' held-out and seen tests |
 | `refs.sh` | The untrained student on the trained rows' stack, from nothing, on both tests | Rows H0 and F on Qwen3.5-9B, the trained rows' references |
 | `reference.sh` | A reference row with its model served by OpenRouter, no GPU | Rows h, h0, hpl, hg, ha, hpl0, hplg and hgpl (the paper's H, H0, H-E, H-T, H-A, H-E0, H-E-T-E and H-T-E) and the bare-model rows dc, f, m and m0, on GLM-5.3 Flash and Qwen3.5-9B |
