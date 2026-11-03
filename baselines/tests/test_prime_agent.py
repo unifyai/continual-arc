@@ -554,3 +554,54 @@ def test_the_turn_budget_leaves_out_what_the_proxy_credits(tmp_path, monkeypatch
     t.credit(1.5)
     t.credit(-3.0)   # a replayed reply's recorded seconds: counted though not taken
     assert t.credit_s == -1.5
+
+
+def _prime_install(root: Path) -> Path:
+    """A prime-agent install tree with three bundled Python skills, websearch among them, and an MCP integration."""
+    for name, module in (("refine", "refine"), ("agent-message", "agent_message"), ("websearch", "websearch")):
+        (root / "skills" / name / "src" / module).mkdir(parents=True)
+        (root / "skills" / name / "pyproject.toml").write_text("[project]\nname = 'skill'\n")
+    (root / "skills" / "linear").mkdir(parents=True)
+    (root / "skills" / "linear" / "SKILL.md").write_text("an MCP integration: no package\n")
+    return root
+
+
+def test_bundled_python_skills_are_the_packaged_skills_left_on(tmp_path):
+    from continual_arc_baselines.systems import prime_agent
+
+    root = _prime_install(tmp_path / "prime-agent")
+    assert prime_agent.bundled_python_skills(root) == {"agent_message": root / "skills" / "agent-message",
+                                                       "refine": root / "skills" / "refine"}
+    assert prime_agent.bundled_python_skills(tmp_path / "no-skills") == {}
+
+
+def test_missing_kernel_skills_are_installed_then_checked(tmp_path, monkeypatch):
+    from continual_arc_baselines.systems import prime_agent
+
+    root, venv = _prime_install(tmp_path / "prime-agent"), tmp_path / "kernel-venv"
+    venv.mkdir()
+    calls, imports = [], iter([1, 0])   # the first check fails, the one after the install passes
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        code = next(imports) if argv[1] == "-c" else 0
+        return prime_agent.subprocess.CompletedProcess(argv, code, "", "")
+
+    monkeypatch.setattr(prime_agent.subprocess, "run", run)
+    prime_agent.install_kernel_skills(venv, root)
+    prime_agent.install_kernel_skills(venv, root)   # checked once per venv in a process
+    assert calls[0] == [str(venv / "bin" / "python"), "-c", "import agent_message, refine"]
+    assert calls[1] == ["uv", "pip", "install", "--quiet", "--python", str(venv / "bin" / "python"),
+                        "-e", str(root / "skills" / "agent-message"), "-e", str(root / "skills" / "refine")]
+    assert len(calls) == 3
+
+
+def test_kernel_skills_that_still_do_not_import_stop_the_start(tmp_path, monkeypatch):
+    from continual_arc_baselines.systems import prime_agent
+
+    root, venv = _prime_install(tmp_path / "prime-agent"), tmp_path / "kernel-venv"
+    venv.mkdir()
+    monkeypatch.setattr(prime_agent.subprocess, "run", lambda argv, **kwargs: prime_agent.subprocess.CompletedProcess(
+        argv, 1 if argv[1] == "-c" else 0, "", "ModuleNotFoundError: No module named 'refine'"))
+    with pytest.raises(RuntimeError, match="do not import"):
+        prime_agent.install_kernel_skills(venv, root)

@@ -45,12 +45,19 @@ to the same budget of model time as any other row's. A negative credit counts mo
 having taken it: a reply replayed from a recording, served at once, takes its recorded generation's seconds off the
 turn.
 
+Kernel. prime-agent's Python cells run in a kernel the adapter names (``PRIME_AGENT_KERNEL_PYTHON``, the shared kernel
+venv's interpreter), and prime-agent installs no Python skills into an interpreter it is given (its docs/skills.md). So
+the adapter installs prime-agent's bundled Python skills (refine, goal, compact, edit and the rest) into that venv
+itself before the first start, as prime-agent's own kernel setup would, and stops if they still do not import
+(:func:`install_kernel_skills`): without them every call to one raises and each session opens by telling the agent so.
+
 Requires the ``prime-agent`` CLI on ``PATH``:
-``curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh``.
+``curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh``, and ``uv``.
 """
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -101,10 +108,59 @@ REFINE_INSTRUCTIONS = (
 )
 PRESERVED = ("models.json", "settings.json", "kernel-venv")  # survive a state wipe
 INTEGRATION_SKILLS = ("linear", "notion", "prime-intellect")  # MCP integrations; off
+DISABLED_BUNDLED_SKILLS = ("websearch",)  # bundled skills turned off: web search has no key and the sandbox no route out
 ACTIVITY = ("agent_start", "turn_start", "message_start")  # a new run or turn is underway
 # A running cell's output, which prime-agent streams as it is printed: never a sign that the run moves on, since a cell
 # that prints in a loop that never ends streams it for as long as it runs, so it holds off no idle guard
 CELL_OUTPUT = "tool_execution_update"
+
+
+_kernel_skills_ready: set[Path] = set()
+_kernel_skills_lock = threading.Lock()
+
+
+def bundled_python_skills(root: Path) -> dict[str, Path]:
+    """prime-agent's bundled Python skills in its install ``root``, by the module each one's ``src/`` holds: every
+    folder of ``root/skills`` with a ``pyproject.toml`` (the MCP integrations have none), but the ones the adapter's
+    settings turn off (:data:`DISABLED_BUNDLED_SKILLS`)."""
+    skills = root / "skills"
+    if not skills.is_dir():
+        return {}
+    found = {}
+    for folder in sorted(skills.iterdir()):
+        if folder.name in DISABLED_BUNDLED_SKILLS or not (folder / "pyproject.toml").is_file():
+            continue
+        (module,) = (p.name for p in (folder / "src").iterdir() if p.is_dir() and not p.name.startswith("."))
+        found[module] = folder
+    return found
+
+
+def install_kernel_skills(venv: Path, root: Path) -> None:
+    """Install prime-agent's bundled Python skills (:func:`bundled_python_skills`) editable into the kernel ``venv``
+    when any of them does not import there, and raise if they still do not. prime-agent installs them at its own
+    kernel setup, which it skips for an interpreter it is given, as the adapter gives it one. Checked once per venv in a
+    process; a process installing into the venv holds its lock file, so runs that start together install once."""
+    skills = bundled_python_skills(root)
+    if not skills:
+        return
+    python = venv / "bin" / "python"
+    check = [str(python), "-c", "import " + ", ".join(skills)]
+    with _kernel_skills_lock:
+        if venv in _kernel_skills_ready:
+            return
+        with open(venv / ".bundled-skills.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if subprocess.run(check, capture_output=True).returncode != 0:
+                editable = [arg for folder in skills.values() for arg in ("-e", str(folder))]
+                installed = subprocess.run(["uv", "pip", "install", "--quiet", "--python", str(python), *editable],
+                                           capture_output=True, text=True)
+                after = subprocess.run(check, capture_output=True, text=True)
+                if after.returncode != 0:
+                    raise RuntimeError(
+                        f"prime-agent's bundled Python skills ({', '.join(skills)}) do not import in {venv} after "
+                        f"installing them: {(installed.stderr or after.stderr).strip()[-400:]}")
+                log.info("installed prime-agent's bundled Python skills (%s) into %s", ", ".join(skills), venv)
+        _kernel_skills_ready.add(venv)
 
 
 def _last_role(event: dict) -> str | None:
@@ -286,6 +342,9 @@ class PrimeAgentLearner(SystemLearner):
         # skills the system writes are installed into the venv at session start, and the shared
         # one sits under the sandbox's read-only mount.
         venv = self._venv()
+        root = install_root(self.command[0])
+        if root is not None and (venv / "bin" / "python").exists():
+            install_kernel_skills(venv, root)
         own = self.agent_dir / "kernel-venv"
         if venv.is_dir() and not own.exists():
             shutil.copytree(venv.resolve(), own, symlinks=True)
@@ -301,14 +360,15 @@ class PrimeAgentLearner(SystemLearner):
         }}}
         (self.agent_dir / "models.json").write_text(json.dumps(models, indent=1))
         # prime-agent runs as shipped: its built-in skills (edit, compact, goal, refine,
-        # skill-creator, ...) are the harness's own mechanics. Its integrations are off:
+        # skill-creator, ...) are the harness's own mechanics, installed into its kernel by
+        # install_kernel_skills above. Its integrations are off:
         # web search has no key and the sandbox has no route out; the Linear, Notion and
         # Prime Intellect skills are MCP integrations that prime-agent itself disables
         # without a login, made explicit here so the record does not depend on that.
         settings = self.agent_dir / "settings.json"
         if not settings.exists():
             config: dict[str, Any] = {
-                "bundledSkills": {"websearch": False},
+                "bundledSkills": {name: False for name in DISABLED_BUNDLED_SKILLS},
                 "skills": [f"-{name}/SKILL.md" for name in INTEGRATION_SKILLS],
             }
             if self.compact_at is not None:

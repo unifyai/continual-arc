@@ -76,7 +76,10 @@ On Ubuntu 24.04, bubblewrap needs unprivileged user namespaces, which AppArmor r
 
 Each harness row needs its harness, at the versions of the paper's Appendix D:
 
-- prime-agent 0.9.5: `curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh`
+- prime-agent 0.9.5: `curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh`, with `uv` on `PATH`.
+  The adapter gives prime-agent its kernel's interpreter, and prime-agent installs no Python skills into an
+  interpreter it is given, so the adapter installs prime-agent's bundled Python skills (refine, goal, compact, edit
+  and the rest) into that kernel venv itself at the first start, and stops if they still do not import
 - hermes-agent 0.20.2 (git `0c3452bf75ce6aecc603954d44c8d470d2a20c15`): a checkout of
   [NousResearch/hermes-agent](https://github.com/NousResearch/hermes-agent) at `~/hermes-agent` with
   `uv pip install -e ".[acp]"` in its virtual environment, or pass `command` to the adapter
