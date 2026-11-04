@@ -4,9 +4,11 @@
   :data:`ATTENTION`): FlexAttention when the mask is a block mask, which a chain on a GPU brings
   (:func:`continual_arc_training.branching.pack`), and scaled-dot-product attention otherwise, causal when there is no
   mask and following a dense 4D mask when one is given (a chain on a CPU). FlexAttention runs on FlashAttention's CuTe
-  kernels where they are installed and on Triton's FlexAttention kernel once they refuse a call. The Triton kernel is
-  named outright, never left to FlexAttention's own choice, which takes its decoding kernel for a query under 128
-  tokens: a kernel with no backward, and none at all for Qwen3.5's 256-wide heads.
+  kernels where they are installed and on Triton's FlexAttention kernel once they refuse a call, which the process
+  prints once with the refusal. The Triton kernel is named outright, never left to FlexAttention's own choice, which
+  takes its decoding kernel for a query under 128 tokens: a kernel with no backward, and none at all for Qwen3.5's
+  256-wide heads. On an H100, FlashAttention 4 (4.0.0b27) refuses every chain of Qwen3.5-9B's: its forward reads 80
+  keys at a time for 256-wide heads, and its block sparsity needs the mask's 128-token blocks to be a multiple of that.
 - **The adapter's matmuls in bfloat16** (:func:`bf16_lora`). PEFT keeps a bfloat16 model's LoRA weights in float32 and
   casts each projection's input to float32, so every adapter matmul runs in float32 beside float32 copies of its input
   and output. Here they run in bfloat16 with float32 master weights, as mixed-precision training does: the weights,
@@ -18,6 +20,8 @@ from __future__ import annotations
 import importlib.util
 import types
 from typing import Any
+
+from continual_arc_training.parallel import data_parallel_size
 
 ATTENTION = "chain_attention"
 _TRITON = {"BACKEND": "TRITON"}
@@ -42,10 +46,14 @@ def chain_attention(module: Any, query: Any, key: Any, value: Any, attention_mas
         try:
             out = _flex(query, key, value, block_mask=attention_mask, scale=scaling, enable_gqa=gqa,
                         kernel_options=_flex_options)
-        except Exception:
+        except Exception as refused:
             if _flex_options == _TRITON:
                 raise
             _flex_options = _TRITON   # the FlashAttention backend refused this call: Triton's kernel from now on
+            rank, ranks = data_parallel_size()
+            print(f"{f'rank {rank}: ' if ranks > 1 else ''}FlexAttention: FlashAttention's CuTe kernel refused a chain "
+                  f"({type(refused).__name__}: {refused}), so every chain from now on runs on Triton's FlexAttention "
+                  f"kernel", flush=True)
             out = _flex(query, key, value, block_mask=attention_mask, scale=scaling, enable_gqa=gqa,
                         kernel_options=_flex_options)
         return out.transpose(1, 2).contiguous(), None

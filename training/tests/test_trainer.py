@@ -434,10 +434,10 @@ def test_bf16_lora_computes_peft_s_own_update_in_the_inputs_dtype():
     assert got.dtype == torch.bfloat16 and torch.allclose(got.float(), want, atol=0.1, rtol=0.05)
 
 
-def test_flex_attention_falls_back_to_tritons_flex_kernel_never_its_own_choice(monkeypatch):
+def test_flex_attention_falls_back_to_tritons_flex_kernel_never_its_own_choice(monkeypatch, capsys):
     """A chain goes through FlashAttention's backend first; one it refuses goes, from then on, to Triton's
     FlexAttention kernel named outright, never to FlexAttention's own choice (its decoding kernel for a query under 128
-    tokens has no backward); one Triton refuses raises."""
+    tokens has no backward), and the log says so once, with the refusal; one Triton refuses raises."""
     from torch.nn.attention import flex_attention as flex
 
     seen = []
@@ -445,7 +445,7 @@ def test_flex_attention_falls_back_to_tritons_flex_kernel_never_its_own_choice(m
     def fake(q, k, v, block_mask, scale, enable_gqa, kernel_options):
         seen.append(dict(kernel_options))
         if kernel_options.get("BACKEND") != "TRITON":
-            raise RuntimeError("refused")
+            raise ValueError("Block sparsity requires sparse_block_size[1] to be a multiple of tile_n=80.")
         return q
 
     mask = flex.create_block_mask(lambda b, h, qi, ki: qi >= ki, None, None, 128, 128, device="cpu")
@@ -454,8 +454,17 @@ def test_flex_attention_falls_back_to_tritons_flex_kernel_never_its_own_choice(m
     monkeypatch.setattr(kernels, "_flex_options", {"BACKEND": "FLASH"})
     out, _ = kernels.chain_attention(None, q, q, q, mask)
     assert seen == [{"BACKEND": "FLASH"}, {"BACKEND": "TRITON"}] and out.shape == (1, 128, 2, 4)
+    assert capsys.readouterr().out == (
+        "FlexAttention: FlashAttention's CuTe kernel refused a chain (ValueError: Block sparsity requires "
+        "sparse_block_size[1] to be a multiple of tile_n=80.), so every chain from now on runs on Triton's "
+        "FlexAttention kernel\n")
     kernels.chain_attention(None, q, q, q, mask)
     assert seen[-1] == {"BACKEND": "TRITON"} and len(seen) == 3   # Triton's from then on, FlashAttention's not retried
+    assert capsys.readouterr().out == ""
+    monkeypatch.setattr(kernels, "_flex_options", {"BACKEND": "FLASH"})
+    monkeypatch.setattr(kernels, "data_parallel_size", lambda: (2, 4))   # a data-parallel worker says which rank it is
+    kernels.chain_attention(None, q, q, q, mask)
+    assert capsys.readouterr().out.startswith("rank 2: FlexAttention: FlashAttention's CuTe kernel refused a chain")
     monkeypatch.setattr(kernels, "_flex", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("no kernel")))
     with pytest.raises(RuntimeError, match="no kernel"):
         kernels.chain_attention(None, q, q, q, mask)
