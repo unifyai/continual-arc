@@ -598,6 +598,8 @@ Apache-2.0. Re-ARC is MIT and ARC-AGI is Apache-2.0; both are fetched, not vendo
 
 ## About
 
-Continual-ARC is made by [unify](https://unify.ai). unify is building continual learning for the agents companies
-have already built, training the model to drive their own harness, so the agent gets faster and cheaper the more it
-runs, on a model they own. We publish the research behind it.
+Continual-ARC is made by [unify](https://unify.ai). Unify is building brain-inspired neural memory that makes Claude
+Code, Codex or any other agent actually know you, without endless grepping through files to rediscover who you are and
+what you're working on. Like your hippocampus, it keeps learning as your work changes, so your agent spends less time
+rediscovering and more time knowing. It sits beneath your agents rather than replacing them, and it's yours across
+every agent you use. We publish the research behind it.
