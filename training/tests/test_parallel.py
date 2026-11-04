@@ -30,16 +30,32 @@ def test_every_trainer_method_that_gathers_across_ranks_runs_on_every_rank():
     from continual_arc_training.parallel import DataParallelTrainer
     from continual_arc_training.trainer import Trainer
 
-    collective = ("all_gather_object", "_dp_begin", "_dp_gather", "_train_frame", "_forward(", "deal(")
+    collective = ("all_gather_object", "_dp_gather", "_dp_passes", "_dp_reduce", "_dp_verify", "_train_frame",
+                  "_forward(", "deal(")
     gathering = [name for name, fn in inspect.getmembers(Trainer, inspect.isfunction)
                  if not name.startswith("_") and any(marker in inspect.getsource(fn) for marker in collective)]
     assert set(gathering) >= {"sft_chains", "distill_chains", "policy_gradient_chains", "nll_chains",
-                              "distill_scores_chains", "policy_gradient_scores_chains", "behaviour_logps_chains"}
+                              "distill_scores_chains", "policy_gradient_scores_chains", "behaviour_logps_chains", "step"}
     for name in gathering:
         assert name in vars(DataParallelTrainer), f"Trainer.{name} gathers across ranks but is not forwarded"
 
 
 SETTINGS = dict(rank=4, alpha=8, lr=1e-2, max_seq_len=512, grad_checkpointing=False)
+# the group's timeout, which bounds every collective: a rank left waiting for another fails its test within it rather
+# than hanging it
+TIMEOUT_S = 60
+
+
+@pytest.fixture
+def one_thread(monkeypatch):
+    """One thread in this process and in every worker (torch reads OMP_NUM_THREADS as it starts): the tiny model's
+    operations are far too small to split, and several processes each spinning a thread per core crawl."""
+    torch = pytest.importorskip("torch")
+    threads = torch.get_num_threads()
+    monkeypatch.setenv("OMP_NUM_THREADS", "1")
+    torch.set_num_threads(1)
+    yield
+    torch.set_num_threads(threads)
 
 
 def _prepare(trainer) -> None:
@@ -68,6 +84,20 @@ def _fail_on_rank_1(trainer, on: bool) -> None:
         branching.pack = branching._pack_as_loaded
 
 
+def _fail_step_on_rank_1(trainer, on: bool) -> None:
+    """Rank 1's optimizer step raises (``on``), as one that runs out of memory would, after the gradients are summed;
+    or no longer does."""
+    if trainer.dp_rank != 1:
+        return
+    if on:
+        def broken(*args, **kwargs):
+            raise RuntimeError("injected failure in rank 1's optimizer step")
+
+        trainer.optimizer.step = broken
+    else:
+        del trainer.optimizer.step
+
+
 def _pending(trainer) -> int:
     return trainer._pending_items
 
@@ -83,6 +113,16 @@ def _chains(seed: int, vocab: int = 1024) -> list:
     return [ChainItem(ids(trunk_len), [(p, ids(n)) for p, n in points], labels=[{"chain": c, "k": k}
                                                                                  for k in range(len(points))])
             for c, (trunk_len, points) in enumerate(shapes)]
+
+
+def _long_chains(seed: int, vocab: int = 1024) -> list:
+    """Two chains longer than the window (SETTINGS' max_seq_len), which every pass skips."""
+    from continual_arc_training.chains import ChainItem
+
+    rng = random.Random(seed)
+    ids = lambda n: [rng.randrange(1, vocab) for _ in range(n)]   # noqa: E731
+    return [ChainItem(ids(520), [(500, ids(9)), (520, ids(4))], labels=[{"chain": c, "k": k} for k in range(2)])
+            for c in range(2)]
 
 
 def _teacher_chains(chains: list, seed: int) -> list:
@@ -104,9 +144,11 @@ def _teacher_chains(chains: list, seed: int) -> list:
 
 
 def _session(tr):
-    """What both setups run, in order: two SFT steps, two OPSD steps, the behaviour log-probabilities under the
-    untrained adapter and two PG steps against them, then every forward-only score; each step's result, the adapter
-    after it and the random generator's state."""
+    """What every setup runs, in order: two SFT steps, two OPSD steps, the behaviour log-probabilities under the
+    untrained adapter and two PG steps against them, every forward-only score and one over chains longer than the
+    window, then an SFT step on a single chain and a call whose every chain is longer than the window, which takes no
+    step; each call's result, the step after it, the adapter after that and the random generator's state, and the
+    scores."""
     rng = random.Random(0)
     out = []
 
@@ -135,7 +177,10 @@ def _session(tr):
           for c in chains]
     scores = (played, [x["logp"] for x in tr.nll_chains(chains)["items"]],
               [x["loss"] for x in tr.policy_gradient_scores_chains(pg)["items"]],
-              [x["loss"] for x in tr.distill_scores_chains(chains, teachers, skip_first=1)["items"]])
+              [x["loss"] for x in tr.distill_scores_chains(chains, teachers, skip_first=1)["items"]],
+              tr.nll_chains(_long_chains(8))["items"])
+    took("sft", tr.sft_chains(_chains(9)[:1], rng=rng))
+    took("sft", tr.sft_chains(_long_chains(10), rng=rng))
     return out, scores
 
 
@@ -147,30 +192,60 @@ STATS = {"sft": ("nll_per_token", "entropy_mean", "loss_mean"), "opsd": ("loss_m
          "pg": ("ratio_mean", "clip_fraction", "approx_kl", "loss_mean", "entropy_mean")}
 
 
-def test_two_ranks_take_every_step_and_score_one_process_takes(tmp_path):
-    """DataParallelTrainer over two ranks (this process and one worker): each pass's result (every reply's statistics,
-    in one process's order) is one process's, every rank holds the same adapter after each step and one process's (to
-    float rounding: the gradients are summed in another order), the forward-only scores are one process's and leave
-    nothing pending; rank 0 saves, every rank resets and loads; a pass in which rank 1 fails raises on both ranks with
-    rank 1's error attached and takes no step; the worker ignores SIGTERM and exits when the front-end closes."""
+def _one_process(model_dir) -> tuple:
+    """The session (:func:`_session`) in one process: the adapter it starts from, its calls and steps, its scores."""
+    torch = pytest.importorskip("torch")
+    from continual_arc_training.trainer import Trainer
+
+    torch.manual_seed(0)
+    tr = Trainer(str(model_dir), device="cpu", **SETTINGS)
+    _prepare(tr)
+    return tr.adapter_state(), *_session(tr)
+
+
+def _as_one_process(front, init: dict, one: list, one_scores: tuple) -> None:
+    """``front`` runs the session as one process ran it from ``init`` (:func:`_one_process`): each call's result
+    (every reply's statistics, in one process's order) and step, every rank holding the same adapter after each step and
+    one process's (to float rounding: the gradients are summed in another order), the random generator's state and
+    every score; and nothing is left pending on any rank."""
+    torch = pytest.importorskip("torch")
+    many, many_scores = _session(front)
+    for (name, res1, taken1, after1, rng1), (_, res, taken, after, rng) in zip(one, many, strict=True):
+        assert taken["steps"] == taken1["steps"] and taken["items"] == taken1["items"], name
+        assert taken.get("identical") is (True if taken1["steps"] else None), name
+        assert res["n_examples"] == res1["n_examples"] and res["skipped_long"] == res1["skipped_long"], name
+        assert res["tokens"] == res1["tokens"] and res["chains"] == res1["chains"], name
+        for key in ("logp", "item_loss"):
+            if key in res1:
+                assert res[key] == pytest.approx(res1[key], rel=1e-4, abs=1e-7), (name, key)
+        assert [res[k] for k in STATS[name]] == pytest.approx([res1[k] for k in STATS[name]], rel=1e-4,
+                                                              abs=1e-7), name
+        assert _max_diff(after, after1) < 1e-4 * _max_diff(after1, init) and rng == rng1
+    states = front.every_rank("adapter_state")
+    assert all(torch.equal(state[n], states[0][n]) for state in states[1:] for n in states[0])
+    assert [v for x in many_scores[0] for v in x] == pytest.approx([v for x in one_scores[0] for v in x], rel=1e-5)
+    for got, want in zip(many_scores[1:], one_scores[1:], strict=True):
+        assert got == pytest.approx(want, rel=1e-4, abs=1e-7)
+    assert front.every_rank(_pending) == [0] * front.world_size
+
+
+def test_two_ranks_take_every_step_and_score_one_process_takes(tmp_path, one_thread):
+    """DataParallelTrainer over two ranks (this process and one worker) runs the session as one process does
+    (:func:`_as_one_process`), a call of one chain leaving rank 1 none; rank 0 saves, every rank resets and loads; a
+    pass in which rank 1 fails raises on both ranks, rank 0 naming rank 1's error with its traceback attached, and takes
+    no step; the worker ignores SIGTERM and exits when the front-end closes."""
     torch = pytest.importorskip("torch")
     import torch.distributed as dist
     from test_trainer import _hybrid_model
 
     from continual_arc_training.parallel import DataParallelError, DataParallelTrainer
-    from continual_arc_training.trainer import Trainer
 
     model_dir = tmp_path / "model"
     _hybrid_model(model_dir)   # the model and tokenizer on disk
-    torch.manual_seed(0)
-    tr = Trainer(str(model_dir), device="cpu", **SETTINGS)
-    _prepare(tr)
-    init = tr.adapter_state()
-    one, one_scores = _session(tr)
-    del tr
+    init, one, one_scores = _one_process(model_dir)
 
     torch.manual_seed(0)
-    front = DataParallelTrainer(str(model_dir), world_size=2, device="cpu", timeout_s=120, **SETTINGS)
+    front = DataParallelTrainer(str(model_dir), world_size=2, device="cpu", timeout_s=TIMEOUT_S, **SETTINGS)
     worker = front._workers[0][0]
     try:
         assert dist.get_world_size() == 2 and front.tokenizer is front.local.tokenizer
@@ -178,24 +253,9 @@ def test_two_ranks_take_every_step_and_score_one_process_takes(tmp_path):
         front.every_rank(_prepare)
         start = front.every_rank("adapter_state")
         assert all(torch.equal(start[1][k], start[0][k]) and torch.equal(start[0][k], init[k]) for k in init)
-        two, two_scores = _session(front)
-        for (name, res1, taken1, after1, rng1), (_, res, taken, after, rng) in zip(one, two, strict=True):
-            assert taken["identical"] and taken["steps"] == taken1["steps"] == 1 and taken["items"] == taken1["items"]
-            assert res["tokens"] == res1["tokens"] and res["chains"] == res1["chains"], name
-            for key in ("logp", "item_loss"):
-                if key in res1:
-                    assert res[key] == pytest.approx(res1[key], rel=1e-4, abs=1e-7), (name, key)
-            assert [res[k] for k in STATS[name]] == pytest.approx([res1[k] for k in STATS[name]], rel=1e-4,
-                                                                  abs=1e-7), name
-            assert _max_diff(after, after1) < 1e-4 * _max_diff(after1, init) and rng == rng1
-        states = front.every_rank("adapter_state")
-        assert all(torch.equal(states[0][n], states[1][n]) for n in states[0])
-        assert [v for x in two_scores[0] for v in x] == pytest.approx([v for x in one_scores[0] for v in x], rel=1e-5)
-        for got, want in zip(two_scores[1:], one_scores[1:], strict=True):
-            assert got == pytest.approx(want, rel=1e-4, abs=1e-7)
-        assert front.every_rank(_pending) == [0, 0]
+        _as_one_process(front, init, one, one_scores)
 
-        saved = states[0]
+        saved = front.every_rank("adapter_state")[0]
         front.save(tmp_path / "p0001")
         assert (tmp_path / "p0001" / "trainer_adapter.safetensors").is_file()
         front.reset()
@@ -206,7 +266,7 @@ def test_two_ranks_take_every_step_and_score_one_process_takes(tmp_path):
         assert all(torch.equal(back[r][n], saved[n]) for r in (0, 1) for n in saved)
 
         front.every_rank(_fail_on_rank_1, True)
-        with pytest.raises(DataParallelError, match="other rank failed") as failed:
+        with pytest.raises(DataParallelError, match="rank 1 failed: RuntimeError: injected failure on rank 1") as failed:
             front.sft_chains(_chains(8), rng=random.Random(0))
         assert "injected failure on rank 1" in "".join(failed.value.__notes__)
         front.every_rank(_fail_on_rank_1, False)
@@ -224,3 +284,64 @@ def test_two_ranks_take_every_step_and_score_one_process_takes(tmp_path):
         front.close()
     worker.join(timeout=60)
     assert worker.exitcode == 0 and not dist.is_initialized()
+
+
+def test_ranks_dealt_no_chain_train_and_score_with_the_others_as_one_process(tmp_path, one_thread):
+    """Four ranks (this process and three workers) on calls of two chains, which deal ranks 2 and 3 none, as a
+    phase's last step of a few calls does on a node's four training GPUs; of one chain, which deals ranks 1 to 3 none;
+    and of none that fits the window: every pass, score and step completes on every rank within the group's timeout,
+    as one process's (:func:`_as_one_process`)."""
+    torch = pytest.importorskip("torch")
+    from test_trainer import _hybrid_model
+
+    from continual_arc_training.parallel import DataParallelTrainer
+
+    model_dir = tmp_path / "model"
+    _hybrid_model(model_dir)
+    init, one, one_scores = _one_process(model_dir)
+    torch.manual_seed(0)
+    front = DataParallelTrainer(str(model_dir), world_size=4, device="cpu", timeout_s=TIMEOUT_S, **SETTINGS)
+    try:
+        front.every_rank(_prepare)
+        _as_one_process(front, init, one, one_scores)
+    finally:
+        front.close()
+
+
+def test_a_rank_failing_after_the_gradients_are_summed_fails_every_rank_with_its_error(tmp_path, one_thread):
+    """Three ranks, rank 1's optimizer step failing once the gradients are summed: every rank raises in the step, rank 0
+    a DataParallelError with rank 1's error and every worker's traceback attached, rather than waiting for rank 1 in
+    the next collective; nothing stays pending, and the trainer goes on, its next step finding rank 1 a step behind
+    and every rank taking rank 0's adapter and moments. A score that fails on rank 1 fails on every rank alike."""
+    pytest.importorskip("torch")
+    from test_trainer import _hybrid_model
+
+    from continual_arc_training.parallel import DataParallelError, DataParallelTrainer
+
+    model_dir = tmp_path / "model"
+    _hybrid_model(model_dir)
+    front = DataParallelTrainer(str(model_dir), world_size=3, device="cpu", timeout_s=TIMEOUT_S, **SETTINGS)
+    try:
+        front.every_rank(_prepare)
+        front.sft_chains(_chains(1) + _chains(2), rng=random.Random(0))   # four chains: a share for every rank
+        front.every_rank(_fail_step_on_rank_1, True)
+        with pytest.raises(DataParallelError, match="rank 1 failed: RuntimeError: injected failure in rank 1's "
+                                                    "optimizer step") as failed:
+            front.step()
+        assert all(f"rank {r}: Traceback" in "".join(failed.value.__notes__) for r in (1, 2))
+        front.every_rank(_fail_step_on_rank_1, False)
+        assert front.every_rank(_pending) == [0, 0, 0]
+        front.sft_chains(_chains(3) + _chains(4), rng=random.Random(0))
+        assert front.step()["identical"] is False   # rank 1 missed the step the others took
+        digests = front.every_rank("adapter_digest")
+        assert digests[1] == digests[0] and digests[2] == digests[0]
+        front.sft_chains(_chains(5) + _chains(6), rng=random.Random(0))
+        assert front.step()["identical"] is True
+
+        front.every_rank(_fail_on_rank_1, True)
+        with pytest.raises(DataParallelError, match="rank 1 failed: RuntimeError: injected failure on rank 1"):
+            front.nll_chains(_chains(7))
+        front.every_rank(_fail_on_rank_1, False)
+        assert all(item is not None for item in front.nll_chains(_chains(7))["items"])
+    finally:
+        front.close()

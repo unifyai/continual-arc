@@ -28,20 +28,13 @@ from __future__ import annotations
 
 import contextlib
 import math
-import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from continual_arc_training import branching
 from continual_arc_training.chains import ChainItem
-from continual_arc_training.parallel import (
-    DataParallelError,
-    DataParallelRank,
-    data_parallel_guard,
-    data_parallel_size,
-    deal,
-)
+from continual_arc_training.parallel import DataParallelRank, data_parallel_size, deal
 
 # The projections the adapter trains, matched as PEFT matches them (a module whose name ends in one): Qwen3.5's
 # attention layers and every MLP. Its Gated DeltaNet layers name theirs in_proj_qkv, in_proj_z, in_proj_a, in_proj_b and
@@ -227,11 +220,11 @@ class Trainer(DataParallelRank):
     # -- the training passes -----------------------------------------------------------------------------------------
 
     def _train_frame(self, chains: list[ChainItem], fits: list[bool], cost: Callable[[int], float], rng: Any,
-                     lists: tuple[list, ...], shared: dict[str, int], pass_chain: Callable[[ChainItem, int], None]) -> int:
+                     stats: list, shared: dict[str, int], pass_chain: Callable[[ChainItem, int], None]) -> int:
         """What every training pass shares: the chains that fit the window, in ``rng``'s order, each passed by
-        ``pass_chain`` (its replies' gradients accumulated and their statistics appended to ``lists``), dealt between the
-        ranks by ``cost`` (of chain i) and every rank's statistics gathered after; the replies passed join the step's
-        count. Returns how many replies were skipped for a chain longer than the window."""
+        ``pass_chain`` (its replies' gradients accumulated and their statistics appended to ``stats``), dealt between the
+        ranks by ``cost`` (of chain i) and every rank's statistics gathered after (:meth:`_dp_passes`); the replies
+        passed join the step's count. Returns how many replies were skipped for a chain longer than the window."""
         self.model.train()
         first, _ = self._firsts(chains)
         packs = [i for i, ok in enumerate(fits) if ok]
@@ -239,24 +232,24 @@ class Trainer(DataParallelRank):
         rng.shuffle(packs)
         if not self._pending_items:
             self.optimizer.zero_grad(set_to_none=True)
-        dp = (self._dp_begin([cost(i) for i in packs], sum(len(chains[i].branches) for i in packs), lists, (shared,))
-              if self.dp_size > 1 else None)
-        for pos in (dp.mine if dp else range(len(packs))):
+
+        def run(pos: int) -> None:
             i = packs[pos]
-            if dp:
-                dp.mark(pos)
             pass_chain(chains[i], first[i])
             self._pending_items += len(chains[i].branches)
             shared["chains"] += 1
             shared["replies"] += len(chains[i].branches)
             shared["tokens_read"] += chains[i].length()
             shared["tokens_per_call"] += chains[i].per_call_tokens()
-        if dp:
-            self._dp_gather(dp)
+
+        if self.dp_size > 1:
+            self._dp_passes([cost(i) for i in packs], sum(len(chains[i].branches) for i in packs), stats, shared, run)
+        else:
+            for pos in range(len(packs)):
+                run(pos)
         self.model.eval()
         return skipped
 
-    @data_parallel_guard
     def sft_chains(self, chains: list[ChainItem], *, rng: Any) -> dict[str, Any]:
         """Supervised fine-tuning's pass (the module docstring): each reply's loss minus the sum of its token
         log-probabilities over :data:`PG_TOKEN_SCALE`. ``logp`` per reply in the chains' order (None for a reply in a
@@ -286,7 +279,7 @@ class Trainer(DataParallelRank):
                 sum(losses).backward()
 
         fits = [c.length() <= self.max_seq_len for c in chains]
-        skipped = self._train_frame(chains, fits, lambda i: self._chain_cost(chains[i], 4.0), rng, (stats,), shared,
+        skipped = self._train_frame(chains, fits, lambda i: self._chain_cost(chains[i], 4.0), rng, stats, shared,
                                     pass_chain)
         _, n_calls = self._firsts(chains)
         logp: list[float | None] = [None] * n_calls
@@ -318,7 +311,6 @@ class Trainer(DataParallelRank):
             h = self._states(decoder, packed)
             return [h[idx] for idx in packed[3]]
 
-    @data_parallel_guard
     def distill_chains(self, chains: list[ChainItem], teacher_chains: list[ChainItem], *, rng: Any,
                        skip_first: int = 0) -> dict[str, Any]:
         """Self-distillation's pass (the module docstring): per chain, its teacher chain (the same trunk and replies,
@@ -354,7 +346,7 @@ class Trainer(DataParallelRank):
         fits = [max(c.length(), t.length()) <= self.max_seq_len for c, t in zip(chains, teacher_chains, strict=True)]
         skipped = self._train_frame(
             chains, fits, lambda i: self._chain_cost(chains[i], 4.0) + self._chain_cost(teacher_chains[i], 1.0), rng,
-            (stats,), shared, pass_chain)
+            stats, shared, pass_chain)
         _, n_calls = self._firsts(chains)
         item_loss: list[float | None] = [None] * n_calls
         for i, _, loss in stats:
@@ -407,7 +399,6 @@ class Trainer(DataParallelRank):
                           float(self._token_entropy(h, W).double().sum()),
                           (float(log_ratio[worst]), worst, int(ids[worst]), float(new[worst]), float(old[worst])))
 
-    @data_parallel_guard
     def policy_gradient_chains(self, chains: list[ChainItem], *, rng: Any) -> dict[str, Any]:
         """The policy gradient's pass (the module docstring): each branch a span with its own advantage, its ratios
         against the token log-probabilities the chain carries (``behaviour_logps``, taken under the adapter that played
@@ -438,7 +429,7 @@ class Trainer(DataParallelRank):
                 sum(losses).backward()
 
         fits = [c.length() <= self.max_seq_len for c in chains]
-        skipped = self._train_frame(chains, fits, lambda i: self._chain_cost(chains[i], 5.0), rng, (stats,), shared,
+        skipped = self._train_frame(chains, fits, lambda i: self._chain_cost(chains[i], 5.0), rng, stats, shared,
                                     pass_chain)
         labels = [c.labels[k] if c.labels else {} for c in chains for k in range(len(c.branches))]
         return {**self._pg_result(labels, stats), "skipped_long": skipped, "chains": shared}
@@ -475,11 +466,11 @@ class Trainer(DataParallelRank):
     # -- forward only ----------------------------------------------------------------------------------------------
 
     def _forward(self, chains: list[ChainItem], fits: list[bool], cost: Callable[[int], float],
-                 score: Callable[[int, Any, Any], list[Any]], what: str) -> list[Any]:
+                 score: Callable[[int, Any, Any], list[Any]]) -> list[Any]:
         """What every forward-only pass shares: each chain that fits the window scored without gradient by
         ``score(i, decoder, W)``, a result per branch; per branch in the chains' order, None for a branch in a chain that
-        does not fit. Nothing a step reads is touched. On several ranks each passes its share (dealt by ``cost`` of
-        chain i) and every rank returns every branch's."""
+        does not fit. Nothing a step reads is touched. On several ranks each scores its share (dealt by ``cost`` of
+        chain i, none for a rank dealt no chain) and every rank returns every branch's (:meth:`_dp_gather`)."""
         torch = self.torch
         first, n_calls = self._firsts(chains)
         packs = [i for i, ok in enumerate(fits) if ok]
@@ -489,29 +480,23 @@ class Trainer(DataParallelRank):
         else:
             mine = packs
         decoder, W = self._decoder_head()
-        was_training = self.model.training
-        self.model.eval()
-        results: dict[int, Any] = {}
-        error = None
-        try:
+
+        def scores() -> dict[int, Any]:
+            results: dict[int, Any] = {}
             with torch.no_grad():
                 for i in mine:
                     for k, res in enumerate(score(i, decoder, W)):
                         results[first[i] + k] = res
-        except Exception:
-            if self.dp_size == 1:
-                raise
-            error = traceback.format_exc()
+            return results
+
+        was_training = self.model.training
+        self.model.eval()
+        try:
+            results = ({i: res for part in self._dp_gather(scores) for i, res in part.items()} if self.dp_size > 1
+                       else scores())
         finally:
             if was_training:
                 self.model.train()
-        if self.dp_size > 1:
-            gathered: list[Any] = [None] * self.dp_size
-            torch.distributed.all_gather_object(gathered, {"results": results, "error": error})
-            errors = [f"rank {r}: {g['error']}" for r, g in enumerate(gathered) if g["error"]]
-            if errors:
-                raise DataParallelError(f"{what} failed on " + "\n".join(errors))
-            results = {i: res for g in gathered for i, res in g["results"].items()}
         return [results.get(i) for i in range(n_calls)]
 
     def nll_chains(self, chains: list[ChainItem]) -> dict[str, Any]:
@@ -528,7 +513,7 @@ class Trainer(DataParallelRank):
                                    .double().sum()), "tokens": len(c.reply(k))} for k in range(len(c.branches))]
 
         fits = [c.length() <= self.max_seq_len for c in chains]
-        return {"items": self._forward(chains, fits, lambda i: self._chain_cost(chains[i], 1.0), score, "nll_chains")}
+        return {"items": self._forward(chains, fits, lambda i: self._chain_cost(chains[i], 1.0), score)}
 
     def distill_scores_chains(self, chains: list[ChainItem], teacher_chains: list[ChainItem], *,
                               skip_first: int = 0) -> dict[str, Any]:
@@ -552,8 +537,7 @@ class Trainer(DataParallelRank):
 
         fits = [max(c.length(), t.length()) <= self.max_seq_len for c, t in zip(chains, teacher_chains, strict=True)]
         return {"items": self._forward(
-            chains, fits, lambda i: self._chain_cost(chains[i], 1.0) + self._chain_cost(teacher_chains[i], 1.0), score,
-            "distill_scores_chains")}
+            chains, fits, lambda i: self._chain_cost(chains[i], 1.0) + self._chain_cost(teacher_chains[i], 1.0), score)}
 
     def policy_gradient_scores_chains(self, chains: list[ChainItem]) -> dict[str, Any]:
         """Each branch's :meth:`policy_gradient_chains` loss under the adapter as it is now: ``items``, per branch in the
@@ -576,8 +560,7 @@ class Trainer(DataParallelRank):
             return out
 
         fits = [c.length() <= self.max_seq_len for c in chains]
-        return {"items": self._forward(chains, fits, lambda i: self._chain_cost(chains[i], 2.0), score,
-                                       "policy_gradient_scores_chains")}
+        return {"items": self._forward(chains, fits, lambda i: self._chain_cost(chains[i], 2.0), score)}
 
     def behaviour_logps_chains(self, chains: list[ChainItem]) -> dict[str, Any]:
         """Each branch's reply token log-probabilities under the behaviour adapter (:meth:`configure_behaviour`), a list
@@ -595,8 +578,7 @@ class Trainer(DataParallelRank):
                         for k in range(len(c.branches))]
 
         fits = [c.length() <= self.max_seq_len for c in chains]
-        return {"items": self._forward(chains, fits, lambda i: self._chain_cost(chains[i], 1.0), score,
-                                       "behaviour_logps_chains")}
+        return {"items": self._forward(chains, fits, lambda i: self._chain_cost(chains[i], 1.0), score)}
 
     # -- the step, and the adapter on disk ------------------------------------------------------------------------------
 
@@ -608,18 +590,22 @@ class Trainer(DataParallelRank):
         out: dict[str, Any] = {"steps": 0, "items": n}
         if not n:
             return out
-        params = self._trainable()
+
+        def update() -> None:
+            params = self._trainable()
+            for p in params:
+                if p.grad is not None:
+                    p.grad.div_(n)
+            out["grad_norm"] = float(self.torch.nn.utils.clip_grad_norm_(params, 1.0))
+            self.optimizer.step()
+            self.optimizer.zero_grad(set_to_none=True)
+            self._pending_items = 0
+
         if self.dp_size > 1:
             self._dp_reduce()
-        for p in params:
-            if p.grad is not None:
-                p.grad.div_(n)
-        out["grad_norm"] = float(self.torch.nn.utils.clip_grad_norm_(params, 1.0))
-        self.optimizer.step()
-        self.optimizer.zero_grad(set_to_none=True)
-        self._pending_items = 0
-        if self.dp_size > 1:
-            out["identical"] = self._dp_verify()
+            out["identical"] = self._dp_verify(update)
+        else:
+            update()
         out["steps"] = 1
         return out
 

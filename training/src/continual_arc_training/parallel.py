@@ -14,8 +14,14 @@ every rank holds the same adapter, which is checked after every step.
   one persistent worker process per other GPU holds its own trainer. Each call's chains go to every rank, the step is
   taken together, and rank 0's result (every reply's statistics) comes back.
 
-A rank that raises in the middle of a call tells the others (:func:`data_parallel_guard`), so every rank raises and
-the step is abandoned on every rank; a worker process that dies leaves the others waiting until the group's timeout.
+A rank's share may hold any number of chains, none included: a call of fewer chains than ranks leaves some with
+nothing to pass, which add no statistics and zero gradients, and the step is the one a single process takes. Wherever
+the ranks do work of their own, they meet after it in one exchange that carries each rank's result or its error
+(:meth:`DataParallelRank._dp_gather`), so a rank that raises leaves no other waiting in a collective it will not
+reach: every rank raises, rank 0 naming the failed rank's error, and drops the gradients accumulated toward the step.
+An optimizer update that fails on some ranks and goes through on others leaves their adapters apart until the next
+step's check gives every rank rank 0's. A worker process that dies leaves the others waiting until the group's
+timeout.
 """
 from __future__ import annotations
 
@@ -64,50 +70,14 @@ def deal(costs: list[float], ranks: int) -> tuple[list[int], list[float]]:
     return owner, load
 
 
-def data_parallel_guard(method: Callable) -> Callable:
-    """For the trainer's passes that accumulate gradients: a rank that fails in a call's passes, before it has said it
-    got through them, says so instead, so the other ranks, which will wait for it there, raise too instead of waiting
-    until the group's timeout, and the step is abandoned on every rank."""
-
-    @functools.wraps(method)
-    def guarded(self: Any, *args: Any, **kwargs: Any) -> Any:
-        try:
-            return method(self, *args, **kwargs)
-        except BaseException:
-            if self.dp_size > 1 and self._dp_pending:
-                self._dp_flag(failed=True)
-            raise
-
-    return guarded
-
-
-class _Step:
-    """One data-parallel pass over some chains on one rank: the chains it passes (their positions in the call's order),
-    and where each one's statistics begin in the per-reply lists, so every rank's can be put back in the order one
-    process would have produced them; the counters the result sums over the chains, which every rank's are added
-    into; and the replies of all the chains, which the step will count."""
-
-    def __init__(self, mine: list[int], lists: tuple[list, ...], shared: tuple[dict[str, int], ...], items: int,
-                 pending: int) -> None:
-        self.mine, self.lists, self.shared = mine, lists, shared
-        self.start = [len(x) for x in lists]
-        self.shared0 = [dict(d) for d in shared]
-        self.items, self.pending = items, pending
-        self.marks: list[tuple[int, list[int]]] = []
-
-    def mark(self, pos: int) -> None:
-        self.marks.append((pos, [len(x) for x in self.lists]))
-
-
 class DataParallelRank:
     """What the trainer does as one rank of a data-parallel group (``Trainer`` inherits it). Every rank is given every
-    chain; :func:`deal` decides which of them it passes (:meth:`_dp_begin`); after the passes every reply's statistics
-    and the reply count the step divides by are gathered (:meth:`_dp_gather`), right before the optimizer step the
-    gradients are summed (:meth:`_dp_reduce`), and after it every rank's adapter is checked to be the same
-    (:meth:`_dp_verify`)."""
+    chain; :func:`deal` decides which of them it passes, and after the passes every reply's statistics and the reply
+    count the step divides by are gathered (:meth:`_dp_passes`); right before the optimizer step the gradients are
+    summed (:meth:`_dp_reduce`), and with the step every rank's adapter is checked to be the same (:meth:`_dp_verify`).
+    The ranks meet after any work of their own in :meth:`_dp_gather`."""
 
     dp_rank, dp_size = 0, 1            # one rank: everything as before
-    _dp_pending = False                # inside a call's passes: a failure must tell the other ranks
     _dp_pair_cost: float | None = None
 
     def join_data_parallel(self) -> None:
@@ -139,79 +109,78 @@ class DataParallelRank:
                     sums.append(bits.sum(dtype=torch.int64))
         return torch.stack(sums).tolist() if sums else []
 
-    def _dp_begin(self, costs: list[float], items: int, lists: tuple[list, ...],
-                  shared: tuple[dict[str, int], ...]) -> _Step:
-        """This rank's share of chains whose estimated costs are given (in the call's order), holding ``items`` replies
-        in all, which the step will count."""
+    def _dp_gather(self, work: Callable[[], Any]) -> list[Any]:
+        """``work()`` on this rank, then every rank's result on every rank, in rank order: how the ranks meet after work
+        of their own, which must start no collective. A rank whose work raised sends its error instead, and then every
+        rank drops what it has accumulated since the last step (the ranks' gradients can no longer be counted on to
+        agree) and raises, that rank its own error and every other a :class:`DataParallelError` naming it; so no rank
+        is left waiting in a collective for one that has left the call. This rank's GPU is synchronized before the
+        exchange, so that an asynchronous error of the work's kernels is the work's."""
+        torch = self.torch
+        try:
+            mine = work()
+            if torch.device(self.device).type == "cuda":
+                torch.cuda.synchronize(self.device)
+            raised, said = None, None
+        except Exception as error:
+            mine, raised, said = None, error, "".join(traceback.format_exception_only(error)).strip()
+        every: list[Any] = [None] * self.dp_size
+        torch.distributed.all_gather_object(every, (mine, said))
+        failed = [f"rank {r} failed: {e}" for r, (_, e) in enumerate(every) if e is not None]
+        if failed:
+            self.optimizer.zero_grad(set_to_none=True)
+            self._pending_items = 0
+            if raised is not None:
+                raise raised
+            raise DataParallelError("; ".join(failed))
+        return [m for m, _ in every]
+
+    def _dp_passes(self, costs: list[float], items: int, stats: list, shared: dict[str, int],
+                   run: Callable[[int], None]) -> None:
+        """A call's passes over chains whose estimated costs are given (in the call's order), ``items`` replies in all:
+        this rank runs ``run(pos)`` on each chain :func:`deal` gives it, which appends the chain's replies' statistics
+        to ``stats`` and adds its counts into ``shared``, none for a rank dealt no chain; then every rank's statistics
+        are gathered into ``stats`` on every rank, in the order one process would have produced them, ``shared`` holds
+        every rank's counts, and the reply count the step divides by gains the call's ``items``."""
         owner, _ = deal(costs, self.dp_size)
-        self._dp_pending = True
-        return _Step([i for i, r in enumerate(owner) if r == self.dp_rank], lists, shared, items, self._pending_items)
+        start, counted, pending = len(stats), dict(shared), self._pending_items
 
-    def _dp_gather(self, step: _Step) -> None:
-        """After this rank's passes: every rank got through its chains (else every rank raises), and every reply's
-        statistics are gathered, in the order one process would have produced them, into the per-reply lists on every
-        rank; the reply count the step divides by becomes the whole step's."""
-        torch, dist = self.torch, self.torch.distributed
-        if torch.device(self.device).type == "cuda":
-            torch.cuda.synchronize(self.device)
-        self._dp_check()
-        ends = [m[1] for m in step.marks[1:]] + [[len(x) for x in step.lists]]
-        segments = [(pos, [x[a:b] for x, a, b in zip(step.lists, starts, stops, strict=True)])
-                    for (pos, starts), stops in zip(step.marks, ends, strict=True)]
-        mine = {"segments": segments,
-                "shared": [{k: d[k] - d0[k] for k in d} for d, d0 in zip(step.shared, step.shared0, strict=True)]}
-        every: list[Any] = [None] * self.dp_size
-        dist.all_gather_object(every, mine)
-        segments = sorted((s for e in every for s in e["segments"]), key=lambda s: s[0])
-        for j, x in enumerate(step.lists):
-            del x[step.start[j]:]
-            for _, parts in segments:
-                x.extend(parts[j])
-        for j, d in enumerate(step.shared):
-            for k in d:
-                d[k] = step.shared0[j][k] + sum(e["shared"][j][k] for e in every)
-        self._pending_items = step.pending + step.items
+        def passes() -> tuple[list[tuple[int, list]], dict[str, int]]:
+            segments = []
+            for pos in (p for p, r in enumerate(owner) if r == self.dp_rank):
+                begin = len(stats)
+                run(pos)
+                segments.append((pos, stats[begin:]))
+            return segments, {k: shared[k] - counted[k] for k in shared}
 
-    def _dp_reduce(self) -> None:
-        """Right before the optimizer step: the adapter's gradients summed across ranks (a rank that passed no chain
-        adds zeros)."""
-        self._dp_check()
-        self._dp_all_reduce_grads()
+        every = self._dp_gather(passes)
+        del stats[start:]
+        for _, segment in sorted((s for segments, _ in every for s in segments), key=lambda s: s[0]):
+            stats.extend(segment)
+        for k in shared:
+            shared[k] = counted[k] + sum(added[k] for _, added in every)
+        self._pending_items = pending + items
 
-    def _dp_verify(self) -> bool:
-        """After the step: whether every rank holds the same adapter (compared exactly), as it must, having taken the
-        same step from the same gradients. If one ever did not, every rank takes rank 0's adapter and optimizer
-        moments."""
-        every: list[Any] = [None] * self.dp_size
-        self.torch.distributed.all_gather_object(every, self.adapter_digest())
+    def _dp_verify(self, update: Callable[[], None]) -> bool:
+        """The optimizer step from the summed gradients (``update``) on every rank, then whether every rank holds the
+        same adapter (compared exactly), as it must, having taken the same step from the same gradients; if one does
+        not, every rank takes rank 0's adapter and optimizer moments. An update that fails on any rank fails the step on
+        every rank before the check (:meth:`_dp_gather`), so a rank whose update went through holds another adapter
+        than one whose update failed until the next step's check."""
+
+        def updated() -> list[int]:
+            update()
+            return self.adapter_digest()
+
+        every = self._dp_gather(updated)
         identical = all(e == every[0] for e in every)
         if not identical:
             self._dp_broadcast(optimizer=True)
         return identical
 
-    def _dp_check(self) -> None:
-        """Once after a call's passes (whichever collective comes first): did every rank get through them?"""
-        if self._dp_pending:
-            self._dp_flag(failed=False)
-
-    def _dp_flag(self, failed: bool) -> None:
-        """Every rank says whether it failed in this call's passes; if one did, the step is abandoned on every rank
-        (everything accumulated since the last step is dropped: the ranks' gradients cannot be told apart by call),
-        and a rank that did not fail raises."""
-        torch = self.torch
-        flag = torch.tensor([1.0 if failed else 0.0], device=self.device)
-        torch.distributed.all_reduce(flag)
-        self._dp_pending = False
-        n = int(flag.item())
-        if n:
-            self.optimizer.zero_grad(set_to_none=True)
-            self._pending_items = 0
-            if not failed:
-                raise DataParallelError(f"{n} other rank{'s' if n > 1 else ''} failed in this call (their errors are "
-                                        f"reported with them); the step it was part of is abandoned on every rank")
-
-    def _dp_all_reduce_grads(self) -> None:
-        """The adapter's gradients summed across ranks, in flat buffers of at most BUCKET_BYTES."""
+    def _dp_reduce(self) -> None:
+        """Right before the optimizer step: the adapter's gradients summed across ranks, in flat buffers of at most
+        BUCKET_BYTES (a rank that passed no chain adds zeros)."""
         torch = self.torch
         from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 
