@@ -173,6 +173,32 @@ def test_openrouter_style_path_prefix_is_accepted(upstream):
     assert upstream.requests[0]["path"] == "/v1/chat/completions"
 
 
+def test_only_chat_completions_and_reads_of_the_models_reach_the_upstream(upstream):
+    """A system's own code can read the proxy's address and key and send anything: a completion, an embedding, a path
+    it invents. Each is answered here with 404 and counted as a failed call, its path and the model it named kept, and
+    the upstream never hears of it; chat completions and reads of the model list go upstream as before."""
+    tracker = Tracker()
+    seen: list = []
+    tracker.subscribe(seen.append)
+    refused = [("POST", "/completions"), ("POST", "/embeddings"), ("POST", "/v1/arc/solve"), ("GET", "/key"),
+               ("GET", "/chat/completions"), ("POST", "/models"), ("POST", "/chat/completions/x")]
+    with LLMProxy(upstream.base_url, api_key="sk-real", tracker=tracker) as proxy:
+        for method, path in refused:
+            response = httpx.request(method, proxy.base_url + path, json={"model": "vendor/stronger", "prompt": "hi"},
+                                     headers={"Authorization": f"Bearer {PLACEHOLDER_KEY}"}, timeout=10)
+            assert response.status_code == 404 and response.json()["error"]["type"] == "proxy_refused"
+        assert upstream.requests == []
+        assert chat(proxy).status_code == 200
+        assert httpx.get(proxy.base_url + "/models", timeout=10).status_code == 200
+        assert httpx.get(proxy.base_url + "/models/vendor/model/endpoints", timeout=10).status_code == 200
+    assert [r["path"] for r in upstream.requests] == ["/v1/chat/completions", "/v1/models",
+                                                      "/v1/models/vendor/model/endpoints"]
+    ended = [c for c in seen if c.status != "started"]
+    assert [(c.status, c.status_code, c.path, c.requested_model) for c in ended[:len(refused)]] == [
+        ("failed", 404, "/v1" + path, "vendor/stronger") for _, path in refused]
+    assert tracker.usage.requests == len(refused) + 3 and tracker.usage.failed_requests == len(refused)
+
+
 def test_journal_sink_writes_the_cost_journal_and_the_event_log(upstream, tmp_path):
     context = Attempt.create("proxy run", root=tmp_path)
     tracker = Tracker()

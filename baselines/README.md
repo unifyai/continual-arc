@@ -110,8 +110,11 @@ journal and the system's own folder, its state and logs (`attempt.json` in the r
 
 `arc-baselines run` starts the tracking proxy for the run and exports its address as `OPENAI_BASE_URL`,
 `OPENROUTER_BASE_URL` and `ARC_LLM_BASE_URL` with a placeholder key, so any system pointed at it is measured without
-knowing it; the real key stays in the proxy. The proxy forwards each request unchanged except that it asks the
-provider to report usage and adds the run's defaults (`--llm-defaults`) where the system set none.
+knowing it; the real key stays in the proxy. The proxy forwards chat completions and reads of the model list alone and
+answers anything else itself with a 404, so that a system's own code, which can read the address and the key from its
+environment, reaches no other endpoint on the key. It forwards each chat completion unchanged except that it sends it
+to the learner's own model, the `model` argument every adapter takes, whatever model the call names, asks the provider
+to report usage and adds the run's defaults (`--llm-defaults`) where the system set none.
 
 To run your own system, subclass `SystemLearner` (`systems/base.py`), which speaks the benchmark's protocol and leaves
 an adapter only `start`, `stop`, `ask`, `new_session` and `wipe_state`, and keep everything the system persists under

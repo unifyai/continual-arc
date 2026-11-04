@@ -663,7 +663,7 @@ def test_a_stream_still_being_played_is_not_tested(stream_run, tmp_path):
 def test_a_test_is_played_from_the_runs_own_launch_every_user_from_the_streams_memory(stream_run, tmp_path):
     run, system, log = stream_run
     server = FakeUpstream().start()
-    argv = ["run", "--learner", "tests.test_frozen:Remembering", "--learner-kwargs", '{"model": "m"}',
+    argv = ["run", "--learner", "tests.test_frozen:Remembering", "--learner-kwargs", '{"model": "vendor/row-model"}',
             "--llm-defaults", '{"reasoning_effort": "low"}', "--config", "arc1-small", "--out", str(run),
             "--upstream", server.base_url, "--upstream-key-env", "NO_SUCH_KEY", "--registry",
             "tests.test_frozen:registry", "--quiet"]
@@ -683,7 +683,9 @@ def test_a_test_is_played_from_the_runs_own_launch_every_user_from_the_streams_m
     assert [(r["user"], r["phase"], r["solved"], r["cost"]) for r in records] == [(u, "seen-test", True, 0.0)
                                                                                 for u in range(4)]
     bodies = [r["body"] for r in server.requests if r["body"]]
-    assert bodies and all(b["reasoning_effort"] == "low" and b["session_id"] == "run-seen" for b in bodies)
+    # every call went to the stream's own model, which Remembering's calls do not name
+    assert bodies and all(b["reasoning_effort"] == "low" and b["session_id"] == "run-seen"
+                          and b["model"] == "vendor/row-model" for b in bodies)
     for user in range(4):
         mine = out / "users" / f"u{user:03d}" / "system"
         assert not (mine / "state").exists()   # its working tree gone, its state in its repository

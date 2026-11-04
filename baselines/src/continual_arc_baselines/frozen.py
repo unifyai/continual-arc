@@ -444,6 +444,7 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
 
     from continual_arc_baselines.cli import import_object, launch_settings
     from continual_arc_baselines.collective import CollectiveHarnessLearner
+    from continual_arc_baselines.proxy import own_model
 
     run_dir = Path(run_dir).resolve()
     test = Schedule.load(schedule)
@@ -470,6 +471,7 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
     learner = CollectiveHarnessLearner(lambda user: import_object(launch.learner, "learner")(**kwargs), out,
                                        schedule=test, upstream=launch.upstream,
                                        api_key=os.environ.get(launch.upstream_key_env) or None, body_defaults=defaults,
+                                       body_overrides=own_model(kwargs),
                                        declared_context_length=launch.declared_context_length or None)
     try:   # the round's end commits every user's state (CollectiveHarnessLearner.end_round)
         run(learner, test, config=config, out_dir=out, registry=registry, learner_name=learner_name,

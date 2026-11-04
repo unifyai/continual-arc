@@ -550,9 +550,10 @@ tasks, and 25 held out. To have a learner verified on it:
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,
 whole, inside the sandbox the paper's runs used, which reaches nothing but the tracking proxy: the proxy makes every
-model call on your key, and your code never holds it. At a seed of its own, your learner plays the season's stream and
-then its two frozen tests from where the stream left it: the seen test, four fresh instances of each of the 25
-streamed rules, and the held-out test, one instance of each held-out rule. A harness on the baselines'
+model call on your key, as a chat completion, the one kind it forwards, and your code never holds it. At a seed of
+its own, your learner plays the season's stream and then its two frozen tests from where the stream left it: the seen
+test, four fresh instances of each of the 25 streamed rules, and the held-out test, one instance of each held-out
+rule. A harness on the baselines'
 `SystemLearner`, which keeps everything as files and holds one conversation, plays them one at a time, as
 `arc-baselines test` plays a harness's tests: before each one we stop it and put its state directory back as the
 stream left it. Any other learner plays them in one round, every instance a user of its own, so it keeps each user's

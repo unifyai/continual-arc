@@ -61,6 +61,52 @@ def test_plain_learner_gets_proxy_counters_for_free(tmp_path, monkeypatch, capsy
         upstream.stop()
 
 
+def test_every_chat_completion_goes_to_the_learners_own_model(tmp_path, monkeypatch, capsys):
+    """A learner named by its model has each chat completion sent to that model, whatever model the call names, and
+    its run's parameters say so; a raw completion never leaves the proxy."""
+    from .fake_upstream import FakeUpstream
+
+    upstream = FakeUpstream().start()
+    try:
+        source = FakeSource(n_tasks=3)
+        sched_path = tmp_path / "sched.json"
+        stream_schedule(source.task_ids(), 4, seed=0, source=source.name).save(sched_path)
+        monkeypatch.delenv("WORKBENCH_RUN_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        code = main(["run", "--learner", "tests.test_cli:StrongerModelLearner", "--learner-kwargs",
+                     '{"model": "vendor/row-model"}', "--schedule", str(sched_path), "--upstream", upstream.base_url,
+                     "--registry", "tests.fixtures:fake_registry", "--quiet"])
+        assert code == 0
+        outcome = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+        assert [(r["path"], r["body"]["model"]) for r in upstream.requests] == [
+            ("/v1/chat/completions", "vendor/row-model")] * 4
+        assert outcome["llm"]["llm_requests"] == 8 and outcome["llm"]["llm_failed_requests"] == 4
+        log = Path(outcome["attempt_dir"]) / "events.jsonl"
+        events = [json.loads(line) for line in log.read_text().splitlines()]
+        params = next(e["payload"]["values"] for e in events if e["kind"] == "parameters")
+        assert params["proxy"]["body_overrides"] == {"model": "vendor/row-model"}
+    finally:
+        upstream.stop()
+
+
+class StrongerModelLearner(BaseLearner):
+    """Names another model than its own in a chat completion each instance, then asks for a raw completion."""
+
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    def act(self, obs):
+        import os
+
+        import httpx
+        from continual_arc.env import GiveUp
+
+        for path, body in (("/chat/completions", {"messages": [{"role": "user", "content": obs.task_id}]}),
+                           ("/completions", {"prompt": obs.task_id})):
+            httpx.post(os.environ["OPENAI_BASE_URL"] + path, timeout=10, json={"model": "vendor/stronger", **body})
+        return GiveUp()
+
+
 class EnvClientLearner(BaseLearner):
     """Calls the model once per instance through OPENAI_BASE_URL, then gives up."""
 

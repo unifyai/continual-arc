@@ -4,6 +4,13 @@ Point any agent system at :attr:`LLMProxy.base_url` with the placeholder :attr:`
 model request is observed, journaled and counted, without the system knowing. The real upstream credential lives only
 in this process, so it never enters the system's configuration files or logs.
 
+Only a chat completion (a POST to ``/chat/completions``) and a read of the model list (a GET of ``/models`` or of an
+entry under it) go upstream. Anything else is answered here with 404 and counted as a failed call, so that a system's
+own code, which can read the proxy's address and placeholder key from its environment as any program the system runs
+can, reaches no other endpoint on the run's key: a completion, an embedding or any path it invents. When
+:attr:`~LLMProxy.body_overrides` names a model, as every row's overrides do (:func:`own_model` gives a learner's), each
+chat completion goes to that model, whatever model the call names.
+
 The proxy is transparent: no caching and no fallback models. Streaming responses are passed through byte for byte while
 the server-sent events are parsed on the side for the usage block. A request is changed only as follows, in
 chat completions alone:
@@ -75,6 +82,9 @@ VLLM_ROLES = {"developer": "system"}
 # The key a past assistant turn carries its thinking under for the open models' chat templates, which refuse a turn
 # with none.
 THINKING_FIELD = "reasoning_content"
+# The endpoints the proxy forwards, as a request names them under its version prefix: a chat completion, POSTed, and
+# the model list or one model's entry, read with a GET (hermes-agent reads the model's window there).
+CHAT, MODELS = "/chat/completions", "/models"
 HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
     "transfer-encoding", "upgrade", "host", "content-length", "accept-encoding",
@@ -83,6 +93,33 @@ HOP_BY_HOP = frozenset({
 
 def _int(value: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
+def _endpoint(path: str) -> str:
+    """The endpoint a request's path names: its version prefix (``/v1``, or OpenRouter's ``/api/v1``) and its query left
+    out."""
+    path = path.split("?", 1)[0]
+    for prefix in ("/api/v1", "/v1"):
+        if path == prefix or path.startswith(prefix + "/"):
+            path = path[len(prefix):]
+            break
+    return path.rstrip("/")
+
+
+def forwarded(method: str, path: str) -> bool:
+    """Whether the proxy sends a request upstream: a chat completion, or a read of the model list or of a model's
+    entry."""
+    endpoint = _endpoint(path)
+    if method == "POST":
+        return endpoint == CHAT
+    return method == "GET" and (endpoint == MODELS or endpoint.startswith(MODELS + "/"))
+
+
+def own_model(learner_kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The body overrides that send every chat completion of a learner to its own model, the ``model`` argument every
+    adapter takes, whatever model the call names; none for a learner that takes no model, such as a submission run
+    whole (:mod:`continual_arc_baselines.systems.hosted`), whose models its submission names."""
+    return {"model": learner_kwargs["model"]} if "model" in learner_kwargs else {}
 
 
 def _usage_tokens(usage: dict) -> dict[str, int | None]:
@@ -376,7 +413,7 @@ class LLMProxy:
                 parsed = json.loads(body)
             except ValueError:
                 parsed = None
-        if isinstance(parsed, dict) and path.rstrip("/").endswith("/chat/completions"):
+        if isinstance(parsed, dict) and _endpoint(path) == CHAT:
             for key, value in self.body_defaults.items():
                 parsed.setdefault(key, value)
             parsed.update(self.body_overrides)
@@ -439,11 +476,6 @@ def _canonicalise_volatile_prefix(payload: dict) -> None:
             for part in content:
                 if isinstance(part, dict) and isinstance(part.get("text"), str):
                     part["text"] = _SESSION_PATH.sub(r"\1session\2", part["text"])
-
-
-def _is_models_path(path: str) -> bool:
-    p = path.split("?", 1)[0].rstrip("/")
-    return p.endswith("/models") or "/models/" in p
 
 
 def _declare_context_length(payload: dict, length: int) -> None:
@@ -611,6 +643,20 @@ class _Handler(BaseHTTPRequestHandler):
             owner.tracker.emit(_snapshot(call))
         return True
 
+    def _refuse(self, method: str, call: LLMCall, started: float) -> None:
+        """Answer a request the proxy does not forward (:func:`forwarded`) with 404, as an upstream answers an endpoint
+        it does not serve, and count it as a failed call; it ends once, whether or not its system is still there to
+        read the answer."""
+        message = f"the proxy forwards chat completions and the model list alone, not {method} {self.path}"
+        call.status, call.status_code, call.error = "failed", 404, f"HTTP 404: {message}"
+        try:
+            self._send_json(404, {"error": {"message": message, "type": "proxy_refused", "code": 404}})
+        except OSError:   # the system went away
+            call.status, call.error = "cancelled", "client disconnected"
+        finally:
+            call.latency_ms = (time.monotonic() - started) * 1000
+            self.owner.tracker.emit(_snapshot(call))
+
     def _forward(self, method: str) -> None:
         owner = self.owner
         assert owner._client is not None
@@ -624,7 +670,10 @@ class _Handler(BaseHTTPRequestHandler):
         )
         owner.tracker.emit(_snapshot(call))
         started = time.monotonic()
-        if (owner.serve is not None and parsed is not None and self.path.rstrip("/").endswith("/chat/completions")
+        if not forwarded(method, self.path):
+            self._refuse(method, call, started)
+            return
+        if (owner.serve is not None and parsed is not None and _endpoint(self.path) == CHAT
                 and self._serve(parsed, call, stream, started)):
             return
         sent = False
@@ -709,7 +758,7 @@ class _Handler(BaseHTTPRequestHandler):
                     if response.status_code >= 400:
                         refusal = data[:400].decode("utf-8", "replace")
                     if (method == "GET" and response.status_code < 400 and isinstance(payload, dict)
-                            and owner.declared_context_length and _is_models_path(self.path)):
+                            and owner.declared_context_length):   # a read of the models, the one GET forwarded
                         _declare_context_length(payload, owner.declared_context_length)
                         data = json.dumps(payload).encode()
                     for key, value in passthrough.items():

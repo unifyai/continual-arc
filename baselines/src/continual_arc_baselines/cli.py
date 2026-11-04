@@ -221,7 +221,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
 
     from continual_arc_baselines.attempt import Attempt
     from continual_arc_baselines.frozen import give_back, hold_aside, one_at_a_time, settle
-    from continual_arc_baselines.proxy import LLMProxy
+    from continual_arc_baselines.proxy import LLMProxy, own_model
     from continual_arc_baselines.systems.base import SystemLearner
     from continual_arc_baselines.tracking import JournalSink, PilotStop, TrackedLearner, Tracker
 
@@ -260,13 +260,14 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         # Applied with setdefault, so a system that sets its own wins.
         defaults.setdefault("session_id", attempt.directory.name)
         tracker.subscribe(JournalSink(attempt, provider=args.provider, capture_content=args.capture_content))
+        overrides = own_model(kwargs)
         proxy = LLMProxy(args.upstream, api_key=os.environ.get(args.upstream_key_env) or None,
                          declared_context_length=args.declared_context_length or None,
-                         tracker=tracker, body_defaults=defaults,
+                         tracker=tracker, body_defaults=defaults, body_overrides=overrides,
                          capture_content=args.capture_content).start()
         os.environ.update(proxy.environ())
         proxy_settings = {"enabled": True, "upstream": args.upstream, "provider": args.provider,
-                          "body_defaults": defaults, "base_url": proxy.base_url,
+                          "body_defaults": defaults, "body_overrides": overrides, "base_url": proxy.base_url,
                           "upstream_key_present": bool(proxy.api_key)}
 
     # imported once the proxy's address is in the environment, which a learner's module may read as it loads
