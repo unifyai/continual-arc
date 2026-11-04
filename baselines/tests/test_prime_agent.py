@@ -4,6 +4,7 @@ import json
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -732,3 +733,260 @@ def test_a_start_without_the_bundled_skills_in_the_kernel_stops_before_prime_age
         learner.stop()
     assert type(stopped.value) is RuntimeError   # not SystemUnavailable, which the adapter answers with restarts
     assert not (tmp_path / "system" / "prime-agent.log").exists()
+
+
+def site(venv: Path) -> Path:
+    return next(venv.glob("lib/python*/site-packages"))
+
+
+def agent_skill(folder: Path, body: str = "def run():\n    return 'grid tools ran'\n", dependencies: str = "") -> Path:
+    """A Python skill as an agent writes one: a SKILL.md, a pyproject.toml and its package in src/. Its build backend is
+    its own (backend.py beside it, named by backend-path), which leaves BUILT beside it if anything ever runs it."""
+    module = folder.name.replace("-", "_")
+    (folder / "src" / module).mkdir(parents=True)
+    (folder / "SKILL.md").write_text(f"---\nname: {folder.name}\ndescription: what {folder.name} does\n---\n")
+    (folder / "pyproject.toml").write_text(
+        f'[project]\nname = "{folder.name}"\nversion = "0.1.0"\ndependencies = [{dependencies}]\n\n'
+        '[build-system]\nrequires = []\nbuild-backend = "backend"\nbackend-path = ["."]\n')
+    (folder / "backend.py").write_text(f"open({str(folder / 'BUILT')!r}, 'w').close()\n")
+    (folder / "src" / module / "__init__.py").write_text(body)
+    return folder
+
+
+def kernel_learner(tmp_path, monkeypatch):
+    """A factory of learners on the fake prime-agent with a kernel (FAKE_AGENT_KERNEL_LOG, read by kernel_starts), all
+    sharing one kernel venv that holds the bundled skills as the adapter's install leaves them, with no network: uv,
+    which nothing should call, fails. The shared venv."""
+    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
+
+    launcher, uv = install_rust_sh(tmp_path / ".local"), fake_uv(tmp_path / "uv", "error: no network")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(launcher.parent), str(uv), os.environ["PATH"]]))
+    monkeypatch.setenv("FAKE_AGENT_KERNEL_LOG", str(tmp_path / "kernel.log"))
+    venv = kernel_venv(tmp_path / "kernel-venv", tmp_path / ".local" / "share" / "prime-agent" / "skills")
+    return lambda: PrimeAgentLearner(command="prime-agent", kernel_venv=str(venv), sandbox="none",
+                                     startup_timeout_s=30, passthrough_env=["FAKE_AGENT_KERNEL_LOG"]), venv
+
+
+def kernel_starts(tmp_path) -> list[dict]:
+    return [json.loads(line) for line in (tmp_path / "kernel.log").read_text().splitlines()]
+
+
+def imports(venv: Path, module: str) -> bool:
+    return subprocess.run([venv / "bin" / "python", "-c", f"import {module}"], capture_output=True).returncode == 0
+
+
+def files_of(*folders: Path) -> dict[Path, bytes]:
+    """Every file in ``folders`` but Python's bytecode caches, which importing the bundled skills writes beside their
+    sources (the adapter's check that they import does, and so does a test's)."""
+    return {path: path.read_bytes() for folder in folders for path in sorted(folder.rglob("*"))
+            if path.is_file() and "__pycache__" not in path.parts}
+
+
+@pytest.mark.parametrize("root", ["agent/skills", "workspace/.prime/agent/skills", "workspace/.agents/skills",
+                                  ".agents/skills", "home/.agents/skills"])
+def test_a_python_skill_the_agent_writes_imports_in_the_kernel_from_its_next_session(tmp_path, monkeypatch, root):
+    """A Python skill the agent writes during a session, in any folder of its state that prime-agent finds skills in,
+    imports in the kernel from the next session on, as prime-agent's own kernel setup would install it, while nothing of
+    it runs outside the kernel, its build backend never. It goes into the learner's own copy of the kernel venv beside
+    the bundled skills, and nothing reaches the shared venv or prime-agent's install."""
+    make, venv = kernel_learner(tmp_path, monkeypatch)
+    learner = make()
+    learner.attach(tmp_path / "system", {})
+    try:
+        learner.start()
+        shared = files_of(venv, tmp_path / ".local")   # with the bundled skills installed, and the install's lock
+        skill = agent_skill(learner.state_dir / root / "grid-tools")
+        learner.new_session()
+        learner.new_session()
+    finally:
+        learner.stop()
+    ran = {"grid_tools": "grid tools ran"}
+    assert kernel_starts(tmp_path) == [{"session": 0, "ran": {}, "disabled": []},
+                                       {"session": 1, "ran": ran, "disabled": []},
+                                       {"session": 2, "ran": ran, "disabled": []}]
+    assert not (skill / "BUILT").exists() and not (tmp_path / "uv" / "uv.log").exists()
+    assert (site(learner.own_venv) / "arc-agent-skills.pth").read_text() == f"{skill / 'src'}\n"
+    assert imports(learner.own_venv, ", ".join(KERNEL_SKILLS))
+    assert files_of(venv, tmp_path / ".local") == shared and not imports(venv, "grid_tools")
+    assert "the agent's Python skills on the kernel's path: " + f"{root}/grid-tools/src" in (
+        tmp_path / "system" / "adapter.log").read_text()
+
+
+def test_what_the_kernel_imports_follows_the_skills_folder_as_each_session_starts(tmp_path, monkeypatch):
+    """A skill that is no longer a Python skill, is removed or is wiped with the rest of the state (row H0's wipe before
+    every instance) leaves nothing in the kernel from its next session, though the learner's venv outlasts the wipe; one
+    there before the first start imports from the first session."""
+    make, venv = kernel_learner(tmp_path, monkeypatch)
+    learner = make()
+    learner.attach(tmp_path / "system", {})
+    skill = agent_skill(learner.agent_dir / "skills" / "grid-tools")
+    importable = []
+    try:
+        learner.start()
+        importable.append(imports(learner.own_venv, "grid_tools"))
+        (skill / "pyproject.toml").rename(tmp_path / "pyproject.toml")   # no longer a Python skill
+        learner.new_session()
+        importable.append(imports(learner.own_venv, "grid_tools"))
+        (tmp_path / "pyproject.toml").rename(skill / "pyproject.toml")
+        learner.new_session()
+        importable.append(imports(learner.own_venv, "grid_tools"))
+        shutil.rmtree(skill)
+        learner.new_session()
+        importable.append(imports(learner.own_venv, "grid_tools"))
+        agent_skill(skill)
+        learner.new_session()
+        importable.append(imports(learner.own_venv, "grid_tools"))
+        before_the_wipe = site(learner.own_venv).stat().st_ino
+        learner.stop()
+        learner.wipe_state()
+        learner.start()
+        importable.append(imports(learner.own_venv, "grid_tools"))
+    finally:
+        learner.stop()
+    assert importable == [True, False, True, False, True, False]
+    assert site(learner.own_venv).stat().st_ino == before_the_wipe   # the same venv, not a new copy
+    assert [start["ran"] for start in kernel_starts(tmp_path)] == [
+        {"grid_tools": "grid tools ran"}, {}, {"grid_tools": "grid tools ran"}, {}, {"grid_tools": "grid tools ran"}, {}]
+    assert not (site(learner.own_venv) / "arc-agent-skills.pth").exists()
+    assert imports(learner.own_venv, ", ".join(KERNEL_SKILLS))
+    assert not (site(venv) / "arc-agent-skills.pth").exists()
+
+
+def test_a_state_that_comes_without_its_venv_has_its_skills_in_the_kernel_from_its_first_session(tmp_path, monkeypatch):
+    """A state copied without the learner's venv, as a collective's snapshot is restored or a training snapshot is put
+    back, has its Python skills in the kernel from the first session of the learner that plays it."""
+    from continual_arc_baselines.collective import restore_state, snapshot_state
+
+    make, _ = kernel_learner(tmp_path, monkeypatch)
+    first = make()
+    first.attach(tmp_path / "system", {})
+    try:
+        first.start()
+        agent_skill(first.agent_dir / "skills" / "grid-tools")
+    finally:
+        first.stop()
+    snapshot_state(first.state_dir, tmp_path / "snapshot", max_file_bytes=None)
+    restore_state(tmp_path / "snapshot", tmp_path / "restored")
+    second = make()
+    second.attach(tmp_path / "second", {}, state_dir=tmp_path / "restored")
+    try:
+        second.start()
+    finally:
+        second.stop()
+    assert kernel_starts(tmp_path)[-1] == {"session": 0, "ran": {"grid_tools": "grid tools ran"}, "disabled": []}
+    assert (site(second.own_venv) / "arc-agent-skills.pth").read_text() == (
+        f"{tmp_path / 'restored' / 'agent' / 'skills' / 'grid-tools' / 'src'}\n")
+
+
+def test_a_skill_whose_dependency_the_venv_lacks_is_disabled_with_prime_agents_warning(tmp_path, monkeypatch):
+    """Nothing is fetched: a skill that needs a package the kernel's venv does not hold fails to import, and prime-agent
+    disables it with its warning, as it does any Python skill that does not import in the interpreter it is given; the
+    agent's other skills import."""
+    make, _ = kernel_learner(tmp_path, monkeypatch)
+    learner = make()
+    learner.attach(tmp_path / "system", {})
+    try:
+        learner.start()
+        agent_skill(learner.agent_dir / "skills" / "grid-tools")
+        plotter = agent_skill(learner.agent_dir / "skills" / "plotter", "import plotting_library\n",
+                              dependencies='"plotting-library>=2"')
+        learner.new_session()
+    finally:
+        learner.stop()
+    assert kernel_starts(tmp_path)[-1] == {"session": 1, "ran": {"grid_tools": "grid tools ran"}, "disabled": ["plotter"]}
+    assert ("Python skills unavailable in PRIME_AGENT_KERNEL_PYTHON and will be disabled: plotter (plotter)"
+            in (tmp_path / "system" / "prime-agent.log").read_text())
+    assert not (plotter / "BUILT").exists() and not (tmp_path / "uv" / "uv.log").exists()
+
+
+def test_a_skill_reached_through_a_link_stays_out_of_the_kernel(tmp_path, monkeypatch):
+    """The adapter reads the state with no link followed: a skill linked into the agent's skills from outside the state,
+    and a skills folder that is a link to one outside it, stay out of the kernel, so nothing outside the state is put on
+    its path; prime-agent, which follows links, finds them and disables them."""
+    make, _ = kernel_learner(tmp_path, monkeypatch)
+    learner = make()
+    learner.attach(tmp_path / "system", {})
+    linked = agent_skill(tmp_path / "outside" / "linked-skill")
+    far = agent_skill(tmp_path / "far" / "skills" / "far-skill")
+    try:
+        learner.start()
+        (learner.agent_dir / "skills").mkdir()
+        (learner.agent_dir / "skills" / "linked-skill").symlink_to(linked)
+        (learner.home_dir / ".agents").mkdir()
+        (learner.home_dir / ".agents" / "skills").symlink_to(far.parent)
+        learner.new_session()
+    finally:
+        learner.stop()
+    assert kernel_starts(tmp_path)[-1] == {"session": 1, "ran": {}, "disabled": ["linked_skill", "far_skill"]}
+    assert not (site(learner.own_venv) / "arc-agent-skills.pth").exists()
+
+
+def test_a_skill_named_as_a_bundled_one_leaves_prime_agents_own_in_the_kernel(tmp_path, monkeypatch):
+    """The agent's skills are on the kernel's path after prime-agent's bundled ones, so a package of the agent's that has
+    a bundled skill's name (refine) leaves prime-agent's own in the kernel: the harness's mechanics stay as shipped."""
+    make, _ = kernel_learner(tmp_path, monkeypatch)
+    learner = make()
+    learner.attach(tmp_path / "system", {})
+    agent_skill(learner.agent_dir / "skills" / "refine", "def run():\n    return 'the agent wrote this refine'\n")
+    try:
+        learner.start()
+    finally:
+        learner.stop()
+    assert kernel_starts(tmp_path) == [{"session": 0, "ran": {"refine": None}, "disabled": []}]
+
+
+def test_the_kernel_runs_on_the_learners_own_venv_which_the_sandbox_binds_read_only(tmp_path, monkeypatch):
+    """prime-agent is given the interpreter of the learner's own venv, in its workdir outside its state, which the
+    sandbox binds in read-only, as it does the shared venv: the agent cannot write the venv its kernel runs on."""
+    from continual_arc_baselines.systems import sandbox
+
+    make, venv = kernel_learner(tmp_path, monkeypatch)
+    learner = make()
+    learner.attach(tmp_path / "system", {})
+    try:
+        learner.start()
+        spec, env = learner._sandbox_spec(), learner._child_env()
+    finally:
+        learner.stop()
+    own = learner.own_venv
+    assert env["PRIME_AGENT_KERNEL_PYTHON"] == str(own / "bin" / "python")
+    assert own.parent == learner.workdir and learner.state_dir not in own.parents
+    monkeypatch.setattr(sandbox, "hidden_roots", lambda: [tmp_path])
+    cmd = sandbox.bwrap_command(learner._argv(), spec)
+    ro = [(cmd[i + 1], cmd[i + 2]) for i, arg in enumerate(cmd[:-2]) if arg == "--ro-bind"]
+    rw = [cmd[i + 1] for i, arg in enumerate(cmd[:-2]) if arg == "--bind"]
+    own, venv = own.resolve(), venv.resolve()   # the sandbox binds the real paths
+    assert (str(own), str(own)) in ro and (str(venv), str(venv)) in ro
+    assert not any(own == Path(path) or Path(path) in own.parents for path in rw)
+
+
+def test_the_agents_python_skills_are_read_off_its_state_with_no_link_followed(tmp_path):
+    """agent_python_skill_sources: in each folder of the state that prime-agent finds skills in, the src/ of every skill
+    holding a pyproject.toml and a src/ folder, in the order of the folders and by name within one, never what a skill's
+    files say; a skill's own folders, dot-folders and node_modules are not searched; anything reached through a link,
+    a file in a folder's place and a name that would not be one line of a .pth file are left out."""
+    from continual_arc_baselines.systems.prime_agent import agent_python_skill_sources
+
+    state, outside = tmp_path / "state", tmp_path / "outside"
+    skills = state / "agent" / "skills"
+    for folder in ("b-skill", "a-skill", "group/nested", "group/nested/inner", ".hidden/h", "node_modules/n",
+                   "md-link", "src-link", "new\nline"):
+        agent_skill(skills / folder)
+    (skills / "markdown-only").mkdir()
+    (skills / "markdown-only" / "SKILL.md").write_text("---\nname: markdown-only\ndescription: words\n---\n")
+    (skills / "linked").symlink_to(agent_skill(outside / "linked"))
+    (skills / "md-link" / "SKILL.md").unlink()
+    (skills / "md-link" / "SKILL.md").symlink_to(outside / "linked" / "SKILL.md")
+    (skills / "src-link" / "src").rename(skills / "src-link" / "source")
+    (skills / "src-link" / "src").symlink_to("source")
+    agent_skill(state / "home" / ".agents" / "skills" / "home-skill")
+    (state / "workspace").mkdir()
+    (state / "workspace" / ".agents").symlink_to(outside)
+    agent_skill(outside / "skills" / "through-a-linked-folder")
+    os.mkfifo(state / ".agents")
+    roots = [Path("workspace/.prime/agent/skills"), Path("workspace/.agents/skills"), Path(".agents/skills"),
+             Path("agent/skills"), Path("home/.agents/skills")]
+    assert agent_python_skill_sources(state, roots) == [
+        skills / "a-skill" / "src", skills / "b-skill" / "src", skills / "group" / "nested" / "src",
+        state / "home" / ".agents" / "skills" / "home-skill" / "src"]
+    assert agent_python_skill_sources(tmp_path / "never-started", roots) == []

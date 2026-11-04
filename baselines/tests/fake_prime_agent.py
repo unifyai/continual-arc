@@ -37,6 +37,11 @@ agent directory (a marker file records that the scenario has fired):
   the worker is then idle with the previous turn's text as its last reply.
 * ``FAKE_AGENT_PROBE=<path>``: on the first prompt, try to read that file and
   log ``probe:ok`` or ``probe:denied`` (for the sandbox test).
+
+With ``FAKE_AGENT_KERNEL_LOG=<path>``, a session's kernel starts as prime-agent
+starts it on the interpreter it is given (``PRIME_AGENT_KERNEL_PYTHON``): as
+the process starts and as each new session opens, before it is answered
+(:func:`start_kernel`).
 """
 
 from __future__ import annotations
@@ -44,12 +49,74 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
 import httpx
+
+# The kernel's first act: import each Python skill it is given, and tell what each one's run() returns
+KERNEL = """import importlib, json, sys
+ran = {}
+for name in sys.argv[1:]:
+    skill = importlib.import_module(name)
+    ran[name] = skill.run() if hasattr(skill, "run") else None
+print(json.dumps(ran))
+"""
+
+
+def skill_roots(agent_dir: Path, cwd: Path) -> list[Path]:
+    """Where prime-agent finds skills, in its order: the project's, ``.prime/agent/skills`` and ``.agents/skills`` of
+    the working directory, and ``.agents/skills`` of its parent, standing in for each folder above it up to the git
+    repository's root; then the user's, the agent directory's ``skills/`` and ``~/.agents/skills``."""
+    return [cwd / ".prime" / "agent" / "skills", cwd / ".agents" / "skills", cwd.parent / ".agents" / "skills",
+            agent_dir / "skills", Path.home() / ".agents" / "skills"]
+
+
+def python_skills(roots: list[Path]) -> dict[str, Path]:
+    """The Python skills in ``roots``, by import name, the first of a name kept. As prime-agent finds them (its
+    docs/skills.md): a folder holding a SKILL.md, links followed, is a skill, and nothing in it is searched, every other
+    folder but dot-folders and node_modules is; a skill is a Python skill when it also holds a pyproject.toml and
+    ``src/<import name>/__init__.py``, the import name its frontmatter's name, or else its folder's, with hyphens as
+    underscores."""
+    found: dict[str, Path] = {}
+    pending = list(reversed(roots))
+    while pending:
+        folder = pending.pop()
+        if not folder.is_dir():
+            continue
+        if not (folder / "SKILL.md").is_file():
+            pending += sorted((inner for inner in folder.iterdir()
+                               if not inner.name.startswith(".") and inner.name != "node_modules"), reverse=True)
+            continue
+        named = re.search(r"^name:\s*(\S+)\s*$", (folder / "SKILL.md").read_text(), re.M)
+        module = (named.group(1) if named else folder.name).replace("-", "_")
+        if (folder / "pyproject.toml").is_file() and (folder / "src" / module / "__init__.py").is_file():
+            found.setdefault(module, folder)
+    return found
+
+
+def start_kernel(session: int, roots: list[Path]) -> None:
+    """A session's kernel, as prime-agent starts it on the interpreter it is given: each Python skill is checked by
+    importing it there, one that does not import is disabled with prime-agent's warning, and nothing is installed;
+    then the kernel imports the rest. One line per start in ``$FAKE_AGENT_KERNEL_LOG``: the session, what each skill's
+    run() returned in the kernel, and the skills disabled."""
+    path = os.environ.get("FAKE_AGENT_KERNEL_LOG")
+    if not path:
+        return
+    python = os.environ["PRIME_AGENT_KERNEL_PYTHON"]
+    skills = python_skills(roots)
+    disabled = [name for name in skills
+                if subprocess.run([python, "-c", f"import {name}"], capture_output=True).returncode]
+    if disabled:
+        print("Warning: Python skills unavailable in PRIME_AGENT_KERNEL_PYTHON and will be disabled: "
+              + ", ".join(f"{skills[name].name} ({name})" for name in disabled), file=sys.stderr, flush=True)
+    kernel = subprocess.run([python, "-c", KERNEL, *(name for name in skills if name not in disabled)],
+                            capture_output=True, text=True, check=True)
+    with open(path, "a") as fh:
+        fh.write(json.dumps({"session": session, "ran": json.loads(kernel.stdout), "disabled": disabled}) + "\n")
 
 EMIT = threading.Lock()  # a printing cell's thread emits beside the command loop
 
@@ -121,6 +188,9 @@ def main() -> int:
     agent_dir = Path(os.environ["PRIME_AGENT_CODING_AGENT_DIR"])
     memory_path = agent_dir / "memory.json"
     memory = json.loads(memory_path.read_text()) if memory_path.exists() else {}
+    roots = skill_roots(agent_dir, Path(sys.argv[sys.argv.index("--cwd") + 1]))
+    session = 0
+    start_kernel(session, roots)
 
     def once(flag: str) -> bool:
         """True the first time ``flag`` is set for this agent directory."""
@@ -303,7 +373,11 @@ def main() -> int:
             result = {"scope": scope, "summary": f"fake {scope} refine", "appliedEdits": []}
             emit({"type": "refine_complete", "result": result})
             emit({"type": "response", "command": kind, "success": True, "id": command.get("id"), "data": result})
-        elif kind in ("new_session", "get_session_stats"):
+        elif kind == "new_session":
+            session += 1
+            start_kernel(session, roots)
+            emit({"type": "response", "command": kind, "success": True, "data": {}})
+        elif kind == "get_session_stats":
             emit({"type": "response", "command": kind, "success": True, "data": {}})
         else:
             emit({"type": "response", "command": kind, "success": False, "error": "unknown"})

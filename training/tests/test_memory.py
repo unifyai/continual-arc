@@ -16,15 +16,15 @@ def test_snapshot_state_reads_path_size_mtime_hash_and_skips_excluded(tmp_path):
     state = tmp_path / "state"
     (state / "agent" / "skills" / "solve-grids").mkdir(parents=True)
     (state / "agent" / "skills" / "solve-grids" / "SKILL.md").write_text("do the thing")
-    (state / "agent" / "kernel-venv" / "lib").mkdir(parents=True)
-    (state / "agent" / "kernel-venv" / "lib" / "x.pyc").write_text("not real bytecode")
+    (state / "workspace" / "node_modules" / "pkg").mkdir(parents=True)
+    (state / "workspace" / "node_modules" / "pkg" / "index.js").write_text("module.exports = 1")
     (state / "workspace" / "programs").mkdir(parents=True)
     (state / "workspace" / "programs" / "p1.py").write_text("print(1)")
 
     snapshot = memory.snapshot_state(state)
 
     assert "agent/skills/solve-grids/SKILL.md" in snapshot
-    assert not any(p.startswith("agent/kernel-venv") for p in snapshot)   # excluded: a runtime, not what it learned
+    assert not any(p.startswith("workspace/node_modules") for p in snapshot)   # excluded: a runtime, not what it learned
     entry = snapshot["agent/skills/solve-grids/SKILL.md"]
     assert entry["size"] == len("do the thing")
     assert entry["hash"] == memory._hash_file(state / "agent" / "skills" / "solve-grids" / "SKILL.md",

@@ -45,13 +45,27 @@ to the same budget of model time as any other row's. A negative credit counts mo
 having taken it: a reply replayed from a recording, served at once, takes its recorded generation's seconds off the
 turn.
 
-Kernel. prime-agent's Python cells run in a kernel the adapter names (``PRIME_AGENT_KERNEL_PYTHON``, the shared kernel
-venv's interpreter), and prime-agent installs no Python skills into an interpreter it is given (its docs/skills.md), nor
-does its installer into the venv it makes. So the adapter installs prime-agent's bundled Python skills (refine, goal,
-compact, edit and the rest) into that venv itself before prime-agent first starts, from wherever the prime-agent on
-``PATH`` keeps them, as prime-agent's own kernel setup would, and the start stops if that install holds none, the venv is
-missing or they still do not import (:func:`install_kernel_skills`): without them every call to one raises and each
-session opens by telling the agent so.
+Kernel. prime-agent's Python cells run in a kernel on the interpreter the adapter names (``PRIME_AGENT_KERNEL_PYTHON``),
+which prime-agent takes as it is: it checks that its runtime, its default packages and each Python skill import there,
+disables with a warning a skill that does not, and installs nothing (its docs/skills.md). Left to set up a kernel venv
+of its own, it would install each Python skill it finds into that venv as a session's kernel is set up, editable
+(``uv pip install --editable``), and again once the skill's pyproject.toml changes: that builds the skill with the build
+backend its pyproject.toml names, fetched from the package index with the skill's dependencies, and a venv it finds out
+of date it deletes and makes again from the network. The sandbox has no network, and nothing of a skill the agent wrote
+may run outside the sandbox. So the adapter does for the kernel what that install does, without building anything:
+
+* prime-agent's bundled Python skills (refine, goal, compact, edit and the rest) are installed into the shared kernel
+  venv, editable, before prime-agent first starts, from wherever the prime-agent on ``PATH`` keeps them, and the start
+  stops if that install holds none, the venv is missing or they still do not import (:func:`install_kernel_skills`):
+  without them every call to one raises and each session opens by telling the agent so;
+* the kernel runs on the learner's own copy of that venv, made at its first start in its workdir, outside its state,
+  and read-only inside the sandbox as the shared venv is (:attr:`PrimeAgentLearner.own_venv`);
+* the Python skills the agent keeps in its state go into that copy as an editable install leaves them, each one's
+  ``src/`` on the kernel's path, at every start and before every new session, read from the skill folders as they are
+  then (:meth:`PrimeAgentLearner._install_agent_skills`): a skill written in one session imports from the next on, one
+  removed or wiped is gone from the next, and none of them reaches the shared venv. Nothing is fetched: a skill whose
+  dependencies the venv lacks fails to import, and prime-agent disables it with its warning, so that calling it
+  raises and the session opens by telling the agent so.
 
 Requires the ``prime-agent`` CLI on ``PATH``:
 ``curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh``, and ``uv``.
@@ -59,6 +73,7 @@ Requires the ``prime-agent`` CLI on ``PATH``:
 
 from __future__ import annotations
 
+import errno
 import fcntl
 import json
 import logging
@@ -108,7 +123,11 @@ REFINE_INSTRUCTIONS = (
     "{verdict}\n\nThis piece of work is finished. Refine whatever you learned in it that will help with future work "
     "into the global harness store (memories, prompt notes, skills)."
 )
-PRESERVED = ("models.json", "settings.json", "kernel-venv")  # survive a state wipe
+PRESERVED = ("models.json", "settings.json")  # survive a state wipe
+# The file in the kernel's venv naming the src/ of each Python skill the agent keeps (_install_agent_skills). Its name
+# sorts after the bundled skills' (_editable_impl_<name>.pth), so the site module puts the agent's skills on the path
+# after theirs, and a bundled skill's name imports prime-agent's own package whatever the agent writes.
+AGENT_SKILLS_PTH = "arc-agent-skills.pth"
 INTEGRATION_SKILLS = ("linear", "notion", "prime-intellect")  # MCP integrations; off
 DISABLED_BUNDLED_SKILLS = ("websearch",)  # bundled skills turned off: web search has no key and the sandbox no route out
 ACTIVITY = ("agent_start", "turn_start", "message_start")  # a new run or turn is underway
@@ -149,10 +168,10 @@ def install_kernel_skills(venv: Path, executable: str) -> None:
     """Install the bundled Python skills (:func:`bundled_python_skills`) of the prime-agent ``executable`` runs into the
     kernel ``venv``, editable, when any of them does not import there, and raise if that install holds none of them, if
     the venv has no interpreter or if they still do not import. Nothing else puts them there: prime-agent installs them
-    only at its own kernel setup, which it skips for an interpreter it is given, as the adapter gives it this venv's, and
-    its installer's kernel setup leaves them out (``pythonSkills`` is empty in the venv's ``.bootstrap-version``).
-    Checked once per venv in a process; a process installing into the venv holds its lock file, so runs that start
-    together install once."""
+    only at its own kernel setup, which it skips for an interpreter it is given, as the adapter gives it the interpreter
+    of a copy of this venv (:attr:`PrimeAgentLearner.own_venv`), and its installer's kernel setup leaves them out
+    (``pythonSkills`` is empty in the venv's ``.bootstrap-version``). Checked once per venv in a process; a process
+    installing into the venv holds its lock file, so runs that start together install once."""
     root = install_root(executable)
     if root is None:
         raise RuntimeError(f"{executable} is not on PATH")
@@ -184,6 +203,61 @@ def install_kernel_skills(venv: Path, executable: str) -> None:
                                        f"installing them: {imported.stderr.strip()[-400:]}")
                 log.info("installed prime-agent's bundled Python skills (%s) into %s", names, venv)
         _kernel_skills_ready.add(venv)
+
+
+def agent_python_skill_sources(state: Path, roots: list[Path]) -> list[Path]:
+    """The ``src/`` folder of each Python skill in ``roots``, folders of the agent's ``state`` given relative to it that
+    prime-agent finds skills in, in their order: what an editable install of each skill puts on the kernel's path.
+
+    prime-agent's skill loader takes a folder holding a SKILL.md for a skill, and looks for skills in every folder of
+    any other folder but dot-folders and node_modules; a skill that also holds a pyproject.toml and its package in
+    ``src/`` is a Python skill (its docs/skills.md). Here a skill holding a pyproject.toml and a ``src/`` folder counts,
+    so that whichever package prime-agent imports from it is on the path, and only which files and folders a folder
+    holds is read, never what the agent wrote in a file. Left out: the local packages beside a skill that prime-agent's
+    own install adds when the skill depends on them, since which they are is written in the skill's pyproject.toml;
+    anything reached through a link (:func:`_listing`), so that nothing outside the state is opened, even when the
+    agent puts a link in a folder's place while the search runs; and a path that would not be one line of the .pth
+    file the sources go into."""
+    sources = []
+    for root in roots:
+        pending = [root]
+        while pending:
+            folder = pending.pop()
+            listing = _listing(state, folder)
+            if listing is None:
+                continue
+            files, folders = listing
+            if "SKILL.md" not in files:
+                pending += [folder / name for name in sorted(folders, reverse=True)
+                            if not name.startswith(".") and name != "node_modules"]
+            elif "pyproject.toml" in files and "src" in folders and str(state / folder / "src").isprintable():
+                sources.append(state / folder / "src")
+    return sources
+
+
+def _listing(state: Path, folder: Path) -> tuple[set[str], set[str]] | None:
+    """The names of the files and of the folders in ``folder``, a folder of ``state`` given relative to it, each a file
+    or a folder itself, not a link to one. Each folder from ``state`` down is opened in turn with no link followed and
+    only as a folder (``O_NOFOLLOW``, ``O_DIRECTORY``), so a link or anything else put in a folder's place stops the
+    reading there, rather than leading out of the state. None when one of them is missing, a link, not a folder or
+    closed to the adapter, as it is then to the kernel, which runs as the same user."""
+    try:
+        fd = os.open(state, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for name in folder.parts:
+                inner = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd)
+                fd = inner
+            with os.scandir(fd) as entries:
+                listed = [(entry.name, entry.is_file(follow_symlinks=False), entry.is_dir(follow_symlinks=False))
+                          for entry in entries]
+        finally:
+            os.close(fd)
+    except OSError as error:
+        if error.errno not in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EACCES):
+            raise
+        return None
+    return {name for name, file, _ in listed if file}, {name for name, _, inner in listed if inner}
 
 
 def _last_role(event: dict) -> str | None:
@@ -282,6 +356,7 @@ class PrimeAgentLearner(SystemLearner):
         self.sandbox = sandbox
         self.sandbox_read_paths = list(sandbox_read_paths or [])
         self.passthrough_env = list(passthrough_env or [])
+        self._own_venv_made = False   # own_venv is copied at the learner's first start
         self._backend: str | None = None
         self._tmp_dir: Path | None = None
         self._refine_event: dict | None = None
@@ -311,7 +386,7 @@ class PrimeAgentLearner(SystemLearner):
         return self.state_dir / "sessions"
 
     def transcript_paths(self) -> list[Path]:
-        # the session transcripts; not the agent directory, whose copy of the kernel venv is most of its 300 MB
+        # the session transcripts and their artifacts
         return [self.sessions_dir, self.state_dir / "session-artifacts"]
 
     @property
@@ -322,8 +397,33 @@ class PrimeAgentLearner(SystemLearner):
     def home_dir(self) -> Path:
         return self.state_dir / "home"
 
-    def _venv(self) -> Path:
+    def _shared_venv(self) -> Path:
+        """The kernel venv every learner on the machine shares, where prime-agent's installer makes it unless
+        ``kernel_venv`` or ``PRIME_AGENT_KERNEL_VENV`` names another: the one :func:`install_kernel_skills` installs the
+        bundled Python skills into and :attr:`own_venv` copies."""
         return Path(self.kernel_venv or Path.home() / ".prime" / "agent" / "kernel-venv")
+
+    @property
+    def own_venv(self) -> Path:
+        """The venv the kernel runs on: this learner's own copy of the shared kernel venv, in its workdir, which holds
+        the Python skills the agent keeps in its state (:meth:`_install_agent_skills`), so that no learner's skills
+        reach the shared venv or another learner's kernel. Outside the state, the agent cannot rewrite it, as it could
+        a venv in its state, whose changes would outlast every wipe of row H0: the sandbox binds it in read-only, as it
+        does the shared venv, and the adapter alone writes it. Nothing that copies a state (a frozen test's put-back,
+        a fork, the state log, a collective snapshot) carries it, and a state that comes without it has its skills
+        installed at the next start. Its interpreter runs only inside the sandbox: it puts the agent's folders on its
+        path as it starts, so an import there, ``sitecustomize`` among them, can run what the agent wrote."""
+        return self.workdir / "kernel-venv"
+
+    def _skill_roots(self) -> list[Path]:
+        """The folders of the state, relative to it, that prime-agent finds skills in by itself, in its order of
+        precedence: the project's, the workspace's ``.prime/agent/skills`` and the ``.agents/skills`` of the workspace
+        and of each folder above it up to the git repository's root or the filesystem's, of which the state holds the
+        workspace's own and its own; then the user's, the agent directory's ``skills/`` (where ``~/.prime/agent/skills``
+        leads, :meth:`_link_home_agent_dir`) and ``~/.agents/skills``."""
+        return [path.relative_to(self.state_dir) for path in (
+            self.workspace / ".prime" / "agent" / "skills", self.workspace / ".agents" / "skills",
+            self.state_dir / ".agents" / "skills", self.agent_dir / "skills", self.home_dir / ".agents" / "skills")]
 
     # -- configuration -------------------------------------------------------
 
@@ -360,14 +460,6 @@ class PrimeAgentLearner(SystemLearner):
         for path in (self.agent_dir, self.sessions_dir, self.workspace, self.home_dir):
             path.mkdir(parents=True, exist_ok=True)
         self._link_home_agent_dir()
-        # Start from a copy of the shared kernel venv instead of bootstrapping one per run
-        # (which needs the network, and the sandbox has none). A copy, not a link: Python-backed
-        # skills the system writes are installed into the venv at session start, and the shared
-        # one sits under the sandbox's read-only mount.
-        venv = self._venv()
-        own = self.agent_dir / "kernel-venv"
-        if venv.is_dir() and not own.exists():
-            shutil.copytree(venv.resolve(), own, symlinks=True)
         models = {"providers": {self.provider_name: {
             "baseUrl": self._base_url(), "api": "openai-completions", "apiKey": KEY_VARIABLE,
             # thinkingLevelMap: prime-agent's model layer (pi-ai) offers xhigh and max only for a
@@ -380,8 +472,8 @@ class PrimeAgentLearner(SystemLearner):
         }}}
         (self.agent_dir / "models.json").write_text(json.dumps(models, indent=1))
         # prime-agent runs as shipped: its built-in skills (edit, compact, goal, refine,
-        # skill-creator, ...) are the harness's own mechanics, installed into its kernel by
-        # install_kernel_skills at the start. Its integrations are off:
+        # skill-creator, ...) are the harness's own mechanics, the Python ones installed by
+        # install_kernel_skills into the shared kernel venv that own_venv copies. Its integrations are off:
         # web search has no key and the sandbox has no route out; the Linear, Notion and
         # Prime Intellect skills are MCP integrations that prime-agent itself disables
         # without a login, made explicit here so the record does not depend on that.
@@ -396,6 +488,42 @@ class PrimeAgentLearner(SystemLearner):
             if self.compact_keep is not None:
                 config.setdefault("compaction", {})["keepRecentTokens"] = self.compact_keep
             settings.write_text(json.dumps(config, indent=1))
+
+    def _copy_kernel_venv(self) -> None:
+        """:attr:`own_venv`, copied afresh from the shared kernel venv, links as links, at the learner's first start,
+        once :func:`install_kernel_skills` has checked the shared one: a copy left by an earlier process holds the
+        shared venv as it was then. The venv names its own path only in the scripts in its ``bin/``, so a copy runs
+        from anywhere."""
+        if self.own_venv.exists():
+            shutil.rmtree(self.own_venv)
+        shutil.copytree(self._shared_venv().resolve(), self.own_venv, symlinks=True)
+        self._own_venv_made = True
+
+    def _install_agent_skills(self) -> None:
+        """Install the Python skills the agent keeps in its state into the kernel's venv (:attr:`own_venv`) as an
+        editable install leaves them: each one's ``src/`` (:func:`agent_python_skill_sources`, in the folders of
+        :meth:`_skill_roots`) named in one .pth file (:data:`AGENT_SKILLS_PTH`), which the venv's site module reads as
+        every interpreter of the venv starts, the kernel and prime-agent's check that each skill imports among them.
+        At every start and before every new session, ahead of prime-agent starting that session's kernel, so the
+        kernel imports the skills as the state holds them then; the file is replaced whole, or removed when there are
+        none, so a skill removed or wiped leaves nothing in the venv, which outlasts every wipe. Nothing of the skill
+        runs here: there is no build and no dependency to fetch, and a skill that needs a package the venv lacks fails
+        to import in the kernel, where prime-agent disables it with its warning, as it does any Python skill that does
+        not import in the interpreter it is given."""
+        state = self.state_dir.absolute()   # each line of a .pth file that is not absolute is read from its folder
+        sources = agent_python_skill_sources(state, self._skill_roots())
+        pth = next((self.own_venv / "lib").glob("python*/site-packages")) / AGENT_SKILLS_PTH
+        text = "".join(f"{source}\n" for source in sources)
+        if text == (pth.read_text(encoding="utf-8") if pth.exists() else ""):
+            return
+        if text:
+            partial = pth.with_name(f".{pth.name}.partial")   # not a .pth: never read half written
+            partial.write_text(text, encoding="utf-8")
+            os.replace(partial, pth)
+        else:
+            pth.unlink()
+        self._note("the agent's Python skills on the kernel's path: "
+                   + (", ".join(str(source.relative_to(state)) for source in sources) or "none"))
 
     def _child_env(self) -> dict[str, str]:
         """An allowlisted environment: nothing from the host leaks in by accident."""
@@ -412,12 +540,10 @@ class PrimeAgentLearner(SystemLearner):
             "PRIME_AGENT_SESSION_DIR": str(self.sessions_dir),
             "PI_SKIP_VERSION_CHECK": "1",
             KEY_VARIABLE: self.environ.get(KEY_VARIABLE) or os.environ.get("OPENROUTER_API_KEY", ""),
+            # The learner's own venv's interpreter, not the base interpreter it links to: only the venv has
+            # prime-agent-runtime, the default kernel packages and the skills.
+            "PRIME_AGENT_KERNEL_PYTHON": str((self.own_venv / "bin" / "python").absolute()),
         })
-        python = self._venv() / "bin" / "python"
-        if python.exists():
-            # The venv's interpreter, not the base interpreter it links to: only the
-            # venv has prime-agent-runtime and the default kernel packages.
-            env["PRIME_AGENT_KERNEL_PYTHON"] = str(python.absolute())
         return env
 
     def _argv(self) -> list[str]:
@@ -440,12 +566,12 @@ class PrimeAgentLearner(SystemLearner):
         root = install_root(self.command[0])
         if root:
             reads.append(root)
-        venv = self._venv()
-        if venv.exists():
-            reads.append(venv)
-            runtime = python_runtime_root(venv / "bin" / "python")
-            if runtime:
-                reads.append(runtime)
+        # read-only, as everything here: the kernel's venv, the shared one it copies, whose interpreter the copy's
+        # console scripts name, and the Python installation both run on
+        reads += [self.own_venv, self._shared_venv()]
+        runtime = python_runtime_root(self.own_venv / "bin" / "python")
+        if runtime:
+            reads.append(runtime)
         reads += [Path(p) for p in self.sandbox_read_paths]
         reads.append(self.workdir / "netbridge.py")  # the sandbox half of the proxy bridge, inside the masked attempt
         parsed = urlparse(self._base_url())
@@ -496,11 +622,14 @@ class PrimeAgentLearner(SystemLearner):
 
     def start(self) -> None:
         self._backend = resolve_backend(self.sandbox)
-        install_kernel_skills(self._venv(), self.command[0])
+        install_kernel_skills(self._shared_venv(), self.command[0])
+        if not self._own_venv_made:
+            self._copy_kernel_venv()
         # Short path: UNIX socket names are limited to ~100 bytes, and attempt
         # directories are far longer than that.
         self._tmp_dir = Path(tempfile.mkdtemp(prefix="arc-pa-", dir="/tmp" if os.path.isdir("/tmp") else None))
         self._write_config()
+        self._install_agent_skills()   # prime-agent starts a kernel as soon as it starts
         inner = self._argv()
         self._bridge = None
         if self._backend == "bwrap":
@@ -1019,14 +1148,16 @@ class PrimeAgentLearner(SystemLearner):
     # -- SystemLearner -------------------------------------------------------
 
     def new_session(self) -> None:
+        self._install_agent_skills()   # prime-agent starts the session's kernel as soon as it opens the session
         self._send({"type": "new_session"})
         self._wait_response("new_session", timeout=60.0)
         self._fresh_session = True
 
     def wipe_state(self) -> None:
         """Delete everything prime-agent persisted: memories, skills, sessions, session
-        artifacts, HOME, the workspace. The provider config, the kernel venv link and
-        the adapter's own logs are kept for the record."""
+        artifacts, HOME, the workspace. The provider config is kept, and the adapter's own
+        logs and the kernel's venv are outside the state; the next start takes the wiped
+        skills out of that venv."""
         if not self.state_dir.is_dir():
             return
         for child in self.state_dir.iterdir():

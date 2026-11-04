@@ -306,13 +306,13 @@ def test_snapshot_leaves_out_runtimes_and_large_files(tmp_path):
     src = tmp_path / "state"
     (src / "memories").mkdir(parents=True)
     (src / "memories" / "MEMORY.md").write_text("rule for task-1: shift by 3")
-    (src / "agent" / "kernel-venv" / "lib").mkdir(parents=True)
-    (src / "agent" / "kernel-venv" / "lib" / "big.so").write_bytes(b"x" * 10)
+    (src / "workspace" / "node_modules" / "pkg").mkdir(parents=True)
+    (src / "workspace" / "node_modules" / "pkg" / "addon.node").write_bytes(b"x" * 10)
     (src / "sessions").mkdir()
     (src / "sessions" / "huge.jsonl").write_bytes(b"x" * 3_000_000)
     stats = snapshot_state(src, tmp_path / "copy")
     assert (tmp_path / "copy" / "memories" / "MEMORY.md").read_text().startswith("rule")
-    assert not (tmp_path / "copy" / "agent" / "kernel-venv").exists()
+    assert not (tmp_path / "copy" / "workspace" / "node_modules").exists()
     assert not (tmp_path / "copy" / "sessions" / "huge.jsonl").exists()
     assert stats["files"] == 1 and stats["skipped"] == 1
 
@@ -357,14 +357,14 @@ def test_each_users_proxy_is_the_learners_proxy_class(tmp_path):
 def test_a_complete_snapshot_restores_the_state_as_it_was(tmp_path):
     """A round cut short is played again from the state its users had when it began: the snapshot taken then, with no
     size limit, is put back, so what the cut attempt wrote is gone and what it changed is as it was, while the
-    harness's runtimes (its Python environment) stay as they are and the dead process's locks go."""
+    harness's runtimes (the packages it installed for itself) stay as they are and the dead process's locks go."""
     state = tmp_path / "state"
     (state / "memories").mkdir(parents=True)
     (state / "memories" / "MEMORY.md").write_text("rule for task-1: shift by 3")
     (state / "sessions").mkdir()
     (state / "sessions" / "big.jsonl").write_bytes(b"x" * 3_000_000)
-    (state / "agent" / "kernel-venv" / "lib").mkdir(parents=True)
-    (state / "agent" / "kernel-venv" / "lib" / "big.so").write_bytes(b"y" * 10)
+    (state / "workspace" / "node_modules" / "pkg").mkdir(parents=True)
+    (state / "workspace" / "node_modules" / "pkg" / "addon.node").write_bytes(b"y" * 10)
     stats = snapshot_state(state, tmp_path / "round-start", max_file_bytes=None)
     assert stats["files"] == 2 and (tmp_path / "round-start" / "sessions" / "big.jsonl").stat().st_size == 3_000_000
     # the cut attempt: a note added, the memory rewritten, a session removed, a package installed, a lock left
@@ -373,12 +373,13 @@ def test_a_complete_snapshot_restores_the_state_as_it_was(tmp_path):
     (state / "notes").mkdir()
     (state / "notes" / "a.md").write_text("from the cut attempt")
     (state / "sessions" / "big.jsonl").unlink()
-    (state / "agent" / "kernel-venv" / "lib" / "added.so").write_bytes(b"z")
+    (state / "workspace" / "node_modules" / "pkg" / "added.node").write_bytes(b"z")
+    (state / "agent").mkdir()
     (state / "agent" / "session.lock").write_text("pid 1")
     restore_state(tmp_path / "round-start", state)
     files = sorted(str(p.relative_to(state)) for p in state.rglob("*") if p.is_file())
-    assert files == ["agent/kernel-venv/lib/added.so", "agent/kernel-venv/lib/big.so", "memories/MEMORY.md",
-                     "sessions/big.jsonl"]
+    assert files == ["memories/MEMORY.md", "sessions/big.jsonl", "workspace/node_modules/pkg/added.node",
+                     "workspace/node_modules/pkg/addon.node"]
     assert (state / "memories" / "MEMORY.md").read_text().startswith("rule") and not (state / "notes").exists()
 
 
@@ -454,10 +455,10 @@ def test_a_copy_to_read_is_as_it_was_and_a_copy_to_restore_from_has_every_direct
     snapshot_state(state, tmp_path / "whole", max_file_bytes=None)
     assert sorted(p.name for p in (tmp_path / "read").iterdir()) == ["notes"]
     assert sorted(p.name for p in (tmp_path / "whole").iterdir()) == ["notes", "programs"]
-    (state / "agent" / "kernel-venv").mkdir(parents=True)
-    (state / "agent" / "kernel-venv" / "lib.so").write_bytes(b"x")
+    (state / "workspace" / "node_modules").mkdir(parents=True)
+    (state / "workspace" / "node_modules" / "addon.node").write_bytes(b"x")
     snapshot_state(tmp_path / "missing", tmp_path / "none", max_file_bytes=None)
     assert not (tmp_path / "none").exists()
     restore_state(tmp_path / "none", state)
-    assert sorted(str(p.relative_to(state)) for p in state.rglob("*")) == ["agent", "agent/kernel-venv",
-                                                                          "agent/kernel-venv/lib.so"]
+    assert sorted(str(p.relative_to(state)) for p in state.rglob("*")) == ["workspace", "workspace/node_modules",
+                                                                          "workspace/node_modules/addon.node"]

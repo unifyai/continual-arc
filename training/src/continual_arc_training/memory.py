@@ -39,11 +39,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-# What a snapshot leaves out: runtimes and caches the harness installs for itself (prime-agent copies a whole Python
-# environment into its state, not what it has learned: "kernel-venv" to "*.lock") and its own bookkeeping, which changes
-# every game by construction: per-session state and logs ("sessions", "session-artifacts"), the daemon's command
-# journals ("daemon-workers"), its logs ("logs"), its session leases ("session-leases"), its per-session ledger
-# ("rlm-ledger") and the supervisor's lock folder ("supervisor-owners").
+# What a snapshot leaves out: runtimes and caches the harness installs for itself, not what it has learned
+# ("kernel-venv" to "*.lock"; "kernel-venv" is the copy of the kernel's Python environment that the states earlier runs
+# of the prime-agent adapter saved hold, the paper's among them, and that the kernel never ran on), and its own
+# bookkeeping, which changes every game by construction: per-session state and
+# logs ("sessions", "session-artifacts"), the daemon's command journals ("daemon-workers"), its logs ("logs"), its
+# session leases ("session-leases"), its per-session ledger ("rlm-ledger") and the supervisor's lock folder
+# ("supervisor-owners").
 SNAPSHOT_EXCLUDE = ("kernel-venv", "node_modules", ".cache", "__pycache__", ".npm", "tmp", "*.pyc", "*.sock", "*.lock",
                    "sessions", "session-artifacts", "daemon-workers", "logs", "session-leases", "supervisor-owners",
                    "rlm-ledger")
@@ -82,8 +84,7 @@ def snapshot_state(state_dir: Path, *, exclude: tuple[str, ...] = SNAPSHOT_EXCLU
     """Every file under ``state_dir`` (posix-relative path -> {"size", "mtime", "hash"}), except symlinks,
     ``exclude``'s runtimes/caches/bookkeeping (by bare name, pruned at any depth) and ``exclude_paths``' bookkeeping
     (by its exact relative path, since these names are not safe to prune wherever they appear); empty if
-    ``state_dir`` does not exist (a user never started, or a wiped row between rounds). On a 100-user run 325 of
-    572,887 files survive the exclusions: the snapshot never goes near the kernel's Python environment."""
+    ``state_dir`` does not exist (a user never started, or a wiped row between rounds)."""
     out: dict[str, dict[str, Any]] = {}
     if not state_dir.is_dir():
         return out

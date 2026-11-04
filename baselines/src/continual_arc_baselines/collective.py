@@ -68,8 +68,10 @@ from continual_arc_baselines.tracking import LLMCall, Tracker, instance_ended
 log = logging.getLogger(__name__)
 
 # What a snapshot of a user's harness state leaves out: runtimes and caches the harness installs for
-# itself (prime-agent copies a whole Python environment into its state), not what it has learned, and the
-# files of the process that was running (its temporary files, sockets and locks).
+# itself, not what it has learned, and the files of the process that was running (its temporary files,
+# sockets and locks). "kernel-venv" is the copy of the kernel's Python environment, some 300 MB, that the states
+# earlier runs of the prime-agent adapter saved hold in their agent directory, the paper's among them, and that the
+# kernel never ran on.
 RUNTIMES = ("kernel-venv", "node_modules", ".cache", "__pycache__", ".npm", "*.pyc")
 SNAPSHOT_EXCLUDE = (*RUNTIMES, "tmp", "*.sock", "*.lock")
 SNAPSHOT_MAX_FILE_BYTES = 2_000_000
