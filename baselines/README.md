@@ -76,7 +76,9 @@ On Ubuntu 24.04, bubblewrap needs unprivileged user namespaces, which AppArmor r
 
 Each harness row needs its harness, at the versions of the paper's Appendix D:
 
-- prime-agent 0.9.5: `curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh`, with `uv` on `PATH`.
+- prime-agent 0.10.0 for GPT-6 Luna's rows and 0.9.6 for the open models': `curl -fsSL
+  https://app.primeintellect.ai/prime-agent/install.sh | sh`, which installs its stable channel's release, with `uv` on
+  `PATH`.
   The adapter gives prime-agent its kernel's interpreter, and prime-agent installs no Python skills into an
   interpreter it is given, so the adapter installs prime-agent's bundled Python skills (refine, goal, compact, edit
   and the rest) into the kernel venv the installer makes, at the first start, and stops if they still do not import.

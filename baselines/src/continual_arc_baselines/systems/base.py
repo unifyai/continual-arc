@@ -74,7 +74,7 @@ _starting = threading.BoundedSemaphore(STARTS_AT_ONCE)
 
 
 class SystemUnavailable(RuntimeError):
-    """The system process died or stopped answering."""
+    """The system process died, stopped answering or can't be started as its state stands."""
 
 
 def remove(path: Path) -> None:

@@ -14,7 +14,10 @@ Confinement. The whole prime-agent tree (client, per-run daemon, workers, kernel
 runs inside a sandbox (:mod:`continual_arc_baselines.systems.sandbox`): it can
 read its own installation and runtime, read and write only its private state
 under the attempt directory plus a private HOME and TMPDIR, and open TCP only to
-the proxy. Its environment is built from an allowlist, not inherited.
+the proxy. Its environment is built from an allowlist, not inherited. The adapter
+itself runs outside the sandbox and writes into the state only through folders that
+lead to a place in it, replacing its own files whole, so a link the agent leaves in
+its state takes none of the adapter's writes onto the host.
 
 Liveness. One benchmark action is one prime-agent turn, and a turn is an
 unbounded loop of model calls and Python cells. Four guards bound it:
@@ -123,7 +126,6 @@ REFINE_INSTRUCTIONS = (
     "{verdict}\n\nThis piece of work is finished. Refine whatever you learned in it that will help with future work "
     "into the global harness store (memories, prompt notes, skills)."
 )
-PRESERVED = ("models.json", "settings.json")  # survive a state wipe
 # The file in the kernel's venv naming the src/ of each Python skill the agent keeps (_install_agent_skills). Its name
 # sorts after the bundled skills' (_editable_impl_<name>.pth), so the site module puts the agent's skills on the path
 # after theirs, and a bundled skill's name imports prime-agent's own package whatever the agent writes.
@@ -430,35 +432,66 @@ class PrimeAgentLearner(SystemLearner):
     def _base_url(self) -> str:
         return self.environ.get("ARC_LLM_BASE_URL") or OPENROUTER
 
+    def _in_state(self, path: Path) -> Path:
+        """``path`` with every link on the way to it followed, which must lead to a place in the state, ``path`` itself
+        as it is. The adapter runs outside the sandbox and the agent writes every folder of its state, so a link the agent
+        left on the way would otherwise take the adapter's writes, moves and links wherever it leads on the host."""
+        state, folder = self.state_dir.resolve(), path.parent.resolve()
+        if not folder.is_relative_to(state):
+            raise SystemUnavailable(f"{path.parent} leads out of the agent's state, to {folder}, so the adapter "
+                                    f"won't write {path.name} there")
+        return folder / path.name
+
+    def _folder_in_state(self, path: Path) -> Path:
+        """A folder of the state the adapter makes or writes in, itself followed too, made if it is not there."""
+        real = self._in_state(path / "_").parent
+        real.mkdir(parents=True, exist_ok=True)
+        return real
+
+    def _write_in_state(self, path: Path, text: str) -> None:
+        """A file the adapter writes in the state, made under a name of its own beside it and renamed over whatever the
+        agent left at the path, a link or a folder included, so that nothing there is followed."""
+        real = self._in_state(path)
+        fd, made = tempfile.mkstemp(dir=real.parent, prefix=f".{real.name}.")
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(text)
+        if real.is_dir() and not real.is_symlink():
+            shutil.rmtree(real)
+        os.replace(made, real)
+
     def _link_home_agent_dir(self) -> None:
         """``~/.prime/agent`` is a link to this adapter's agent directory. prime-agent's own docs (its skill-creator
         skill) put a personal skill in ``~/.prime/agent/skills/``, its default agent directory, but the adapter gives it a
         private one (``PRIME_AGENT_CODING_AGENT_DIR``) and a private HOME, and 0.9.5 loads personal skills from the agent
         directory's ``skills/`` (read from its binary), so a skill written where its docs say would never be loaded.
         A relative link, so it holds wherever the sandbox mounts the state directory. A directory already there (a skill
-        written there before the link) has its skills moved into the agent directory's and the rest kept aside."""
-        link = self.home_dir / ".prime" / "agent"
-        target = os.path.relpath(self.agent_dir, link.parent)
+        written there before the link) has its skills moved into the agent directory's and the rest kept aside; a link
+        there is replaced, never followed, and so is a ``skills`` link in that directory."""
+        link = self._in_state(self.home_dir / ".prime" / "agent")
+        target = os.path.relpath(self._in_state(self.agent_dir), link.parent)
         if link.is_symlink():
             if os.readlink(link) == target:
                 return
             link.unlink()
         elif link.exists():
             skills = link / "skills"
-            if skills.is_dir():
-                (self.agent_dir / "skills").mkdir(parents=True, exist_ok=True)
+            if skills.is_dir() and not skills.is_symlink():
+                kept = self._folder_in_state(self.agent_dir / "skills")
                 for skill in skills.iterdir():
-                    if not (self.agent_dir / "skills" / skill.name).exists():
-                        shutil.move(str(skill), str(self.agent_dir / "skills" / skill.name))
+                    if not os.path.lexists(kept / skill.name):
+                        os.rename(skill, kept / skill.name)   # a link moves as the link
             aside = link.with_name(f"agent.before-link.{int(time.time())}")
             link.rename(aside)
             log.info("moved %s aside to %s and linked it to the agent directory", link, aside)
-        link.parent.mkdir(parents=True, exist_ok=True)
+        self._folder_in_state(link.parent)
         link.symlink_to(target)
 
     def _write_config(self) -> None:
+        """The provider and the settings, written afresh at every start, so that a wipe takes whatever the agent changed
+        in them and nothing it wrote there outlasts row H0's wipes; then the folders prime-agent writes and the link of
+        :meth:`_link_home_agent_dir`, each through :meth:`_in_state`."""
         for path in (self.agent_dir, self.sessions_dir, self.workspace, self.home_dir):
-            path.mkdir(parents=True, exist_ok=True)
+            self._folder_in_state(path)
         self._link_home_agent_dir()
         models = {"providers": {self.provider_name: {
             "baseUrl": self._base_url(), "api": "openai-completions", "apiKey": KEY_VARIABLE,
@@ -470,24 +503,22 @@ class PrimeAgentLearner(SystemLearner):
                         "maxTokens": self.max_tokens,
                         "thinkingLevelMap": {"xhigh": "xhigh", "max": "max"}}],
         }}}
-        (self.agent_dir / "models.json").write_text(json.dumps(models, indent=1))
+        self._write_in_state(self.agent_dir / "models.json", json.dumps(models, indent=1))
         # prime-agent runs as shipped: its built-in skills (edit, compact, goal, refine,
         # skill-creator, ...) are the harness's own mechanics, the Python ones installed by
         # install_kernel_skills into the shared kernel venv that own_venv copies. Its integrations are off:
         # web search has no key and the sandbox has no route out; the Linear, Notion and
         # Prime Intellect skills are MCP integrations that prime-agent itself disables
         # without a login, made explicit here so the record does not depend on that.
-        settings = self.agent_dir / "settings.json"
-        if not settings.exists():
-            config: dict[str, Any] = {
-                "bundledSkills": {name: False for name in DISABLED_BUNDLED_SKILLS},
-                "skills": [f"-{name}/SKILL.md" for name in INTEGRATION_SKILLS],
-            }
-            if self.compact_at is not None:
-                config["compaction"] = {"reserveTokens": self.context_window - self.compact_at}
-            if self.compact_keep is not None:
-                config.setdefault("compaction", {})["keepRecentTokens"] = self.compact_keep
-            settings.write_text(json.dumps(config, indent=1))
+        config: dict[str, Any] = {
+            "bundledSkills": {name: False for name in DISABLED_BUNDLED_SKILLS},
+            "skills": [f"-{name}/SKILL.md" for name in INTEGRATION_SKILLS],
+        }
+        if self.compact_at is not None:
+            config["compaction"] = {"reserveTokens": self.context_window - self.compact_at}
+        if self.compact_keep is not None:
+            config.setdefault("compaction", {})["keepRecentTokens"] = self.compact_keep
+        self._write_in_state(self.agent_dir / "settings.json", json.dumps(config, indent=1))
 
     def _copy_kernel_venv(self) -> None:
         """:attr:`own_venv`, copied afresh from the shared kernel venv, links as links, at the learner's first start,
@@ -1155,19 +1186,14 @@ class PrimeAgentLearner(SystemLearner):
 
     def wipe_state(self) -> None:
         """Delete everything prime-agent persisted: memories, skills, sessions, session
-        artifacts, HOME, the workspace. The provider config is kept, and the adapter's own
-        logs and the kernel's venv are outside the state; the next start takes the wiped
-        skills out of that venv."""
+        artifacts, HOME, the workspace, the provider and settings files, which the next start
+        writes again (:meth:`_write_config`), and every link as a link. The adapter's own logs
+        and the kernel's venv are outside the state; the next start takes the wiped skills
+        out of that venv."""
         if not self.state_dir.is_dir():
             return
         for child in self.state_dir.iterdir():
-            if child == self.agent_dir:
-                for inner in child.iterdir():
-                    if inner.name in PRESERVED:
-                        continue
-                    remove(inner)
-            else:
-                remove(child)
+            remove(child)
 
     def _close_instance(self, obs: Any) -> None:
         """With ``refine_via="rpc"``, a refinement to follow and no storage turn, the verdict is kept for the refinement's

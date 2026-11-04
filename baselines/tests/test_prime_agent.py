@@ -522,6 +522,84 @@ def test_integrations_are_off(tmp_path):
     assert "compaction" not in settings  # prime-agent's own threshold
 
 
+def _configured(tmp_path):
+    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
+    s = PrimeAgentLearner(model="m", sandbox="none", command=sys.executable)
+    s.attach(tmp_path / "system", {})
+    s._write_config()
+    return s
+
+
+def test_the_provider_and_settings_are_written_afresh_at_every_start(tmp_path):
+    """An agent's edit to settings.json lasts only until the next start, and a wipe leaves neither file for it to keep."""
+    s = _configured(tmp_path)
+    written = {name: (s.agent_dir / name).read_text() for name in ("models.json", "settings.json")}
+    (s.agent_dir / "settings.json").write_text(json.dumps({"skills": ["+mine/SKILL.md"]}))
+    (s.agent_dir / "models.json").write_text("{}")
+    s._write_config()
+    assert {name: (s.agent_dir / name).read_text() for name in written} == written
+    s.wipe_state()
+    assert not s.state_dir.exists() or not any(s.state_dir.iterdir())
+    s._write_config()
+    assert {name: (s.agent_dir / name).read_text() for name in written} == written
+
+
+def test_the_adapter_follows_no_link_the_agent_leaves_in_its_state(tmp_path):
+    """The adapter runs outside the sandbox: a link in the state at one of its own files is replaced, never written
+    through, and a folder that leads out of the state stops the start with nothing written there."""
+    from continual_arc_baselines.systems.base import SystemUnavailable
+    host = tmp_path / "host"
+    host.mkdir()
+    victim = host / "victim.txt"
+    victim.write_text("the host's own")
+    s = _configured(tmp_path)
+    for name in ("models.json", "settings.json"):
+        (s.agent_dir / name).unlink()
+        (s.agent_dir / name).symlink_to(victim)
+    s._write_config()
+    assert victim.read_text() == "the host's own"
+    assert all((s.agent_dir / name).is_file() and not (s.agent_dir / name).is_symlink()
+               for name in ("models.json", "settings.json"))
+    for folder in (s.agent_dir, s.home_dir / ".prime"):
+        s.wipe_state()
+        folder.parent.mkdir(parents=True, exist_ok=True)
+        folder.symlink_to(host, target_is_directory=True)
+        with pytest.raises(SystemUnavailable, match="leads out of the agent's state"):
+            s._write_config()
+        assert sorted(p.name for p in host.iterdir()) == ["victim.txt"] and victim.read_text() == "the host's own"
+
+
+def test_a_skills_link_in_home_prime_agent_is_moved_aside_not_followed(tmp_path):
+    """A real ~/.prime/agent made before the link has its skills moved into the agent directory's, but a skills link
+    there leads out of the state: it goes aside with the folder, and nothing it leads to moves."""
+    host = tmp_path / "host"
+    (host / "theirs").mkdir(parents=True)
+    s = _configured(tmp_path)
+    link = s.home_dir / ".prime" / "agent"
+    link.unlink()
+    link.mkdir()
+    (link / "skills").symlink_to(host, target_is_directory=True)
+    s._write_config()
+    assert (host / "theirs").is_dir()
+    assert link.is_symlink() and link.resolve() == s.agent_dir.resolve()
+    assert not (s.agent_dir / "skills" / "theirs").exists()
+    aside = next((s.home_dir / ".prime").glob("agent.before-link.*"))
+    assert (aside / "skills").is_symlink()
+
+
+def test_a_wipe_removes_a_link_as_a_link(tmp_path):
+    """A wipe deletes the state's entries, an agent directory the agent made a link to the host as the link alone."""
+    host = tmp_path / "host"
+    host.mkdir()
+    (host / "keep.txt").write_text("the host's own")
+    s = _configured(tmp_path)
+    shutil.rmtree(s.agent_dir)
+    s.agent_dir.symlink_to(host, target_is_directory=True)
+    s.wipe_state()
+    assert (host / "keep.txt").read_text() == "the host's own"
+    assert not os.path.lexists(s.agent_dir)
+
+
 def test_compaction_can_come_earlier(tmp_path):
     from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
     s = PrimeAgentLearner(model="m", sandbox="none", command=sys.executable, context_window=131_072, compact_at=49_152)
@@ -562,7 +640,7 @@ def test_stateless_row_wipes_and_restarts_before_every_instance(tmp_path, monkey
     assert sum(r["resources"]["system_refines"] for r in records) == 0   # nothing could survive it
     assert commands.read_text().count("get_state") == len(records)        # one start per instance
     assert commands.read_text().count("new_session") == 0
-    # the provider configuration survives every wipe; the stores are rebuilt by each start
+    # each start writes the provider configuration again after the wipe that took it, as it rebuilds the stores
     state = context.directory / "system" / "state" / "agent"
     assert (state / "models.json").is_file()
     params = next(json.loads(line)["payload"]["values"] for line in (context.directory / "events.jsonl").read_text().splitlines()
