@@ -292,6 +292,44 @@ def test_a_refusal_relayed_from_the_provider_is_retried_but_an_openrouter_refusa
         server.stop()
 
 
+def test_a_call_whose_reply_budget_overruns_the_window_is_sent_again_for_the_room_left():
+    """vLLM refuses a prompt and a reply budget that together pass its window, where a hosted provider shortens the
+    reply: such a call, streamed or not, is sent once more without its budget, so that the server gives the reply the
+    room the window has left. A prompt that passes the window alone still reaches the system refused, for its own
+    overflow handling, and any other 400 reaches it as it came."""
+    server = FakeUpstream(window=1_000).start()
+    try:
+        tracker = Tracker()
+        seen = []
+        tracker.subscribe(seen.append)
+        with LLMProxy(server.base_url, tracker=tracker, capture_content=True) as proxy:
+            fits = chat(proxy, messages=[{"role": "user", "content": "x" * 600}], max_completion_tokens=400)
+            turn = chat(proxy, messages=[{"role": "user", "content": "x" * 700}], max_completion_tokens=400, stream=True)
+            full = chat(proxy, messages=[{"role": "user", "content": "x" * 1_001}], max_tokens=400)
+        assert (fits.status_code, turn.status_code, full.status_code) == (200, 200, 400)
+        assert "maximum context length" in full.json()["error"]["message"]
+        asked = [{k: r["body"][k] for k in ("max_tokens", "max_completion_tokens") if k in r["body"]}
+                 for r in server.requests]
+        assert asked == [{"max_completion_tokens": 400}, {"max_completion_tokens": 400}, {}, {"max_tokens": 400}, {}]
+        done = [c for c in seen if c.status != "started"]
+        assert [c.status for c in done] == ["completed", "completed", "failed"]
+        assert "x-proxy-reply-budget-dropped" not in done[0].response_headers
+        assert json.loads(done[1].response_headers["x-proxy-reply-budget-dropped"]) == {"max_completion_tokens": 400}
+        assert "max_completion_tokens" not in done[1].request_body   # the request as the upstream answered it
+        assert json.loads(done[2].response_headers["x-proxy-reply-budget-dropped"]) == {"max_tokens": 400}
+        assert "maximum context length" in done[2].error
+    finally:
+        server.stop()
+    other = {"error": {"message": "tools[0].function.parameters is not a valid schema", "code": 400}}
+    server = FakeUpstream(status=400, error=other).start()
+    try:
+        with LLMProxy(server.base_url) as proxy:
+            response = chat(proxy, max_tokens=400)
+        assert response.status_code == 400 and response.json() == other and len(server.requests) == 1
+    finally:
+        server.stop()
+
+
 def test_every_past_reply_carries_its_reasoning_under_the_thinking_field_and_one_without_an_empty_one():
     server = FakeUpstream().start()
     messages = [{"role": "user", "content": "hi"},

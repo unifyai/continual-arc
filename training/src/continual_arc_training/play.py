@@ -54,6 +54,10 @@ HARNESS = {"compact_at": 49_152, "compact_keep": 8_000, "end": "finish", "empty_
 # the whole turn with a restart instead of the budget's "decide now" with 60 s to answer. The follow-up's 6 calls stay.
 BLOCK = {"max_model_calls": 40, "action_budget_s": 1740.0, "reprompt_budget_s": 1740.0, "reprompt_max_model_calls": 6}
 SAMPLING = {"temperature": 1.0, "top_p": 1.0, "top_k": -1}
+# The served window (scripts/vllm-serve.sh's MAX_MODEL_LEN), declared to the harness as its model's, and the reply cap,
+# of which prime-agent asks min(it, 32,000) at every turn whatever room the conversation leaves. vLLM refuses a call
+# whose prompt and budget together pass the window, so the proxy sends such a call again without its budget and the
+# server gives the reply the room left (continual_arc_baselines.proxy).
 CONTEXT_WINDOW, MAX_TOKENS = 131_072, 32_768
 # The bare model's settings, every floor's: the harness rows' rules (end "finish"), an empty reply asked again, a wipe
 # archived first

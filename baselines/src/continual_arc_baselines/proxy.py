@@ -21,7 +21,13 @@ chat completions alone:
 
 A throttled or failing upstream is retried with backoff before anything reaches the system (429, 5xx, and a 403 that
 OpenRouter relays from the provider behind it), and an account out of credit (402) is waited out rather than failed.
-``serve`` lets a run answer some chat completions itself. The captured request is what the upstream received.
+A call refused only because its prompt and the reply budget it asks together pass the model's window is sent once more
+without the budget, so that the server gives the reply the room the window has left: a harness asks the same budget
+at every call (prime-agent min(maxTokens, 32,000) for a turn, 0.8 x its compaction reserve to compact), which a hosted
+provider shortens to fit and vLLM refuses, so on vLLM every call of a long conversation was refused once it passed the
+window less the budget. A prompt that fills the window alone is still refused, and the system's own overflow handling
+(prime-agent compacts) takes it from there. ``serve`` lets a run answer some chat completions itself. The captured
+request is what the upstream received, the budget left out where it was sent again.
 """
 
 from __future__ import annotations
@@ -50,6 +56,11 @@ WAIT_STATUSES = {402}  # the account is out of credit: wait for a top-up rather 
 # A 403 that OpenRouter relays from the provider behind it, retried like a 5xx: a provider may refuse calls at random,
 # one request at a time. OpenRouter's own 403s (moderation, key limits) carry no such marker and pass straight through.
 PROVIDER_REFUSAL = b"Provider returned error"
+# The fields a chat completion asks its reply budget in, and the mark of a refusal for the room it asks: vLLM's "This
+# model's maximum context length is 131072 tokens. However, you requested 32000 output tokens and your prompt contains
+# 99073 input tokens ..." (vllm/renderers/params.py), OpenRouter's "This endpoint's maximum context length is ..."
+REPLY_BUDGETS = ("max_tokens", "max_completion_tokens")
+WINDOW_REFUSAL = b"maximum context length"
 # The keys chat templates read an assistant turn's reasoning from, in the order a template that reads them all does.
 THINKING_KEYS = ("think", "think_fast", "think_faster", "reasoning_content", "reasoning")
 # A proxy's settings for a model served by vLLM (body_drop, role_map, thinking_field), as the open-model rows set them.
@@ -622,6 +633,7 @@ class _Handler(BaseHTTPRequestHandler):
             # with backoff before anything reaches the system, the same for every harness.
             attempts = 0
             waits = 0
+            overran: dict[str, Any] = {}   # the reply budget the window had no room for, left out of the call sent again
             while True:
                 cm = owner._client.stream(method, owner.upstream_url(self.path), headers=headers, content=body)
                 response = cm.__enter__()
@@ -644,6 +656,13 @@ class _Handler(BaseHTTPRequestHandler):
                     owner.tracker.touch()
                     time.sleep(min(max(delay, 1.0), 60.0))
                     continue
+                if (not overran and response.status_code == 400 and parsed is not None
+                        and any(key in parsed for key in REPLY_BUDGETS) and WINDOW_REFUSAL in response.read().lower()):
+                    cm.__exit__(None, None, None)
+                    overran = {key: parsed.pop(key) for key in REPLY_BUDGETS if key in parsed}
+                    body = json.dumps(parsed).encode()
+                    owner.tracker.touch()
+                    continue
                 break
             refusal = ""
             try:
@@ -654,6 +673,8 @@ class _Handler(BaseHTTPRequestHandler):
                     call.response_headers["x-proxy-upstream-retries"] = str(attempts)
                 if waits:
                     call.response_headers["x-proxy-credit-waits"] = str(waits)
+                if overran:
+                    call.response_headers["x-proxy-reply-budget-dropped"] = json.dumps(overran)
                 self.send_response(response.status_code)
                 passthrough = {k: v for k, v in response.headers.items()
                                if k.lower() not in HOP_BY_HOP and k.lower() != "content-encoding"}

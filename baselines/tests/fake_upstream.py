@@ -10,8 +10,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 class FakeUpstream:
     def __init__(self, reply: str = "OK", cost: float = 0.00025, status: int | list[int] = 200,
                  error: dict | None = None, reasoning: str | None = None, replies: list[str] | None = None,
-                 broken: bool = False):
+                 broken: bool = False, window: int | None = None):
         self.reply, self.cost, self.error = reply, cost, error  # error: the JSON body of a non-streamed 4xx or 5xx
+        # a vLLM server's max_model_len: a prompt (a token per character of its messages' text) and the reply budget a
+        # call asks that together pass it are refused as vLLM refuses them, a 400 before any stream; a call that asks
+        # no budget is refused only for a prompt that passes it alone
+        self.window = window
         self.broken = broken  # a streamed reply stops after its first chunk and the connection closes, as a dying upstream's
         self.replies = list(replies) if replies else None  # a scripted sequence of replies; its last value repeats
         self.reasoning = reasoning  # sent as the reply's reasoning_content (a delta of its own when streamed)
@@ -55,6 +59,8 @@ class FakeUpstream:
                 upstream.requests.append({"path": self.path, "body": body,
                                           "authorization": self.headers.get("Authorization"),
                                           "rank": self.headers.get("X-data-parallel-rank")})
+                if upstream.window is not None and self.refuse_overrun(body):
+                    return
                 gen = f"gen-{len(upstream.requests)}"
                 if upstream.replies:
                     upstream.reply = upstream.replies.pop(0) if len(upstream.replies) > 1 else upstream.replies[0]
@@ -109,6 +115,24 @@ class FakeUpstream:
                 self.send_header("X-Request-Id", "req-1")
                 self.end_headers()
                 self.wfile.write(data)
+
+            def refuse_overrun(self, body: dict) -> bool:
+                prompt = sum(len(m["content"]) for m in body.get("messages") or [] if isinstance(m.get("content"), str))
+                budget = body.get("max_completion_tokens") or body.get("max_tokens") or 0
+                if prompt + budget <= upstream.window:
+                    return False
+                message = (f"This model's maximum context length is {upstream.window} tokens. However, you requested "
+                           f"{budget} output tokens and your prompt contains {prompt} input tokens, for a total of "
+                           f"{prompt + budget} tokens. Please reduce the length of the input prompt or the number of "
+                           "requested output tokens.")
+                data = json.dumps({"error": {"message": message, "type": "BadRequestError", "param": "input_tokens",
+                                             "code": 400}}).encode()
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return True
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self._server.serve_forever, daemon=True).start()

@@ -298,9 +298,10 @@ def test_a_harness_row_plays_under_the_fixed_harness_and_records_its_settings(tm
 
 class _StreamingModel:
     """A model server that streams every reply as vLLM does for ``"stream": true`` (the reply in one delta, then its
-    finish), the same unparseable text each time, and keeps every request body it was sent."""
+    finish), the same unparseable text each time, and keeps every request body it was sent. Given a window, it refuses
+    as vLLM does a call whose prompt (a token per character of its messages' text) and reply budget together pass it."""
 
-    def __init__(self, reply: str = "I am not sure what the rule is.") -> None:
+    def __init__(self, reply: str = "I am not sure what the rule is.", window: int | None = None) -> None:
         model, self.bodies, lock = self, [], threading.Lock()
 
         class Handler(BaseHTTPRequestHandler):
@@ -311,6 +312,20 @@ class _StreamingModel:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)))
                 with lock:
                     model.bodies.append(body)
+                prompt = sum(len(m["content"]) for m in body["messages"] if isinstance(m.get("content"), str))
+                budget = body.get("max_completion_tokens") or body.get("max_tokens") or 0
+                if window is not None and prompt + budget > window:
+                    data = json.dumps({"error": {"message": (
+                        f"This model's maximum context length is {window} tokens. However, you requested {budget} "
+                        f"output tokens and your prompt contains {prompt} input tokens, for a total of "
+                        f"{prompt + budget} tokens. Please reduce the length of the input prompt or the number of "
+                        "requested output tokens."), "type": "BadRequestError", "code": 400}}).encode()
+                    self.send_response(400)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
@@ -326,6 +341,31 @@ class _StreamingModel:
 
     def stop(self) -> None:
         self.server.shutdown()
+
+
+def test_a_long_conversations_calls_are_answered_in_the_room_the_served_window_has_left():
+    """prime-agent asks the same reply budget at every call whatever room the conversation leaves, min(MAX_TOKENS,
+    32,000) for a turn and 0.8 x (CONTEXT_WINDOW - compact_at) to compact, and the served vLLM, whose window is
+    CONTEXT_WINDOW, refuses a prompt and a budget that together pass it: a turn on a conversation of 100,000 tokens and a
+    compaction of one of 70,000 are answered in the room left, through the proxy as a harness row's play sets it up."""
+    import httpx
+    from continual_arc_baselines.proxy import THINKING_FIELD, VLLM_DROP, VLLM_ROLES, LLMProxy
+
+    model = _StreamingModel(window=play.CONTEXT_WINDOW)
+    overrides = {"model": "r0", "chat_template_kwargs": dict(play.TEMPLATE_KWARGS), **play.SAMPLING,
+                 "return_token_ids": True}
+    turn, compaction = min(play.MAX_TOKENS, 32_000), int(0.8 * (play.CONTEXT_WINDOW - play.HARNESS["compact_at"]))
+    try:
+        with LLMProxy(model.url, body_overrides=overrides, body_drop=VLLM_DROP, role_map=VLLM_ROLES,
+                      thinking_field=THINKING_FIELD, declared_context_length=play.CONTEXT_WINDOW) as proxy:
+            answers = [httpx.post(proxy.base_url + "/chat/completions", timeout=30, json={
+                "model": play.MODEL, "stream": True, "max_completion_tokens": budget,
+                "messages": [{"role": "user", "content": "x" * size}]})
+                for size, budget in ((100_000, turn), (70_000, compaction))]
+    finally:
+        model.stop()
+    assert [a.status_code for a in answers] == [200, 200]
+    assert [b.get("max_completion_tokens") for b in model.bodies] == [turn, None, compaction, None]
 
 
 def test_the_bare_row_is_the_bare_model_at_the_floor_settings_on_the_served_model(tmp_path):

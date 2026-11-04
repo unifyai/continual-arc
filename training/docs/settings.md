@@ -23,7 +23,7 @@ Every harness row, trained or reference, plays prime-agent under the same settin
 | An empty reply | asked again in the same conversation (`empty_reply: reprompt`) | A restart loses the conversation. |
 | Compaction | at 49,152 tokens, keeping 8,000 | On the untrained Qwen3.5-9B, 48 games an arm, compacting at 48k solved 16 against 10 at 32k, and every call stays inside the trainer's 65,536 tokens. |
 | Action budget | 40 model calls; 1,740 s an action and its follow-up; 6 calls in the follow-up | The call cap is meant to be the only thing that routinely stops a turn: at the harness's 1,800 s hard ceiling the ceiling would fire first and restart the turn instead of the budget's "decide now". |
-| Window and replies | 131,072-token window, 32,768-token replies | The model's context, and room for long reasoning. |
+| Window and replies | 131,072-token window, 32,768-token replies, or the room the window has left | The model's context, and room for long reasoning. prime-agent asks the same budget at every call (32,000 for a turn, 0.8 times its compaction reserve, 65,536, to compact), and vLLM refuses a call whose prompt and budget together pass the window, so the proxy sends such a call again without its budget and the reply gets the room left; a prompt that fills the window alone is refused, and prime-agent compacts. |
 | Sampling | temperature 1, top-p 1, no top-k | The model's own distribution, which every update trains on as played. |
 | Thinking | on (`enable_thinking`) | The model card's thinking mode, at every call. |
 | The bare model | the floors' settings: the finish protocol, empty replies asked again, wipes archived (`play.FLOOR`) | The bare-model rows are the benchmark's floors. |
