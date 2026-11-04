@@ -9,8 +9,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 class FakeUpstream:
     def __init__(self, reply: str = "OK", cost: float = 0.00025, status: int | list[int] = 200,
-                 error: dict | None = None, reasoning: str | None = None, replies: list[str] | None = None):
+                 error: dict | None = None, reasoning: str | None = None, replies: list[str] | None = None,
+                 broken: bool = False):
         self.reply, self.cost, self.error = reply, cost, error  # error: the JSON body of a non-streamed 4xx or 5xx
+        self.broken = broken  # a streamed reply stops after its first chunk and the connection closes, as a dying upstream's
         self.replies = list(replies) if replies else None  # a scripted sequence of replies; its last value repeats
         self.reasoning = reasoning  # sent as the reply's reasoning_content (a delta of its own when streamed)
         self._statuses = list(status) if isinstance(status, (list, tuple)) else [status]
@@ -82,6 +84,10 @@ class FakeUpstream:
                     for chunk in chunks:
                         data = b"data: " + json.dumps(chunk).encode() + b"\n\n"
                         self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+                        if upstream.broken:
+                            self.wfile.flush()
+                            self.close_connection = True
+                            return
                     done = b"data: [DONE]\n\n"
                     self.wfile.write(b"%x\r\n%s\r\n0\r\n\r\n" % (len(done), done))
                     self.wfile.flush()

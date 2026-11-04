@@ -716,6 +716,10 @@ class _Handler(BaseHTTPRequestHandler):
             call.latency_ms = (time.monotonic() - started) * 1000
             call.status, call.error = "failed", type(error).__name__
             if sent:
+                # the upstream broke once its reply had begun: the client's connection is closed, as the upstream's
+                # was, so that its read fails now instead of waiting on a kept-alive connection for the rest of a reply
+                # that never comes (a bare learner's waited out its hour-long read timeout and restarted its system)
+                self.close_connection = True
                 return
             try:
                 self._send_json(502, {"error": {"message": f"upstream {type(error).__name__}: {error}",

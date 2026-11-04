@@ -122,6 +122,24 @@ def test_upstream_error_is_a_failed_request(upstream):
     assert tracker.usage.failed_requests == 1 and tracker.usage.cost_usd == 0
 
 
+def test_an_upstream_that_breaks_mid_stream_breaks_the_clients_stream_at_once():
+    """An upstream whose stream stops partway and closes its connection has the client's stream end the same way, at
+    once, rather than leave the client reading a kept-alive connection until its own read timeout."""
+    server = FakeUpstream(broken=True).start()
+    try:
+        tracker = Tracker()
+        with LLMProxy(server.base_url, tracker=tracker) as proxy:
+            began = time.monotonic()
+            with pytest.raises(httpx.RemoteProtocolError):
+                with _stream(proxy, read_s=20) as response:
+                    b"".join(response.iter_bytes())
+            assert time.monotonic() - began < 5
+            assert chat(proxy).status_code == 200   # the proxy serves the next call as before
+        assert tracker.usage.failed_requests == 1
+    finally:
+        server.stop()
+
+
 def test_unreachable_upstream_yields_502():
     tracker = Tracker()
     with LLMProxy("http://127.0.0.1:9", tracker=tracker) as proxy:
