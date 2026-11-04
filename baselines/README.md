@@ -251,6 +251,15 @@ their records count no session there (and a stateless row no wipe). The cells la
 September ran under the earlier rule for empty replies (`empty_reply="restart"`), and `paper-grid.txt` launches them
 under it.
 
+The paper's rows went through a proxy that forwarded any path, where this one forwards chat completions and reads of
+the models alone; the open-model rows' sent each chat completion to the row's model, and the GPT-6 Luna rows' systems
+name theirs in every one, as their replays' records show. So the release plays differently from the paper only where a
+system's own code used the proxy for anything else. On the open-model rows, 20 such calls succeeded, in five games:
+eight of them, in one game, were `/responses` calls that OpenRouter served from another model, which the agent asked
+for the task's demonstrations it could not know, and that game was solved from the demonstrations the game gave; the
+other four games were lost or given up at the whole budget. 149 more the upstream refused with a 400 or a 405, or
+redirected, and they now get the 404.
+
 The open-model rows are driven from [`training/`](../training), which builds each row's `CollectiveHarnessLearner`.
 
 ## Licence
