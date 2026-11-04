@@ -477,10 +477,13 @@ def package_manager_roots(path: Path) -> list[Path]:
 
 
 def install_root(executable: str) -> Path | None:
-    """The directory tree an executable lives in, symlinks resolved.
+    """The directory tree an executable lives in: the folder of the file it resolves to, symlinks followed, or that
+    folder's parent when it is a ``bin``.
 
-    ``~/.local/bin/prime-agent -> ~/.local/share/prime-agent/bin/prime-agent`` gives
-    ``~/.local/share/prime-agent`` (which also holds the release the launcher runs).
+    prime-agent's TypeScript installer links ``~/.local/bin/prime-agent`` to ``~/.local/share/prime-agent/bin/prime-agent``,
+    itself a link to the release's executable, so its tree is the release,
+    ``~/.local/share/prime-agent/releases/<version>-<platform>-<digest>``; install-rust.sh's ``<prefix>/bin/prime-agent``
+    is a launcher script, not a link, so its tree is ``<prefix>``, which holds the release in ``share/prime-agent``.
     """
     found = shutil.which(executable) if os.path.sep not in executable else executable
     if not found:

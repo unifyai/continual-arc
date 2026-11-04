@@ -3,8 +3,11 @@
 import json
 import os
 import platform
+import shlex
+import subprocess
 import sys
 from pathlib import Path
+from venv import create as create_venv
 
 import pytest
 from continual_arc.schedule import epilogue_schedule, stream_schedule
@@ -16,6 +19,97 @@ from continual_arc_baselines.costs import CostJournal
 
 FAKE = str(Path(__file__).with_name("fake_prime_agent.py"))
 REPO = Path(__file__).resolve().parents[1]
+
+# prime-agent's bundled skills as its releases ship them in skills/, each with whether it is a Python skill: 0.9.6's,
+# and 0.9.5's, whose Linear and Notion integrations were Python skills where 0.9.6 has its markdown mcp skill
+SKILLS_0_9_6 = {"agent-message": True, "agent-observe": True, "attach-image": True, "compact": True, "edit": True,
+                "goal": True, "mcp": False, "prime-intellect": False, "refine": True, "rlm-heartbeat": True,
+                "skill-creator": False, "websearch": True}
+SKILLS_0_9_5 = {**{name: python for name, python in SKILLS_0_9_6.items() if name != "mcp"}, "linear": True,
+                "notion": True}
+# what the adapter installs from either: every Python skill but web search and the integrations, which its settings
+# turn off
+KERNEL_SKILLS = ["agent_message", "agent_observe", "attach_image", "compact", "edit", "goal", "refine", "rlm_heartbeat"]
+
+
+def _release(folder: Path, skills: dict[str, bool]) -> Path:
+    """A prime-agent release's folder as its tarball unpacks: the executable, here the fake run by this Python, and
+    skills/, each skill a SKILL.md and a Python skill also a pyproject.toml and its package in src/."""
+    folder.mkdir(parents=True)
+    (folder / "prime-agent").write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(FAKE)} "$@"\n')
+    (folder / "prime-agent").chmod(0o755)
+    for name, python in skills.items():
+        skill = folder / "skills" / name
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text(f"---\nname: {name}\ndescription: the {name} skill\n---\n")
+        if python:
+            (skill / "pyproject.toml").write_text(f'[project]\nname = "{name}"\n')
+            (skill / "src" / name.replace("-", "_")).mkdir(parents=True)
+            (skill / "src" / name.replace("-", "_") / "__init__.py").write_text("")
+    return folder
+
+
+def install_rust_sh(prefix: Path, skills: dict[str, bool] = SKILLS_0_9_6) -> Path:
+    """prime-agent as install-rust.sh installs it, which prime-agent's install.sh is whatever release it installs (the
+    GPU nodes' 0.9.6): the release in <prefix>/share/prime-agent/, and a launcher script in <prefix>/bin that runs its
+    executable. The launcher."""
+    _release(prefix / "share" / "prime-agent", skills)
+    launcher = prefix / "bin" / "prime-agent"
+    launcher.parent.mkdir()
+    launcher.write_text('#!/bin/sh\nexec "$(dirname "$0")/../share/prime-agent/prime-agent" "$@"\n')
+    launcher.chmod(0o755)
+    return launcher
+
+
+def install_typescript(home: Path, skills: dict[str, bool] = SKILLS_0_9_5) -> Path:
+    """prime-agent as its TypeScript installer installs it (0.9.5's own install.sh): the release in
+    ~/.local/share/prime-agent/releases/<version>-<platform>-<digest>/, that folder's bin/prime-agent a link to the
+    release's executable, and ~/.local/bin/prime-agent a link to that. The public link."""
+    root = home / ".local" / "share" / "prime-agent"
+    release = _release(root / "releases" / "0.9.5-linux-x64-bc4b0ed7", skills)
+    (root / "bin").mkdir()
+    (root / "bin" / "prime-agent").symlink_to(f"../releases/{release.name}/prime-agent")
+    launcher = home / ".local" / "bin" / "prime-agent"
+    launcher.parent.mkdir()
+    launcher.symlink_to(root / "bin" / "prime-agent")
+    return launcher
+
+
+def editable(python: Path, skill: Path) -> None:
+    """``skill`` installed into ``python``'s venv as an editable install leaves it: a .pth file naming its src/."""
+    site = next(python.parent.parent.glob("lib/python*/site-packages"))
+    (site / f"_{skill.name}.pth").write_text(f"{skill / 'src'}\n")
+
+
+def kernel_venv(path: Path, skills: Path | None = None) -> Path:
+    """A virtual environment for prime-agent's kernel, holding the Python skills of a release's ``skills`` folder when
+    given, as prime-agent's own kernel setup leaves them."""
+    create_venv(path, symlinks=True)
+    for skill in sorted(skills.iterdir()) if skills else []:
+        if (skill / "pyproject.toml").is_file():
+            editable(path / "bin" / "python", skill)
+    return path
+
+
+def fake_uv(folder: Path, fails: str = "") -> Path:
+    """``uv`` as the adapter calls it, ``uv pip install --quiet --python <python> -e <skill> ...``: every skill installed
+    as an editable install leaves it and each call logged in ``uv.log`` beside it, or, given ``fails``, nothing installed
+    and ``fails`` on stderr. Its folder."""
+    folder.mkdir()
+    (folder / "uv.py").write_text(f"""import sys
+from pathlib import Path
+args = sys.argv[1:]
+with open({str(folder / "uv.log")!r}, "a") as log:
+    log.write(" ".join(args) + "\\n")
+if {fails!r}:
+    sys.exit({fails!r})
+site = next(Path(args[args.index("--python") + 1]).parent.parent.glob("lib/python*/site-packages"))
+for skill in (Path(args[i + 1]) for i, arg in enumerate(args) if arg == "-e"):
+    (site / f"_{{skill.name}}.pth").write_text(str(skill / "src") + "\\n")
+""")
+    (folder / "uv").write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} {shlex.quote(str(folder / "uv.py"))} "$@"\n')
+    (folder / "uv").chmod(0o755)
+    return folder
 
 
 @pytest.fixture
@@ -40,7 +134,10 @@ def run_mode(tmp_path, monkeypatch, upstream, mode: str, extra_kwargs: dict | No
     monkeypatch.setenv("WORKBENCH_RUN_DIR", str(context.directory))
     monkeypatch.setenv("FAKE_AGENT_LOG", str(tmp_path / f"{mode}-commands.log"))
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-upstream")
-    kwargs = {"command": [sys.executable, FAKE], "model": "vendor/model", "thinking": "low",
+    # the fake installed as the GPU nodes' prime-agent is, its kernel venv holding its bundled Python skills
+    launcher = install_rust_sh(tmp_path / "prime-agent")
+    venv = kernel_venv(tmp_path / "kernel-venv", tmp_path / "prime-agent" / "share" / "prime-agent" / "skills")
+    kwargs = {"command": [str(launcher)], "kernel_venv": str(venv), "model": "vendor/model", "thinking": "low",
               "startup_timeout_s": 30, "timeout_s": 30, "sandbox": "none",
               # The child environment is an allowlist; the fake's own switches must be named.
               "passthrough_env": [k for k in os.environ if k.startswith("FAKE_AGENT_")],
@@ -556,52 +653,82 @@ def test_the_turn_budget_leaves_out_what_the_proxy_credits(tmp_path, monkeypatch
     assert t.credit_s == -1.5
 
 
-def _prime_install(root: Path) -> Path:
-    """A prime-agent install tree with three bundled Python skills, websearch among them, and an MCP integration."""
-    for name, module in (("refine", "refine"), ("agent-message", "agent_message"), ("websearch", "websearch")):
-        (root / "skills" / name / "src" / module).mkdir(parents=True)
-        (root / "skills" / name / "pyproject.toml").write_text("[project]\nname = 'skill'\n")
-    (root / "skills" / "linear").mkdir(parents=True)
-    (root / "skills" / "linear" / "SKILL.md").write_text("an MCP integration: no package\n")
-    return root
+def test_prime_agent_0_9_6s_bundled_skills_are_where_install_rust_sh_puts_them(tmp_path, monkeypatch):
+    """install-rust.sh's launcher is a script, which no link leads through: the install root is its prefix, and the
+    skills are in the release in share/prime-agent/ there."""
+    from continual_arc_baselines.systems.prime_agent import bundled_python_skills
+    from continual_arc_baselines.systems.sandbox import install_root
+
+    launcher = install_rust_sh(tmp_path / ".local")
+    monkeypatch.setenv("PATH", f"{launcher.parent}{os.pathsep}{os.environ['PATH']}")
+    root = install_root("prime-agent")
+    assert root == (tmp_path / ".local").resolve()
+    skills = root / "share" / "prime-agent" / "skills"
+    assert bundled_python_skills(root) == {module: skills / module.replace("_", "-") for module in KERNEL_SKILLS}
 
 
-def test_bundled_python_skills_are_the_packaged_skills_left_on(tmp_path):
-    from continual_arc_baselines.systems import prime_agent
+def test_prime_agent_0_9_5s_bundled_skills_are_in_its_release_under_its_typescript_installer(tmp_path, monkeypatch):
+    """The TypeScript installer's launcher links to the release's executable: the install root is the release, whose
+    Linear and Notion Python skills are left out with web search."""
+    from continual_arc_baselines.systems.prime_agent import bundled_python_skills
+    from continual_arc_baselines.systems.sandbox import install_root
 
-    root = _prime_install(tmp_path / "prime-agent")
-    assert prime_agent.bundled_python_skills(root) == {"agent_message": root / "skills" / "agent-message",
-                                                       "refine": root / "skills" / "refine"}
-    assert prime_agent.bundled_python_skills(tmp_path / "no-skills") == {}
-
-
-def test_missing_kernel_skills_are_installed_then_checked(tmp_path, monkeypatch):
-    from continual_arc_baselines.systems import prime_agent
-
-    root, venv = _prime_install(tmp_path / "prime-agent"), tmp_path / "kernel-venv"
-    venv.mkdir()
-    calls, imports = [], iter([1, 0])   # the first check fails, the one after the install passes
-
-    def run(argv, **kwargs):
-        calls.append(argv)
-        code = next(imports) if argv[1] == "-c" else 0
-        return prime_agent.subprocess.CompletedProcess(argv, code, "", "")
-
-    monkeypatch.setattr(prime_agent.subprocess, "run", run)
-    prime_agent.install_kernel_skills(venv, root)
-    prime_agent.install_kernel_skills(venv, root)   # checked once per venv in a process
-    assert calls[0] == [str(venv / "bin" / "python"), "-c", "import agent_message, refine"]
-    assert calls[1] == ["uv", "pip", "install", "--quiet", "--python", str(venv / "bin" / "python"),
-                        "-e", str(root / "skills" / "agent-message"), "-e", str(root / "skills" / "refine")]
-    assert len(calls) == 3
+    launcher = install_typescript(tmp_path)
+    monkeypatch.setenv("PATH", f"{launcher.parent}{os.pathsep}{os.environ['PATH']}")
+    root = install_root("prime-agent")
+    assert root == (tmp_path / ".local" / "share" / "prime-agent" / "releases" / "0.9.5-linux-x64-bc4b0ed7").resolve()
+    assert bundled_python_skills(root) == {module: root / "skills" / module.replace("_", "-") for module in KERNEL_SKILLS}
 
 
-def test_kernel_skills_that_still_do_not_import_stop_the_start(tmp_path, monkeypatch):
-    from continual_arc_baselines.systems import prime_agent
+def test_the_bundled_skills_a_kernel_venv_lacks_are_installed_then_imported(tmp_path, monkeypatch):
+    """A kernel venv as prime-agent's installer makes it holds none of the skills: they are installed from the
+    prime-agent on PATH, editable, once per venv in a process, and import there after."""
+    from continual_arc_baselines.systems.prime_agent import install_kernel_skills
 
-    root, venv = _prime_install(tmp_path / "prime-agent"), tmp_path / "kernel-venv"
-    venv.mkdir()
-    monkeypatch.setattr(prime_agent.subprocess, "run", lambda argv, **kwargs: prime_agent.subprocess.CompletedProcess(
-        argv, 1 if argv[1] == "-c" else 0, "", "ModuleNotFoundError: No module named 'refine'"))
-    with pytest.raises(RuntimeError, match="do not import"):
-        prime_agent.install_kernel_skills(venv, root)
+    launcher, uv = install_rust_sh(tmp_path / ".local"), fake_uv(tmp_path / "uv")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(launcher.parent), str(uv), os.environ["PATH"]]))
+    venv = kernel_venv(tmp_path / "kernel-venv")
+    python, imports = venv / "bin" / "python", ["-c", "import " + ", ".join(KERNEL_SKILLS)]
+    assert subprocess.run([python, *imports], capture_output=True).returncode == 1
+    install_kernel_skills(venv, "prime-agent")
+    install_kernel_skills(venv, "prime-agent")
+    skills = (tmp_path / ".local" / "share" / "prime-agent" / "skills").resolve()
+    assert (uv / "uv.log").read_text().splitlines() == [
+        f"pip install --quiet --python {python} " + " ".join(f"-e {skills / m.replace('_', '-')}" for m in KERNEL_SKILLS)]
+    assert subprocess.run([python, *imports], capture_output=True).returncode == 0
+
+
+@pytest.mark.parametrize("case", ["no skills", "no Python skills", "no kernel venv", "uv failing",
+                                  "skills that do not import", "no prime-agent"])
+def test_a_start_without_the_bundled_skills_in_the_kernel_stops_before_prime_agent_runs(tmp_path, monkeypatch, case):
+    """Whatever keeps the skills from the kernel stops the start before prime-agent runs: an install with no skills, or
+    none in Python, to install, no kernel venv to install them into, an install that fails or after which they still do
+    not import, or no prime-agent on PATH."""
+    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
+
+    skills = {"no skills": {}, "no Python skills": {name: False for name in SKILLS_0_9_6}}.get(case, SKILLS_0_9_6)
+    launcher = install_rust_sh(tmp_path / ".local", skills)
+    if case == "skills that do not import":
+        (tmp_path / ".local" / "share" / "prime-agent" / "skills" / "refine" / "src" / "refine" / "__init__.py").write_text(
+            "import refine_dependency\n")
+    uv = fake_uv(tmp_path / "uv", "error: no network" if case == "uv failing" else "")
+    monkeypatch.setenv("PATH", os.pathsep.join([str(launcher.parent), str(uv), os.environ["PATH"]]))
+    venv = tmp_path / "kernel-venv" if case == "no kernel venv" else kernel_venv(tmp_path / "kernel-venv")
+    command = "prime-agent-nowhere" if case == "no prime-agent" else "prime-agent"
+    learner = PrimeAgentLearner(command=command, kernel_venv=str(venv), sandbox="none", startup_timeout_s=30)
+    learner.attach(tmp_path / "system", {})
+    named = r"\(agent_message, .*, rlm_heartbeat\)"
+    expected = {"no skills": "no bundled Python skills in", "no Python skills": "no bundled Python skills in",
+                "no kernel venv": "no kernel venv at",
+                "uv failing": rf"uv could not install prime-agent's bundled Python skills {named} into .*: error: no "
+                              "network$",
+                "skills that do not import": rf"(?s){named} do not import in .* after installing them: .*No module named "
+                                             "'refine_dependency'$",
+                "no prime-agent": "prime-agent-nowhere is not on PATH"}
+    try:
+        with pytest.raises(RuntimeError, match=expected[case]) as stopped:
+            learner.start()
+    finally:
+        learner.stop()
+    assert type(stopped.value) is RuntimeError   # not SystemUnavailable, which the adapter answers with restarts
+    assert not (tmp_path / "system" / "prime-agent.log").exists()

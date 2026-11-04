@@ -46,10 +46,12 @@ having taken it: a reply replayed from a recording, served at once, takes its re
 turn.
 
 Kernel. prime-agent's Python cells run in a kernel the adapter names (``PRIME_AGENT_KERNEL_PYTHON``, the shared kernel
-venv's interpreter), and prime-agent installs no Python skills into an interpreter it is given (its docs/skills.md). So
-the adapter installs prime-agent's bundled Python skills (refine, goal, compact, edit and the rest) into that venv
-itself before the first start, as prime-agent's own kernel setup would, and stops if they still do not import
-(:func:`install_kernel_skills`): without them every call to one raises and each session opens by telling the agent so.
+venv's interpreter), and prime-agent installs no Python skills into an interpreter it is given (its docs/skills.md), nor
+does its installer into the venv it makes. So the adapter installs prime-agent's bundled Python skills (refine, goal,
+compact, edit and the rest) into that venv itself before prime-agent first starts, from wherever the prime-agent on
+``PATH`` keeps them, as prime-agent's own kernel setup would, and the start stops if that install holds none, the venv is
+missing or they still do not import (:func:`install_kernel_skills`): without them every call to one raises and each
+session opens by telling the agent so.
 
 Requires the ``prime-agent`` CLI on ``PATH``:
 ``curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh``, and ``uv``.
@@ -120,31 +122,50 @@ _kernel_skills_lock = threading.Lock()
 
 
 def bundled_python_skills(root: Path) -> dict[str, Path]:
-    """prime-agent's bundled Python skills in its install ``root``, by the module each one's ``src/`` holds: every
-    folder of ``root/skills`` with a ``pyproject.toml`` (the MCP integrations have none), but the ones the adapter's
-    settings turn off (:data:`DISABLED_BUNDLED_SKILLS`)."""
-    skills = root / "skills"
+    """prime-agent's bundled Python skills in its install ``root`` (:func:`install_root`), by import name.
+
+    prime-agent loads its bundled skills from the ``skills/`` folder beside the executable it runs as. Its TypeScript
+    installer's launcher on ``PATH`` links to that executable, so ``root`` is the release holding it
+    (``~/.local/share/prime-agent/releases/<version>-<platform>-<digest>``); install-rust.sh, which is what
+    prime-agent's install.sh serves whatever release it pins, makes the launcher a script in ``root/bin`` that runs
+    ``root/share/prime-agent/prime-agent``, so ``root`` is the prefix (``~/.local``). A Python skill is a
+    folder there with a SKILL.md, a pyproject.toml and its package in ``src/``, named as the folder with hyphens as
+    underscores, as prime-agent tells one (its docs/skills.md); the skills the adapter's settings turn off are left out
+    (:data:`DISABLED_BUNDLED_SKILLS`, and :data:`INTEGRATION_SKILLS`, of which 0.9.5 ships Linear and Notion as
+    Python skills)."""
+    skills = (root if (root / "skills").is_dir() else root / "share" / "prime-agent") / "skills"
     if not skills.is_dir():
         return {}
     found = {}
     for folder in sorted(skills.iterdir()):
-        if folder.name in DISABLED_BUNDLED_SKILLS or not (folder / "pyproject.toml").is_file():
-            continue
-        (module,) = (p.name for p in (folder / "src").iterdir() if p.is_dir() and not p.name.startswith("."))
-        found[module] = folder
+        module = folder.name.replace("-", "_")
+        if folder.name not in DISABLED_BUNDLED_SKILLS + INTEGRATION_SKILLS and all(
+                (folder / part).is_file() for part in ("SKILL.md", "pyproject.toml", f"src/{module}/__init__.py")):
+            found[module] = folder
     return found
 
 
-def install_kernel_skills(venv: Path, root: Path) -> None:
-    """Install prime-agent's bundled Python skills (:func:`bundled_python_skills`) editable into the kernel ``venv``
-    when any of them does not import there, and raise if they still do not. prime-agent installs them at its own
-    kernel setup, which it skips for an interpreter it is given, as the adapter gives it one. Checked once per venv in a
-    process; a process installing into the venv holds its lock file, so runs that start together install once."""
+def install_kernel_skills(venv: Path, executable: str) -> None:
+    """Install the bundled Python skills (:func:`bundled_python_skills`) of the prime-agent ``executable`` runs into the
+    kernel ``venv``, editable, when any of them does not import there, and raise if that install holds none of them, if
+    the venv has no interpreter or if they still do not import. Nothing else puts them there: prime-agent installs them
+    only at its own kernel setup, which it skips for an interpreter it is given, as the adapter gives it this venv's, and
+    its installer's kernel setup leaves them out (``pythonSkills`` is empty in the venv's ``.bootstrap-version``).
+    Checked once per venv in a process; a process installing into the venv holds its lock file, so runs that start
+    together install once."""
+    root = install_root(executable)
+    if root is None:
+        raise RuntimeError(f"{executable} is not on PATH")
     skills = bundled_python_skills(root)
     if not skills:
-        return
+        raise RuntimeError(f"no bundled Python skills in {root}, the install of {executable}: prime-agent keeps them in "
+                           "the skills/ folder beside the executable it runs as, there or in its share/prime-agent/")
     python = venv / "bin" / "python"
-    check = [str(python), "-c", "import " + ", ".join(skills)]
+    if not python.exists():
+        raise RuntimeError(f"no kernel venv at {venv}, whose interpreter prime-agent's kernel runs on: prime-agent's "
+                           "installer makes it (prime-agent --prime-agent-bootstrap), or kernel_venv or "
+                           "PRIME_AGENT_KERNEL_VENV names another")
+    names, check = ", ".join(skills), [str(python), "-c", "import " + ", ".join(skills)]
     with _kernel_skills_lock:
         if venv in _kernel_skills_ready:
             return
@@ -154,12 +175,14 @@ def install_kernel_skills(venv: Path, root: Path) -> None:
                 editable = [arg for folder in skills.values() for arg in ("-e", str(folder))]
                 installed = subprocess.run(["uv", "pip", "install", "--quiet", "--python", str(python), *editable],
                                            capture_output=True, text=True)
-                after = subprocess.run(check, capture_output=True, text=True)
-                if after.returncode != 0:
-                    raise RuntimeError(
-                        f"prime-agent's bundled Python skills ({', '.join(skills)}) do not import in {venv} after "
-                        f"installing them: {(installed.stderr or after.stderr).strip()[-400:]}")
-                log.info("installed prime-agent's bundled Python skills (%s) into %s", ", ".join(skills), venv)
+                if installed.returncode != 0:
+                    raise RuntimeError(f"uv could not install prime-agent's bundled Python skills ({names}) into "
+                                       f"{venv}: {installed.stderr.strip()[-400:]}")
+                imported = subprocess.run(check, capture_output=True, text=True)
+                if imported.returncode != 0:
+                    raise RuntimeError(f"prime-agent's bundled Python skills ({names}) do not import in {venv} after "
+                                       f"installing them: {imported.stderr.strip()[-400:]}")
+                log.info("installed prime-agent's bundled Python skills (%s) into %s", names, venv)
         _kernel_skills_ready.add(venv)
 
 
@@ -342,9 +365,6 @@ class PrimeAgentLearner(SystemLearner):
         # skills the system writes are installed into the venv at session start, and the shared
         # one sits under the sandbox's read-only mount.
         venv = self._venv()
-        root = install_root(self.command[0])
-        if root is not None and (venv / "bin" / "python").exists():
-            install_kernel_skills(venv, root)
         own = self.agent_dir / "kernel-venv"
         if venv.is_dir() and not own.exists():
             shutil.copytree(venv.resolve(), own, symlinks=True)
@@ -361,7 +381,7 @@ class PrimeAgentLearner(SystemLearner):
         (self.agent_dir / "models.json").write_text(json.dumps(models, indent=1))
         # prime-agent runs as shipped: its built-in skills (edit, compact, goal, refine,
         # skill-creator, ...) are the harness's own mechanics, installed into its kernel by
-        # install_kernel_skills above. Its integrations are off:
+        # install_kernel_skills at the start. Its integrations are off:
         # web search has no key and the sandbox has no route out; the Linear, Notion and
         # Prime Intellect skills are MCP integrations that prime-agent itself disables
         # without a login, made explicit here so the record does not depend on that.
@@ -476,6 +496,7 @@ class PrimeAgentLearner(SystemLearner):
 
     def start(self) -> None:
         self._backend = resolve_backend(self.sandbox)
+        install_kernel_skills(self._venv(), self.command[0])
         # Short path: UNIX socket names are limited to ~100 bytes, and attempt
         # directories are far longer than that.
         self._tmp_dir = Path(tempfile.mkdtemp(prefix="arc-pa-", dir="/tmp" if os.path.isdir("/tmp") else None))
