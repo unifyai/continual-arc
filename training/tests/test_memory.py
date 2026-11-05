@@ -10,6 +10,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import pytest
+
 from continual_arc_training import memory
 
 # -- snapshot_state / area_of / diff_snapshot ----------------------------------------------------------------
@@ -440,12 +442,66 @@ def test_kept_at_start_is_the_program_as_the_round_before_left_it(tmp_path):
     _commit_state(run_dir, 0, 0)
     _write_state(run_dir, 0, {path: REWRITTEN})
     _commit_state(run_dir, 0, 1)
-    system = memory.system_dir(run_dir, 0)
-    assert memory.kept_at_start(system, 1, path, stateless=False) == PROGRAM
-    assert memory.kept_at_start(system, 2, path, stateless=False) == REWRITTEN
-    assert memory.kept_at_start(system, 1, "workspace/programs/task-99999999.py", stateless=False) is None
-    assert memory.kept_at_start(system, 0, path, stateless=False) is None   # round 0 begins from nothing
-    assert memory.kept_at_start(system, 1, path, stateless=True) is None    # and so does a wiped row's every game
+    assert memory.kept_at_start(run_dir, 0, 1, path, stateless=False) == PROGRAM
+    assert memory.kept_at_start(run_dir, 0, 2, path, stateless=False) == REWRITTEN
+    assert memory.kept_at_start(run_dir, 0, 1, "workspace/programs/task-99999999.py", stateless=False) is None
+    assert memory.kept_at_start(run_dir, 0, 0, path, stateless=False) is None   # a stream's round 0 begins from nothing
+    assert memory.kept_at_start(run_dir, 0, 1, path, stateless=True) is None    # and so does a wiped row's every game
+
+
+def test_forked_from_names_the_commit_a_play_began_from(tmp_path):
+    """What a play's frozen.json says it began from, and the plays that began from nothing."""
+    play = tmp_path / "play"
+    play.mkdir()
+
+    def write(doc: dict) -> None:
+        (play / "frozen.json").write_text(json.dumps(doc))
+
+    assert memory.forked_from(play) is None                                           # a stream has no frozen.json
+    write({"from": {"round": 199, "system": "/s", "commit": "c0", "relocated": 1, "databases": 0}})   # a frozen test
+    assert memory.forked_from(play) == "c0"
+    write({"from": None})                                                             # a test of a run with no stream
+    assert memory.forked_from(play) is None
+    write({"memory": "none: played from an empty state"})                             # a reference play
+    assert memory.forked_from(play) is None
+    write({"memory": "every test user a copy of the run's one state, relocated", "relocated": {"files": 1}})
+    with pytest.raises(ValueError, match="no history holds"):                         # a test of a run with no commits
+        memory.forked_from(play)
+
+
+def _forked_play(run_dir: Path) -> None:
+    """A frozen test of one user, its user forked from the commit of a state that kept PROGRAM, then writing over it in
+    its game, as the baselines' seeding and the round's end leave it."""
+    path = f"workspace/programs/{TASK}.py"
+    _write_state(run_dir, 0, {path: PROGRAM})
+    _commit_state(run_dir, 0, 199)
+    commit = memory._committed(memory.system_dir(run_dir, 0), 199)
+    (run_dir / "frozen.json").write_text(json.dumps({"from": {"round": 199, "system": "/stream", "commit": commit}}))
+    _write_state(run_dir, 0, {path: REWRITTEN})
+    _commit_state(run_dir, 0, 200)
+
+
+def test_round_report_of_a_forked_play_reads_the_program_its_fork_began_with(tmp_path):
+    """A frozen test is round 0 but begins from a kept state: its student opens the program it was forked with, and the
+    program it writes over that one and prints is no kept program read."""
+    run_dir = tmp_path / "held-out" / "play"
+    _forked_play(run_dir)
+    _write_doc(run_dir, 0, 0, turns=[_turn("Submit")], calls=[_call(tool_results=[PROGRAM], turn=0)])
+    report = memory.round_report(run_dir, 0, users=1, round_dir_of=_round_dir, stateless=False)
+    assert report["users"]["0"]["reads"]["programs"] == 1 and report["users"]["0"]["reused_program"] is True
+
+    _write_doc(run_dir, 0, 0, turns=[_turn("Submit")], calls=[_call(tool_results=[REWRITTEN], turn=0)])
+    report = memory.round_report(run_dir, 0, users=1, round_dir_of=_round_dir, stateless=False)
+    assert report["users"]["0"]["reads"]["programs"] == 0 and report["users"]["0"]["reused_program"] is False
+
+
+def test_round_report_a_wiped_rows_test_reads_no_program(tmp_path):
+    """A wiped row's test is forked as any other's, but its wipe leaves its game nothing to read."""
+    run_dir = tmp_path / "held-out" / "play"
+    _forked_play(run_dir)
+    _write_doc(run_dir, 0, 0, turns=[_turn("Submit")], calls=[_call(tool_results=[PROGRAM], turn=0)])
+    report = memory.round_report(run_dir, 0, users=1, round_dir_of=_round_dir, stateless=True)
+    assert report["users"]["0"]["reads"]["programs"] == 0
 
 
 def test_round_report_writes_memory_json_with_per_user_and_total_counts(tmp_path):
@@ -607,6 +663,50 @@ def test_summary_line_reports_deliberate_totals_only_and_the_two_game_signals():
     assert "97" not in line and "100" not in line   # scratch never reaches the headline
     assert "3 reads" in line
     assert "4 games reused a saved program" in line and "2 solved without a demo" in line
+
+
+def _recorded(reads: int, reused: bool) -> dict:
+    """A round's memory.json of one user, its reads as older code counted them."""
+    files = {area: {"added": 0, "changed": 0, "removed": 0} for area in memory.AREAS}
+    counts = {"programs": reads, "skills": 0, "harness_store": 0, "notes": 0}
+    return {"round": 0, "users": {"0": {"memory": files, "reads": counts, "reused_program": reused,
+                                        "solved_without_demo": False}},
+            "total": {"memory": files, "reads": counts, "reused_program": int(reused), "solved_without_demo": 0}}
+
+
+def test_recount_of_a_stored_forked_play_reads_the_history_it_is_given(tmp_path):
+    """A stored play keeps none of its users' system folders: recount reads its fork's commit in the state.git it was
+    forked from, and fails loudly without one, its memory.json left as it was."""
+    run_dir = tmp_path / "held-out" / "play"
+    _forked_play(run_dir)
+    (run_dir / "driver.json").write_text(json.dumps({"row": "hplg", "stateless": False}))
+    _write_doc(run_dir, 0, 0, turns=[_turn("Submit")], calls=[_call(tool_results=[PROGRAM], turn=0)])
+    (_round_dir(run_dir, 0) / "memory.json").write_text(json.dumps(_recorded(7, False)))
+    stored = tmp_path / "stream.git"
+    os.rename(memory.system_dir(run_dir, 0) / "state.git", stored)
+
+    with pytest.raises(subprocess.CalledProcessError):
+        memory.recount(run_dir)
+    assert json.loads((_round_dir(run_dir, 0) / "memory.json").read_text()) == _recorded(7, False)
+
+    [report] = memory.recount(run_dir, stored)
+    assert report["users"]["0"]["reads"]["programs"] == 1 and report["total"]["reused_program"] == 1
+
+
+def test_recount_refuses_a_copy_without_its_games_and_writes_nothing(tmp_path):
+    """A copy that kept a run's memory.json and driver.json but none of its games: recount would count every read 0, so
+    it refuses, even when an earlier round could be read."""
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "driver.json").write_text(json.dumps({"row": "hgpl", "stateless": False}))
+    _write_doc(run_dir, 0, 0, turns=[_turn("Submit")], calls=[_call(content="no program here", turn=0)])
+    (_round_dir(run_dir, 0) / "memory.json").write_text(json.dumps(_recorded(7, True)))
+    _round_dir(run_dir, 1).mkdir()
+    (_round_dir(run_dir, 1) / "memory.json").write_text(json.dumps({**_recorded(3, True), "round": 1}))
+
+    with pytest.raises(SystemExit, match="no captured games"):
+        memory.recount(run_dir)
+    assert json.loads((_round_dir(run_dir, 0) / "memory.json").read_text()) == _recorded(7, True)
 
 
 def test_a_body_whose_messages_is_not_a_list_is_read_without_raising():

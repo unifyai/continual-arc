@@ -37,7 +37,7 @@ the known bookkeeping is pruned) are scratch, kept in ``memory.json`` but never 
 
 ``python -m continual_arc_training.memory line MEMORY.json`` prints a report's one-line summary (paper.sh), and
 ``python -m continual_arc_training.memory recount PLAY_DIR`` counts a played run's reads again into its rounds'
-``memory.json`` (:func:`recount`).
+``memory.json`` (:func:`recount`), with ``--state-git`` for a stored play forked from a kept state.
 """
 from __future__ import annotations
 
@@ -295,15 +295,40 @@ def _committed(system: Path, round_: int) -> str:
     return commits[round_]
 
 
-def kept_at_start(system: Path, round_: int, path: str, stateless: bool) -> str | None:
-    """The file at ``path`` (relative to the state folder) as the harness folder a user's game began from, ``system``
-    (:func:`start_system`), held it when round ``round_``'s game began: the state's commit at the end of the round
-    before. None when the folder
-    held no such file, and always for round 0 and for a row wiped before every game (``stateless``), whose games begin
-    from nothing (the commit of the round before is the state its wipe then removed)."""
-    if stateless or round_ == 0:
+def forked_from(run_dir: Path) -> str | None:
+    """The commit of a kept state that a play forked from one began from, which is one round numbered 0 (a frozen test),
+    as the play's ``frozen.json`` names it (the baselines' ``continual_arc_baselines.frozen.seed``). None for a game that
+    began from nothing: a stream's first round, which has no ``frozen.json``, and a play that names no commit. A test of
+    a run that kept no commits (``frozen.copy_states``) is refused, since no history holds the copy its games began
+    from."""
+    path = Path(run_dir) / "frozen.json"
+    if not path.is_file():
         return None
-    repo, commit = f"--git-dir={system / 'state.git'}", _committed(system, round_ - 1)
+    played = json.loads(path.read_text())
+    origin = played.get("from")
+    if origin is None:
+        if "relocated" in played:
+            raise ValueError(f"{path}: its users began from copies of a state no history holds")
+        return None
+    return origin["commit"]
+
+
+def kept_at_start(run_dir: Path, user: int, round_: int, path: str, stateless: bool,
+                  history: Path | None = None) -> str | None:
+    """The file at ``path`` (relative to the state folder) as the state held it when user ``user``'s game of round
+    ``round_`` began: the state's commit at the end of the round before, in the harness folder the game began from
+    (:func:`start_system`), or in round 0 the commit its play was forked from (:func:`forked_from`). None when that state
+    held no such file, and always for a game that began from nothing: a round 0 with no such commit, and a row wiped
+    before every game (``stateless``; the commit of the round before is the state its wipe then removed). The commit is
+    read in that folder's history, or in ``history``, the ``state.git`` a stored play was forked from, since a stored
+    play keeps none of its users' own."""
+    if stateless:
+        return None
+    system = start_system(run_dir, user)
+    commit = _committed(system, round_ - 1) if round_ else forked_from(run_dir)
+    if commit is None:
+        return None
+    repo = f"--git-dir={history or system / 'state.git'}"
     held = subprocess.run(["git", repo, "ls-tree", "--name-only", commit, "--", path], check=True,
                           capture_output=True, text=True).stdout
     if not held.strip():
@@ -358,16 +383,16 @@ def game_memory_outcome(doc: dict[str, Any], call_areas: list[set[str]]) -> dict
     return {"reused_program": reused_program, "solved_without_demo": bool(doc.get("solved")) and not requested_demo}
 
 
-def game_reads(captured: Path, system: Path, round_: int, stateless: bool) -> dict[str, Any]:
-    """One user's game of round ``round_`` (its captured game, ``captured``): reads per area (:func:`count_reads`) and
-    :func:`game_memory_outcome`'s two signals, its task's program as the harness folder the game began from,
-    ``system`` (:func:`start_system`), held it when the game began (:func:`kept_at_start`). A user with no captured game (the round never reached it) has no reads and
-    neither signal."""
+def game_reads(captured: Path, run_dir: Path, user: int, round_: int, stateless: bool,
+               history: Path | None = None) -> dict[str, Any]:
+    """User ``user``'s game of round ``round_`` (its captured game, ``captured``): reads per area (:func:`count_reads`)
+    and :func:`game_memory_outcome`'s two signals, its task's program as the state held it when the game began
+    (:func:`kept_at_start`). A user with no captured game (the round never reached it) has no reads and neither signal."""
     if not captured.is_file():
         return {"reads": {area: 0 for area in DELIBERATE_AREAS}, "reused_program": False, "solved_without_demo": False}
     with gzip.open(captured, "rt") as fp:
         doc = json.load(fp)
-    program = kept_at_start(system, round_, program_path(doc), stateless)
+    program = kept_at_start(run_dir, user, round_, program_path(doc), stateless, history)
     program_marks = marks(program) if program is not None else []
     call_areas = [read_areas(c, program_marks) for c in doc.get("calls") or []]
     return {"reads": count_reads(call_areas), **game_memory_outcome(doc, call_areas)}
@@ -412,32 +437,38 @@ def round_report(run_dir: Path, round_: int, users: int, round_dir_of: Callable[
                 if prev_file.is_file():
                     previous = json.loads(prev_file.read_text())
             files = diff_snapshot(previous, snapshot)
-        per_user[str(u)] = {"memory": files, **game_reads(this_dir / "captured" / f"u{u:03d}.json.gz",
-                                                          start_system(run_dir, u), round_, stateless)}
+        per_user[str(u)] = {"memory": files, **game_reads(this_dir / "captured" / f"u{u:03d}.json.gz", run_dir, u, round_,
+                                                          stateless)}
 
     report = {"round": round_, "users": per_user, "total": _total(per_user)}
     (this_dir / "memory.json").write_text(json.dumps(report, indent=1))
     return report
 
 
-def recount(run_dir: Path) -> list[dict[str, Any]]:
+def recount(run_dir: Path, history: Path | None = None) -> list[dict[str, Any]]:
     """Count a played run's reads again (:func:`game_reads`) into every round's ``memory.json`` under
     ``run_dir/rounds``, in place of the reads and signals it held, each round's files added, changed and removed kept as
     its snapshot recorded them, so that a round's ``memory.json`` reads as :func:`round_report` writes it whatever code
-    wrote it. Whether the run's harness was wiped before every game is its ``driver.json``'s ``stateless``. Returns the
-    rewritten reports in round order."""
+    wrote it. Whether the run's harness was wiped before every game is its ``driver.json``'s ``stateless``. It needs the
+    run whole: a round with no captured games is refused, since every read of it would count 0, and ``history`` is the
+    ``state.git`` a stored play was forked from (:func:`kept_at_start`). Nothing is written unless every round can be
+    read. Returns the rewritten reports in round order."""
     run_dir = Path(run_dir)
     stateless = json.loads((run_dir / "driver.json").read_text())["stateless"]
+    paths = sorted((run_dir / "rounds").glob("r[0-9]*/memory.json"))
     reports = []
-    for path in sorted((run_dir / "rounds").glob("r[0-9]*/memory.json")):
+    for path in paths:
+        if not (path.parent / "captured").is_dir():
+            raise SystemExit(f"{path.parent} holds no captured games: recount a whole copy of the run")
         report = json.loads(path.read_text())
         for user, entry in report["users"].items():
             u = int(user)
-            entry.update(game_reads(path.parent / "captured" / f"u{u:03d}.json.gz", start_system(run_dir, u),
-                                    report["round"], stateless))
+            entry.update(game_reads(path.parent / "captured" / f"u{u:03d}.json.gz", run_dir, u, report["round"],
+                                    stateless, history))
         report["total"] = _total(report["users"])
-        path.write_text(json.dumps(report, indent=1))
         reports.append(report)
+    for path, report in zip(paths, reports, strict=True):
+        path.write_text(json.dumps(report, indent=1))
     return reports
 
 
@@ -466,11 +497,13 @@ def main() -> None:
     again = sub.add_parser("recount", help="count a played run's reads again into its rounds' memory.json, printing "
                                            "each round's summary line")
     again.add_argument("run_dir", help="the run's play folder: rounds/, users/ and driver.json")
+    again.add_argument("--state-git", type=Path, help="the state.git a stored play was forked from, since a stored play "
+                                                      "keeps none of its users' own")
     a = p.parse_args()
     if a.cmd == "line":
         print(summary_line(json.loads(Path(a.report).read_text())))
     else:
-        for report in recount(Path(a.run_dir).expanduser()):
+        for report in recount(Path(a.run_dir).expanduser(), a.state_git):
             print(summary_line(report))
 
 

@@ -120,6 +120,24 @@ def _git(system, *args):
                           check=True).stdout
 
 
+def test_a_forked_test_users_game_reads_the_state_its_fork_began_from(tmp_path, monkeypatch):
+    """memory reads a real fork's start through frozen.json's commit, in the user's own repository, whose objects are the
+    test's store reading the stream's as alternates, also once the user's game has committed over it."""
+    _forks(monkeypatch)
+    from continual_arc_baselines.statelog import StateLog
+
+    from continual_arc_training import memory
+    run = _commit(_stream(tmp_path))
+    test_dir = run / "frozen" / "held-out" / "play"
+    doc = frozen.seed(run, test_dir, 4)
+    (test_dir / "frozen.json").write_text(json.dumps(doc))
+    for user in range(4):
+        system = memory.system_dir(test_dir, user)
+        (system / "state" / "notes.md").write_text("what the test user wrote\n")
+        StateLog(system / "state", system / "state.git", system / "state-log.jsonl").commit()
+        assert memory.kept_at_start(test_dir, user, 0, "notes.md", stateless=False) == "round 0\nround 1\nround 2\n"
+
+
 def test_a_run_with_a_state_log_forks_its_one_states_commit_and_one_without_copies_it(tmp_path, monkeypatch):
     _forks(monkeypatch)
     from continual_arc_baselines.statelog import StateLog
