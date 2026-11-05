@@ -61,6 +61,11 @@ def ssh_command(arena: str, key: str | Path, known_hosts: str | Path, command: s
     return ["ssh", *SSH_OPTIONS, "-i", str(key), "-o", f"UserKnownHostsFile={known_hosts}", *tunnel, arena, command]
 
 
+def _clean_env() -> dict[str, str]:
+    """All an ssh to the arena needs of this process's environment, which holds the submitter's key."""
+    return {name: os.environ[name] for name in ("PATH", "HOME", "LANG") if name in os.environ}
+
+
 class RemoteLearner(ServedLearner):
     """On the verifier's machine, the learner :func:`main` hosts on ``arena`` (``user@address``, reached with ``key``,
     its host key kept in ``known_hosts``), from the environment an install made there: ``python``, ``code`` and ``runtime``
@@ -88,7 +93,7 @@ class RemoteLearner(ServedLearner):
                    *(["--code", self.code] if self.code else []), *(x for p in self.runtime or () for x in ("--runtime", p))]
         command = shlex.join([self.arena_python, "-m", "continual_arc_baselines.systems.remote", "serve", *options])
         try:
-            self._serve_from(ssh_command(self.arena, self.key, self.known_hosts, command, forward=(port, port)))
+            self._serve_from(ssh_command(self.arena, self.key, self.known_hosts, command, forward=(port, port)), env=_clean_env())
         except BaseException:
             self.close()
             raise
@@ -110,7 +115,7 @@ class RemoteLearner(ServedLearner):
         pipeline = f"{command} | head -c {cap}"
         with to.open("wb") as out:
             subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, pipeline), stdout=out, stderr=self._log,
-                           stdin=subprocess.DEVNULL, timeout=FETCH_TIMEOUT_S, check=False)
+                           stdin=subprocess.DEVNULL, timeout=FETCH_TIMEOUT_S, check=False, env=_clean_env())
 
     def close(self) -> None:
         """Ask the arena to end the learner, whose errors are noted rather than raised, since this runs while the run
