@@ -25,20 +25,23 @@ other. The test's logs and model-call journal go to an attempt of its own.
 user of its own and all of them served at once by
 :class:`~continual_arc_baselines.collective.CollectiveHarnessLearner`, a system of the run's own kind for every user.
 The system as the stream left it is the commit :mod:`~continual_arc_baselines.statelog` made at the end of the stream's
-last round, so the run must have logged its state (``arc-baselines run --log-state``). Such a run has one system, its
-attempt's; a collective run has one per user, ``users/uNNN/system``, and test user i starts from the run's user i mod
-U, of its U. Each test user's ``system/`` starts as a fork of that commit (:func:`seed`): its ``state`` the commit's
-tree, its ``state.git`` on the commit, and its ``state-log.jsonl`` the run's rounds up to it, so that the test round's
-commit comes next in the user's history. The tree is relocated first (:func:`relocate`): a harness names its own
-folder in its files (a Python environment's scripts, a daemon's records, a session's log, openclaw's and hermes-agent's
-SQLite databases), and a copy that kept those paths would read and write the run's own state, so every absolute path
-naming the system folder it forks is renamed to the user's, and the renamed tree is committed before the test, so that
-the test round's commit shows what the user wrote in its instance and nothing else. The users keep their objects in one
-store, ``objects.git``, which reads the run's own as alternates: a user's repository is its own (its branch, index and
-log) but its objects are the store's, so a hundred forks cost what the files they wrote cost. The test's round ends
-with every user's state committed as its next round, and once the round is recorded the users' working trees go: every
-one is in its repository, whole (:func:`continual_arc_baselines.statelog.restore`). A run with no stream starts every
-user from nothing, a play that a row's measures are read against.
+last round, so the run must have logged its state (``arc-baselines run --log-state``). A run keeps one state whatever
+its number of users: its attempt's ``system`` for a run of ``arc-baselines run``, and user 0's ``users/u000/system`` for
+a collective run, into which every user's writes were merged round by round
+(:mod:`continual_arc_baselines.shared`), and every test user starts from it. Each test user's ``system/`` starts as a
+fork of that commit (:func:`seed`): its ``state`` the commit's tree, its ``state.git`` on the commit, and its
+``state-log.jsonl`` the run's rounds up to it, so that the test round's commit comes next in the user's history. The
+tree is relocated first (:func:`relocate`): a harness names its own folder in its files (a Python environment's
+scripts, a daemon's records, a session's log, openclaw's and hermes-agent's SQLite databases), and a copy that kept
+those paths would read and write the run's own state, so every absolute path naming the system folder it forks is
+renamed to the user's, and the renamed tree is committed before the test, so that the test round's commit shows what
+the user wrote in its instance and nothing else. The users keep their objects in one store, ``objects.git``, which
+reads the run's own as alternates: a user's repository is its own (its branch, index and log) but its objects are the
+store's, so a hundred forks cost what the files they wrote cost. The test's users never share a state: nothing after
+the test reads what its round wrote, so its round ends with every user's state committed as its next round, apart,
+and once the round is recorded the users' working trees go: every one is in its repository, whole
+(:func:`continual_arc_baselines.statelog.restore`). A run with no stream starts every user from nothing, a play that a
+row's measures are read against.
 
 Either way a stateless system (rows H0, HPL0 and PL0) wipes its state before its test instance, as before every
 instance, so it plays from nothing. The test's records go to a run directory of its own, by default
@@ -284,9 +287,10 @@ def user_system(run_dir: Path, user: int) -> Path:
     return Path(run_dir) / "users" / f"u{user:03d}" / "system"
 
 
-def stream_end(run_dir: Path) -> tuple[list[Path], int] | None:
-    """The run's system folders, user by user (the module's docstring), and how many rounds its stream has, refused
-    while the stream is still being played; None for a run whose schedule has no stream."""
+def stream_end(run_dir: Path) -> tuple[Path, int] | None:
+    """The run's one system folder (the module's docstring) and how many rounds its stream has, refused while the stream
+    is still being played, and for a collective run whose users kept stores of their own, as collective runs did before
+    every learner kept one state for its team; None for a run whose schedule has no stream."""
     run_dir = Path(run_dir)
     schedule = Schedule.load(run_dir / "schedule.json")
     rounds = sum(slot.phase == PHASE_STREAM for slot in schedule.slots) // schedule.users
@@ -302,8 +306,11 @@ def stream_end(run_dir: Path) -> tuple[list[Path], int] | None:
             raise SystemExit(f"{run_dir} did not log its system's state, so its stream's end has no commit to fork: "
                              "play the stream with arc-baselines run --log-state, or its tests one instance at a time "
                              "(arc-baselines test without --collective)")
-        return [system], rounds
-    return [user_system(run_dir, user) for user in range(schedule.users)], rounds
+        return system, rounds
+    if any((user_system(run_dir, user) / "state-log.jsonl").is_file() for user in range(1, schedule.users)):
+        raise SystemExit(f"{run_dir}'s users kept stores of their own, as collective runs did before every learner kept "
+                         "one state for its team, so there is no one state at its stream's end to fork")
+    return user_system(run_dir, 0), rounds
 
 
 def naming(tree: Path, old: str) -> Found:
@@ -367,17 +374,17 @@ def relocate_database(path: Path, old: str, new: str) -> None:
         con.close()
 
 
-def object_store(store: Path, systems: list[Path]) -> Path:
-    """The test's object store, a bare repository reading the objects of each of ``systems`` (the run's, none for a
-    run with no stream) as an alternate, by paths relative to its own, so that a run directory copied whole reads the
+def object_store(store: Path, system: Path | None) -> Path:
+    """The test's object store, a bare repository reading the objects of ``system`` (the run's one system, None for a
+    run with no stream) as an alternate, by a path relative to its own, so that a run directory copied whole reads the
     same wherever it lands; returns its objects folder."""
     if not (store / "HEAD").exists():
         subprocess.run(["git", "init", "--quiet", "--bare", str(store)], env={**os.environ, **GIT_ENV}, check=True)
         _git(store, "config", "gc.auto", "0")
     objects = (store / "objects").resolve()
-    if systems:
-        (objects / "info" / "alternates").write_text("".join(
-            os.path.relpath((system / "state.git" / "objects").resolve(), objects) + "\n" for system in systems))
+    if system is not None:
+        (objects / "info" / "alternates").write_text(
+            os.path.relpath((system / "state.git" / "objects").resolve(), objects) + "\n")
     return objects
 
 
@@ -407,32 +414,27 @@ def fork_user(system: Path, objects: Path, source: tuple[Path, int, str] | None,
 
 def seed(run_dir: Path, test_dir: Path, users: int) -> dict:
     """``test_dir`` as its round begins, from nothing: the run's task names and every user's ``system/`` (the
-    module's docstring), test user i a fork of the run's system i mod U, of its U. Returns what the users start from:
-    the stream's last round and each system's commit of it, in the order the users take them."""
+    module's docstring), every test user a fork of the run's one system. Returns what the users start from: the
+    stream's last round and the system's commit of it."""
     end = stream_end(run_dir)
     shutil.rmtree(test_dir, ignore_errors=True)
     test_dir.mkdir(parents=True)
     shutil.copy2(Path(run_dir) / SALT_FILE, test_dir / SALT_FILE)
-    systems, rounds = end or ([], 0)
-    objects = object_store(test_dir / "objects.git", systems)
-    sources: list[tuple[tuple[Path, int, str], Found]] = []
-    for system in systems:
-        commit = commit_of(system / "state-log.jsonl", rounds - 1)
+    objects = object_store(test_dir / "objects.git", end[0] if end else None)
+    source, found = None, None
+    if end is not None:
+        system, rounds = end
+        source = (system, rounds, commit_of(system / "state-log.jsonl", rounds - 1))
         scratch = test_dir / "naming"
-        restore(system / "state.git", commit, scratch)
-        sources.append(((system, rounds, commit), naming(scratch, str(system))))
+        restore(system / "state.git", source[2], scratch)
+        found = naming(scratch, str(system))
         shutil.rmtree(scratch)
-
-    def fork(user: int) -> None:
-        source, found = sources[user % len(sources)] if sources else (None, None)
-        fork_user(user_system(test_dir, user), objects, source, found)
-
     with ThreadPoolExecutor(FORKS) as pool:
-        list(pool.map(fork, range(users)))
-    return {"from": None if not sources else {
-        "round": rounds - 1,
-        "systems": [{"system": str(system), "commit": commit, "relocated": len(found[0]) + len(found[1]),
-                     "databases": len(found[2])} for (system, _, commit), found in sources]}}
+        list(pool.map(lambda user: fork_user(user_system(test_dir, user), objects, source, found), range(users)))
+    if source is None:
+        return {"from": None}
+    return {"from": {"round": source[1] - 1, "system": str(source[0]), "commit": source[2],
+                     "relocated": len(found[0]) + len(found[1]), "databases": len(found[2])}}
 
 
 def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:

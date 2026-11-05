@@ -264,13 +264,19 @@ not depend on how many users there are, so a run at fewer users is a run at more
 first users. Every user meets the same held-out tasks, in an order of their own. The held-out
 test is the same at every number of users; the seen test covers every user's tasks, 100 new
 instances spread evenly over them (two of each of 50 at two users, one of each of 100 at four)
-and one of every task at eight and sixteen, instance `i` a task of user `i mod U`, whose state
-test user `i` starts from, so it is made for the run's number of users (`schedule make --test
-seen --users U`). So more users bring more tasks as well as more instances at once. The users are deliberately concurrent: a **round** is one instance per
+and one of every task at eight and sixteen, instance `i` a task of user `i mod U`, so it is made
+for the run's number of users (`schedule make --test seen --users U`). So more users bring more tasks as well as more instances at once. The users are deliberately concurrent: a **round** is one instance per
 user, all open at once, the round's records are committed together, and the learner's
 `begin_round` and `end_round` hooks bracket it. The contract is that whatever the learner
 carries between instances changes only in `end_round`, so every user of a round meets the
-state the round began with. Every observation and record says whose work it is (`user`).
+state the round began with. That state is one for the whole team, whatever the learner keeps
+(Dan, 5 Nov 2026): a trained model's weights, a harness's store, a floor's cache, every user's
+instance of a round starting from it and every user's experience of the round changing it
+before the next. ARC holds nothing personal, and a store kept per user would set a harness that
+saw only its own user's tasks against weights trained on every user's. The baselines'
+harnesses keep one store this way, each user's writes merged into it in user order as the round
+ends ([baselines/README.md](baselines/README.md#one-state-for-a-team)). Every observation and
+record says whose work it is (`user`).
 
 A learner that can serve the users of a round at the same time sets
 `concurrent_users = True` and reports its counters per user (`user_resources(user)`): the

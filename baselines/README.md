@@ -30,12 +30,13 @@ in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) an
 
 | path | contents |
 |---|---|
-| `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), the demo-cache floor at several users (`BareSharedDemoCacheLearner` over one `SharedDemoCache` for the team), and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) with the sandboxed runner of its programs |
+| `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) with the sandboxed runner of its programs |
 | `src/continual_arc_baselines/systems/prime_agent.py`, `hermes_agent.py`, `openclaw.py` | the harness adapters of row H: prime-agent over its RPC mode, hermes-agent and openclaw over the Agent Client Protocol (`acp.py`). Row H0 is `stateless=True`, row HA `ask_to_store=True` and row HPL `program_library=True` |
 | `src/continual_arc_baselines/systems/base.py`, `protocol.py` | `SystemLearner`, the adapter base class, with its budgets, restarts, wipes and frozen resets; the messages a learner is shown and the lenient parser that reads an action from a reply |
 | `src/continual_arc_baselines/systems/sandbox.py` | the sandbox each harness runs in: bubblewrap on Linux, Seatbelt on macOS |
 | `src/continual_arc_baselines/systems/hosted.py`, `learner_host.py` | a submitted Python learner run whole inside the sandbox, for verified runs, and the host that serves it there |
-| `src/continual_arc_baselines/collective.py` | `CollectiveHarnessLearner`: one system per user, every user's instance of a round served at once, each user behind a proxy of their own, with the hooks a trained row learns from (every instance's turns and model calls, captured whole) and `snapshot_state` / `restore_state` for a user's state |
+| `src/continual_arc_baselines/collective.py` | `CollectiveHarnessLearner`: a harness process per user and one state for all of them, every user's instance of a round served at once, each user behind a proxy of their own, with the hooks a trained row learns from (every instance's turns and model calls, captured whole) and `snapshot_state` / `restore_state` for a user's state |
+| `src/continual_arc_baselines/shared.py` | the collective regime's one state: the copy of it every user's instance of a round starts from, and the deterministic merge of what the users wrote back into it as the round ends ([below](#one-state-for-a-team)) |
 | `src/continual_arc_baselines/proxy.py`, `tracking.py` | the OpenAI-compatible reverse proxy that records every model call, and the per-instance counters it feeds (`llm_*` in every record) |
 | `src/continual_arc_baselines/cli.py` | `arc-baselines`: `run` a learner over a schedule, `test` a harness's stream, `fork` a run from any round, `install-submission` |
 | `src/continual_arc_baselines/frozen.py` | the frozen tests after a stream, played one instance at a time from the stream's state put back, or as one round of users forked from the stream's last commit |
@@ -50,7 +51,7 @@ in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) an
 | rows | learner | how they ran |
 |---|---|---|
 | GPT-6 Luna's rows, at low, medium and high effort: F, PL and PL0, and H, H0, H-A, H-E and H-E0 (HA, HPL and HPL0 in the run names) in each of prime-agent, hermes-agent and openclaw | `BareModelLearner` and `BareDemoCacheLearner` (F), `BareProgramLibraryLearner` (PL, PL0), `PrimeAgentLearner`, `HermesAgentLearner` and `OpenClawLearner` (the H rows) | one `arc-baselines run` a cell (`scripts/launch-cell.sh`), its stream alone; its frozen tests as one round of a hundred users of the cell's own system, each forked from the commit of the stream's end (`arc-baselines test --collective`) |
-| the open models' rows: on Qwen3.5-9B, F, PL, H, H-E (given expert guidance, the program library's procedure), the rows in which the teacher writes the notes (H-T, H-T-E and H-E-T-E; hg, hgpl and hplg in the run names) and the trained row (DAgger), beside its wiped twin; on GLM-5.3 Flash, F and PL | `CollectiveHarnessLearner`, one system per user: `PrimeAgentLearner` for every harness row, `BareModelLearner` and `BareDemoCacheLearner` (`BareSharedDemoCacheLearner` at several users) for the floors, `BareProgramLibraryLearner` for the program library | driven round by round from [`training/`](../training), which serves the model, trains the adapters and lets the teacher write; every user's state committed at the end of every round, and the frozen tests played as one round of users forked from the stream's end (`frozen.seed`) |
+| the open models' rows: on Qwen3.5-9B, F, PL, H, H-E (given expert guidance, the program library's procedure), the rows in which the teacher writes the notes (H-T, H-T-E and H-E-T-E; hg, hgpl and hplg in the run names) and the trained row (DAgger), beside its wiped twin; on GLM-5.3 Flash, F and PL | `CollectiveHarnessLearner`, one state for all its users: `PrimeAgentLearner` for every harness row, `BareModelLearner` and `BareDemoCacheLearner` for the floors, `BareProgramLibraryLearner` for the program library | driven round by round from [`training/`](../training), which serves the model, trains the adapters and lets the teacher write; the one state committed at the end of every round, and the frozen tests played as one round of users forked from the stream's end (`frozen.seed`) |
 
 ## Install
 
@@ -189,22 +190,63 @@ TEST.json`, one test a launch.
 
 **As one round of users** (`--collective`), as the paper played its tests: every instance of a test made at its full
 width is a user of its own, a hundred played at once on one machine, each forked from the commit of the stream's last
-round. It needs a run that logged its state (below). Test user i starts from the run's user i mod U (a run of one
-user: its one system), its state the stream's last commit with every absolute path that named the run's own system
-folder renamed to the user's (in text files, links and SQLite databases); the users' objects share one store that reads
-the run's. A run with no stream starts every user from nothing, in `RUN/frozen/<the test>-reference/play`.
+round. It needs a run that logged its state (below). Every test user starts from the run's one state (a collective
+run's is user 0's, [below](#one-state-for-a-team)), the stream's last commit with every absolute path that named the
+run's own system folder renamed to the user's (in text files, links and SQLite databases); the users' objects share one
+store that reads the run's, and nothing the test's users write is merged, since nothing after the test reads it. A run
+with no stream starts every user from nothing, in `RUN/frozen/<the test>-reference/play`.
 
 ```bash
 uv run continual-arc schedule make --config arc1 --seed 0 --test held-out --out arc1-held-out0.json
 uv run arc-baselines test runs/arc1/openclaw-ws0-logged --schedule arc1-held-out0.json --collective
 ```
 
+## One state for a team
+
+In the collective regime every learner keeps one state for all the users it serves, a harness's whole store included,
+as a trained row keeps one model: ARC holds nothing personal, and a store kept per user would set a harness that saw
+its own user's tasks alone against weights trained on every user's. `CollectiveHarnessLearner` runs a harness process
+per user and keeps the one state where a run of one user keeps its user's, in user 0's `users/u000/system/state`, so a
+run of one user is what it always was. With more users, every round:
+
+1. **begins** with every other user's `system/state` a copy of the one state, every absolute path that names user 0's
+   folder renamed to the user's own (in text files, links and SQLite databases), so every user's instance starts from
+   the same state, the one state as the round began; user 0's harness works in the one state itself;
+2. **plays** with each harness writing its own copy alone, so nothing one user writes reaches another within the round;
+3. **ends** with every harness stopped and what each user wrote, against the copy it started from, merged into the one
+   state in user order (user 0's in place, then user 1's merged into them, and so on), which is then committed as the
+   round's and which every user starts the next round from. A learner that keeps its state in memory, such as the
+   demo-cache floor, writes it out before the merge (`save_state`) and reads it back after (`load_state`).
+
+The merge is deterministic, path by path against the state as the round began: a path one user alone changed takes
+that change, so files under names of their own (sessions, programs, skills) are all kept; a path several users changed
+differently keeps what each wrote where its kind can hold both, a JSON file merged key by key (arrays keeping both
+sides' items) and any other text file line by line, both versions kept where the same lines changed, the earlier
+user's first. A SQLite database is merged row by row where the merge can read the whole of it as the database keeps
+itself (tables keyed by their primary keys, full-text indexes written by the database's own triggers, no trigger that
+rewrites rows): both users' rows are kept, a row both changed takes the later user's, and new rows whose integer ids
+clash are numbered after the earlier users', the foreign keys the database declares following, so hermes-agent's
+sessions and messages are all kept. A database the merge cannot read so, such as openclaw's agent database, takes the later user's
+whole, and so does anything else both changed, a binary file, a link or git's own files in a repository the harness
+keeps in its state; a removal yields to a change; and nothing is written through a link or over a folder.
+`users/u000/system/state-merges.jsonl` records each round's merge: what every user added, changed and removed, and every
+path several users changed with the rule that settled it. The rules in full are beside the code, in `shared.py`.
+
+The runner writes a round's records before the learner ends the round, so a round stays open, in
+`users/u000/system/state-round.json.gz`, until its merge is committed, and a run stopped in the middle of one settles it
+as it is taken up again: a round stopped while it played is undone, the one state put back as the round began, and the
+runner plays it again; a round stopped in its merge is merged from what every user wrote in it, which is still on disk,
+and committed as its own round before the next begins. A collective run played before every learner kept one state, its
+users' stores apart, is refused rather than played on. A frozen test's round is the one exception to the merge: its
+users are forks of the stream's end that nothing after the test reads, so their writes are kept apart, each committed
+in its own fork.
+
 ## Logged state and forks
 
 `arc-baselines run --log-state` commits a `SystemLearner`'s whole state directory at the end of every round, into
 `system/state.git` beside it, each round's commit listed in `system/state-log.jsonl`; git keeps a file once however
-many rounds it lasts, so a run's every state costs about what its last one does. `CollectiveHarnessLearner` logs every
-user's state this way, in `users/uNNN/system/`.
+many rounds it lasts, so a run's every state costs about what its last one does. `CollectiveHarnessLearner` logs the
+one state its users share this way, in user 0's `users/u000/system/`.
 
 ```bash
 # the stream alone, its state committed at the end of every round

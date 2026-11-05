@@ -1,9 +1,9 @@
-"""The frozen tests (continual_arc_training.frozen and scripts/frozen.sh) off any GPU: the end-of-stream state each test
-user starts from (stream user i mod U, forked from its commit of the stream's last round when the run committed its
-users' states, otherwise copied with its folder's absolute paths renamed to the test user's in text files, links and a
-SQLite database's rows; a bare program library's kept programs and the team's demonstration cache), the run's last
-phase refused unless it trained on every round, each kind of play dispatched to its own play function, the summary,
-the two schedules against the benchmark's own, and frozen.sh end to end with every node tool stubbed."""
+"""The frozen tests (continual_arc_training.frozen and scripts/frozen.sh) off any GPU: the end-of-stream state every test
+user starts from (the run's one state, user 0's, forked from its commit of the stream's last round when the run
+committed it, otherwise copied with its folder's absolute paths renamed to the test user's in text files, links and a
+SQLite database's rows), the run's last phase refused unless it trained on every round, each kind of play dispatched to
+its own play function, the summary, the two schedules against the benchmark's own, and frozen.sh end to end with every
+node tool stubbed."""
 from __future__ import annotations
 
 import json
@@ -25,8 +25,9 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 
 
 def _stream(tmp_path, users=2, rounds=3, latest_rounds=3):
-    """A finished real-time run's folder: its schedule, alias-salt and driver.json, and each user's harness state naming
-    its own folder in a script, a session, a link and a compiled module."""
+    """A finished real-time run's folder: its schedule, alias-salt and driver.json, and every user's harness state naming
+    its own folder in a script, a session, a link and a compiled module: user 0's the one state the run's users shared,
+    every other user's the copy it played its last round on."""
     run = tmp_path / "runs" / "rt" / "pg-u2-lag1"
     played = run / "play"
     played.mkdir(parents=True)
@@ -51,29 +52,30 @@ def _stream(tmp_path, users=2, rounds=3, latest_rounds=3):
     return run
 
 
-def test_each_test_user_starts_from_its_stream_users_end_state_in_a_folder_of_its_own(tmp_path):
+def test_every_test_user_starts_from_the_runs_one_state_in_a_folder_of_its_own(tmp_path):
     run = _stream(tmp_path)
     test_dir = run / "frozen" / "held-out" / "play"
     memory = frozen.seed(run, test_dir, 4)
     assert (test_dir / "alias-salt").read_text() == "salt\n"
-    assert memory == {"memory": "test user i from stream user i mod stream_users, relocated", "stream_users": 2,
-                      "stream_rounds": 3,   # each user's script, session and link renamed
-                      "relocated": {u: {"files": 2, "links": 1, "databases": 0} for u in ("u000", "u001")}}
+    assert memory == {"memory": "every test user a copy of the run's one state, relocated", "stream_users": 2,
+                      "stream_rounds": 3,   # its script, session and link renamed
+                      "relocated": {"files": 2, "links": 1, "databases": 0}}
+    src = run / "play" / "users" / "u000"
     for user in range(4):
-        home, src = test_dir / "users" / f"u{user:03d}", run / "play" / "users" / f"u{user % 2:03d}"
+        home = test_dir / "users" / f"u{user:03d}"
         state = home / "system" / "state"
         pip = state / "workspace" / ".venv" / "bin" / "pip"
         assert pip.read_text() == f"#!{state}/workspace/.venv/bin/python\n" and os.access(pip, os.X_OK)
         cwd, other = [json.loads(line) for line in (state / "sessions" / "s.jsonl").read_text().splitlines()]
-        assert cwd == {"cwd": f"{state}/workspace", "user": user % 2}
+        assert cwd == {"cwd": f"{state}/workspace", "user": 0}
         # a path that only begins with the folder's name is another folder's, and kept
         assert other == {"other": f"{src}0/x", "note": str(home)}
         assert os.readlink(state / "workspace" / "lib") == f"{state}/workspace/.venv"
         assert os.readlink(state / "workspace" / "py") == "/usr/bin/python3"
         assert (state / "workspace" / "m.pyc").read_bytes() == b"\0compiled " + str(src / "system" / "state").encode()
-    # the stream users' own states are as they were
-    src = run / "play" / "users" / "u001" / "system" / "state"
-    assert json.loads((src / "sessions" / "s.jsonl").read_text().splitlines()[0])["cwd"] == f"{src}/workspace"
+    # the run's own state is as it was
+    state = src / "system" / "state"
+    assert json.loads((state / "sessions" / "s.jsonl").read_text().splitlines()[0])["cwd"] == f"{state}/workspace"
 
 
 def _forks(monkeypatch):
@@ -94,9 +96,9 @@ def _forks(monkeypatch):
 
 
 def _commit(run, rounds=3):
-    """``run`` (:func:`_stream`) as a stream whose learner committed its users' states leaves it: every user's state
-    committed at the end of each round (the baselines' ``statelog.StateLog``), each round adding a line to the user's
-    notes, and the benchmark's schedule and a record of every instance, which the baselines' seeding reads."""
+    """``run`` (:func:`_stream`) as a stream whose learner committed its one state leaves it: user 0's state committed at
+    the end of each round (the baselines' ``statelog.StateLog``), each round adding a line to its notes, and the
+    benchmark's schedule and a record of every instance, which the baselines' seeding reads."""
     from continual_arc_baselines.statelog import StateLog
     played, users = run / "play", frozen.stream_users(run)
     (played / "schedule.json").write_text(json.dumps({
@@ -105,12 +107,11 @@ def _commit(run, rounds=3):
                   for r in range(rounds) for u in range(users)]}))
     (played / "records.jsonl").write_text("".join(json.dumps({"phase": "stream", "round": r, "user": u}) + "\n"
                                                   for r in range(rounds) for u in range(users)))
+    system = played / "users" / "u000" / "system"
     for r in range(rounds):
-        for u in range(users):
-            system = played / "users" / f"u{u:03d}" / "system"
-            with (system / "state" / "notes.md").open("a") as notes:
-                notes.write(f"round {r}\n")
-            StateLog(system / "state", system / "state.git", system / "state-log.jsonl").commit()
+        with (system / "state" / "notes.md").open("a") as notes:
+            notes.write(f"round {r}\n")
+        StateLog(system / "state", system / "state.git", system / "state-log.jsonl").commit()
     return run
 
 
@@ -119,50 +120,40 @@ def _git(system, *args):
                           check=True).stdout
 
 
-def test_a_run_with_state_logs_forks_its_users_commits_and_one_without_copies_their_folders(tmp_path, monkeypatch):
+def test_a_run_with_a_state_log_forks_its_one_states_commit_and_one_without_copies_it(tmp_path, monkeypatch):
     _forks(monkeypatch)
     from continual_arc_baselines.statelog import StateLog
     copied = _stream(tmp_path / "copied")
     assert not frozen.committed(copied)
     doc = frozen.seed(copied, copied / "frozen" / "held-out" / "play", 4)
-    assert "from" not in doc and set(doc["relocated"]) == {"u000", "u001"}
+    assert "from" not in doc and doc["relocated"] == {"files": 2, "links": 1, "databases": 0}
     run = _commit(_stream(tmp_path / "committed"))
     played, test_dir = run / "play", run / "frozen" / "held-out" / "play"
-    (played / "library").mkdir()
-    for u in range(2):
-        (played / "library" / f"r0002-u{u:03d}.json").write_text(json.dumps({"user": u}))
-    (played / "demo-cache").mkdir()
-    (played / "demo-cache" / "r0002.json").write_text("[]")
     assert frozen.committed(run)
-    commits = [json.loads((played / "users" / f"u{u:03d}" / "system" / "state-log.jsonl").read_text()
-                          .splitlines()[-1])["commit"] for u in range(2)]
+    src = played / "users" / "u000" / "system"
+    commit = json.loads((src / "state-log.jsonl").read_text().splitlines()[-1])["commit"]
     assert frozen.seed(run, test_dir, 4) == {
-        "memory": "test user i a fork of stream user i mod stream_users at its commit of the stream's last round, "
-                  "relocated", "stream_users": 2, "stream_rounds": 3,
-        "from": {"round": 2, "systems": [{"system": str(played / "users" / f"u{u:03d}" / "system"),
-                                          "commit": commits[u], "relocated": 3, "databases": 0} for u in range(2)]}}
+        "memory": "every test user a fork of the run's one state at its commit of the stream's last round, relocated",
+        "stream_users": 2, "stream_rounds": 3,
+        "from": {"round": 2, "system": str(src), "commit": commit, "relocated": 3, "databases": 0}}
     assert (test_dir / "alias-salt").read_text() == "salt\n"
     for user in range(4):
-        system, src = test_dir / "users" / f"u{user:03d}" / "system", played / "users" / f"u{user % 2:03d}" / "system"
+        system = test_dir / "users" / f"u{user:03d}" / "system"
         state = system / "state"
         assert (state / "workspace" / ".venv" / "bin" / "pip").read_text() == \
             f"#!{state}/workspace/.venv/bin/python\n"
         assert json.loads((state / "sessions" / "s.jsonl").read_text().splitlines()[0]) == {
-            "cwd": f"{state}/workspace", "user": user % 2}
+            "cwd": f"{state}/workspace", "user": 0}
         assert (state / "notes.md").read_text() == "round 0\nround 1\nround 2\n"
-        # the stream user's history, then the renaming, committed before the test begins
+        # the one state's history, then the renaming, committed before the test begins
         assert _git(system, "log", "--format=%s").splitlines() == [f"relocated from {src}", "round 2", "round 1",
                                                                     "round 0"]
-        assert _git(system, "rev-parse", "HEAD~1").strip() == commits[user % 2]
+        assert _git(system, "rev-parse", "HEAD~1").strip() == commit
     # the test round's commit, as the learner makes it, holds what the user wrote in it and nothing else
     system = test_dir / "users" / "u003" / "system"
     (system / "state" / "workspace" / "answer.py").write_text("print(1)\n")
     StateLog(system / "state", system / "state.git", system / "state-log.jsonl").commit()
     assert _git(system, "diff", "--name-only", "HEAD~1", "HEAD").split() == ["workspace/answer.py"]
-    # a bare row's memory and the team's cache are copied as before
-    assert [json.loads((test_dir / "library" / f"r0002-u{u:03d}.json").read_text()) for u in range(4)] == [
-        {"user": u % 2} for u in range(4)]
-    assert [p.name for p in (test_dir / "demo-cache").iterdir()] == ["r0002.json"]
 
 
 def test_a_database_names_the_test_users_folder_in_its_rows_its_full_text_index_left_alone(tmp_path):
@@ -184,26 +175,6 @@ def test_a_database_names_the_test_users_folder_in_its_rows_its_full_text_index_
             (f"{mine}/system/state/workspace",), (f"{home}0/elsewhere",)]
         assert copy.execute("SELECT body FROM notes").fetchall() == [(f"ran in {state}",)]
     assert db.execute("SELECT cwd FROM sessions WHERE id = 's1'").fetchone() == (f"{state}/workspace",)
-
-
-def test_a_bare_rows_memory_is_its_users_last_library_and_the_teams_cache(tmp_path):
-    run = _stream(tmp_path)   # two users, three rounds
-    played = run / "play"
-    for u in range(2):
-        (played / "users" / f"u{u:03d}" / "system" / "state").rename(played / "users" / f"u{u:03d}" / "system" / "gone")
-    (played / "library").mkdir()
-    (played / "demo-cache").mkdir()
-    for r in range(3):
-        for u in range(2):
-            (played / "library" / f"r{r:04d}-u{u:03d}.json").write_text(json.dumps({"round": r, "user": u}))
-        (played / "demo-cache" / f"r{r:04d}.json").write_text(json.dumps([{"round": r}]))
-    test_dir = run / "frozen" / "held-out" / "play"
-    assert frozen.seed(run, test_dir, 4)["relocated"] == {}
-    assert [json.loads((test_dir / "library" / f"r0002-u{u:03d}.json").read_text()) for u in range(4)] == [
-        {"round": 2, "user": u % 2} for u in range(4)]
-    assert sorted(p.name for p in (test_dir / "library").iterdir()) == [f"r0002-u{u:03d}.json" for u in range(4)]
-    assert sorted(p.name for p in (test_dir / "demo-cache").iterdir()) == ["r0000.json", "r0001.json", "r0002.json"]
-    assert not (test_dir / "users").exists()
 
 
 def test_seeding_again_starts_from_nothing(tmp_path):
@@ -252,13 +223,13 @@ def test_a_trained_run_plays_on_its_server_and_a_reference_row_through_its_own_p
     assert [args[:2] for args, _ in played] == [("qwen", "hg")] and played[0][1] == {"api_key": "a key"}
     (run / "play" / "driver.json").write_text(json.dumps({"row": "m", "player": "glm"}))
     played = _play_with(monkeypatch, "--run", str(run), "--player", "glm")
-    assert [args[:2] for args, _ in played] == [("glm", "m")] and played[0][1] == {"api_key": "a key", "rounds_done": 3}
+    assert [args[:2] for args, _ in played] == [("glm", "m")] and played[0][1] == {"api_key": "a key"}
     doc = json.loads((run / "frozen" / "held-out" / "play" / "frozen.json").read_text())
     assert (doc["player"], doc["row"], doc["stream_rounds"]) == ("glm", "m", 3)
-    # the same row from an empty state: nothing seeded, no rounds done, into held-out-reference
+    # the same row from an empty state: nothing seeded, into held-out-reference
     played = _play_with(monkeypatch, "--run", str(run), "--player", "glm", "--reference")
     assert [args[:3] for args, _ in played] == [("glm", "m", run / "frozen" / "held-out-reference" / "play")]
-    assert played[0][1] == {"api_key": "a key", "rounds_done": 0}
+    assert played[0][1] == {"api_key": "a key"}
     assert sorted(p.name for p in (run / "frozen" / "held-out-reference" / "play").iterdir()) == ["frozen.json"]
     # another player from the row's memory, under a name of its own
     played = _play_with(monkeypatch, "--run", str(run), "--player", "qwen", "--name", "held-out-qwen")
@@ -493,3 +464,10 @@ def test_frozen_sh_plays_a_reference_from_nothing_and_a_runs_weights_alone(tmp_p
     assert refused.returncode == 1
     assert "a reference from nothing has no memory to leave out" in \
         (home / "runs" / "paper" / "qwen-h0" / "weights" / "progress").read_text()
+
+
+def test_a_run_that_kept_its_demo_cache_apart_has_no_memory_to_test_from(tmp_path):
+    run = _stream(tmp_path)
+    (run / "play" / "demo-cache").mkdir()
+    with pytest.raises(SystemExit, match="demo-cache"):
+        frozen.seed(run, run / "frozen" / "held-out" / "play", 4)

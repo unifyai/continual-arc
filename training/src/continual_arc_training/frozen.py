@@ -11,19 +11,20 @@ nothing is learnt:
   * the model: a trained run's last phase, trained on every round the stream played, or another adapter given; or a
     reference row's player, or another given; or the base model, for the trained runs' references, rows h0 (the
     learner reset) and bare (the bare model), played from nothing on the stack the trained runs play on (``--row``);
-  * the memory: test user i starts from what stream user i mod U, of the run's U users, ended the stream with: its
-    harness state, in which every absolute path that named the stream user's folder names the test user's instead (a
-    prime-agent state names its folder in its Python environments, its daemon's records and its sessions, and a state
-    that kept them would read and write the stream user's own files), a bare program library's kept programs and pairs
-    (its ``library/``), and the team's demonstration cache as the stream left it (the demo-cache floor's ``demo-cache/``);
+  * the memory: every test user starts from the one state the run's users shared, as the stream ended it (the
+    baselines' CollectiveHarnessLearner keeps it in user 0's ``system/state``, every user's writes merged into it round
+    by round): a harness's store, a floor's demonstration cache or a program library's programs and pairs, in which
+    every absolute path that named user 0's folder names the test user's instead (a prime-agent state names its folder
+    in its Python environments, its daemon's records and its sessions, and a state that kept them would read and write
+    the stream's own files);
   * the task names: the run's own (its ``alias-salt``), by which the memory names tasks.
 
-A run whose stream committed every user's harness state at the end of every round (the baselines'
-CollectiveHarnessLearner keeps each user's ``system/state.git`` and ``state-log.jsonl``) has each test user forked from
-its stream user's commit of the stream's last round by the baselines' own seeding, so ``git diff HEAD~1 HEAD`` in a
-test user's ``system/state.git`` is what it wrote in its test instance. A run without commits has its users'
-``system/state`` folders copied and renamed instead (:func:`copy_states`). Either way the path renamed is the run's
-``play/`` as its driver spelt it, never resolved, since a harness names its folder by that spelling.
+A run whose stream committed its one state at the end of every round (user 0's ``system/state.git`` and
+``state-log.jsonl``) has each test user forked from its commit of the stream's last round by the baselines' own
+seeding, so ``git diff HEAD~1 HEAD`` in a test user's ``system/state.git`` is what it wrote in its test instance. A run
+without commits has user 0's ``system/state`` copied and renamed instead (:func:`copy_states`). Either way the path
+renamed is the run's ``play/`` as its driver spelt it, never resolved, since a harness names its folder by that
+spelling. The test's own users never share a state: nothing after the test reads what its round wrote.
 
 Each test is a benchmark run of its own, ``OUT/TEST/play`` (OUT the run's ``frozen/`` unless given): records.jsonl,
 schedule.json, summary.json, every user's harness and every model call, played by the run's own driver as its stream
@@ -160,60 +161,52 @@ def relocate_database(path: Path, old: str, new: str) -> None:
 
 
 def committed(run: Path) -> bool:
-    """Whether the run's stream committed its users' harness states round by round (each user's
-    ``system/state-log.jsonl``)."""
-    return any((run / "play" / "users").glob("u*/system/state-log.jsonl"))
+    """Whether the run's stream committed its one state round by round (user 0's ``system/state-log.jsonl``)."""
+    return (run / "play" / "users" / "u000" / "system" / "state-log.jsonl").is_file()
 
 
 def copy_states(run: Path, test_dir: Path, users: int) -> dict[str, Any]:
-    """``test_dir`` from nothing with the run's alias-salt and, for each of its ``users``, a copy of stream user i mod U's
-    harness state, renamed: the seeding of a run whose users' states were never committed. Returns what each stream
-    user's state renamed its folder in, by user."""
+    """``test_dir`` from nothing with the run's alias-salt and, for each of its ``users``, a copy of the run's one state
+    (user 0's), renamed: the seeding of a run whose state was never committed. Returns what the state renamed its folder
+    in."""
     played = run / "play"
-    n = stream_users(run)
     shutil.rmtree(test_dir, ignore_errors=True)
     test_dir.mkdir(parents=True)
     shutil.copy2(played / SALT_FILE, test_dir / SALT_FILE)
-    sources = [played / "users" / f"u{u:03d}" for u in range(n)]
-    found = {u: naming(src / "system" / "state", str(src)) for u, src in enumerate(sources)
-             if (src / "system" / "state").is_dir()}
+    src = played / "users" / "u000"
+    if not (src / "system" / "state").is_dir():
+        return {"files": 0, "links": 0, "databases": 0}
+    found = naming(src / "system" / "state", str(src))
 
     def one(user: int) -> None:
-        src, dst = sources[user % n], test_dir / "users" / f"u{user:03d}"
-        if user % n not in found:
-            return
+        dst = test_dir / "users" / f"u{user:03d}"
         (dst / "system").mkdir(parents=True)
         subprocess.run(["cp", "-a", str(src / "system" / "state"), str(dst / "system" / "state")], check=True)
-        relocate(dst / "system" / "state", str(src), str(dst), found[user % n])
+        relocate(dst / "system" / "state", str(src), str(dst), found)
 
     with ThreadPoolExecutor(COPIES) as pool:
         list(pool.map(one, range(users)))
-    return {f"u{u:03d}": {"files": len(f[0]), "links": len(f[1]), "databases": len(f[2])} for u, f in found.items()}
+    return {"files": len(found[0]), "links": len(found[1]), "databases": len(found[2])}
 
 
 def seed(run: Path, test_dir: Path, users: int) -> dict[str, Any]:
     """``test_dir`` as its round begins (the module's docstring), from nothing: the run's alias-salt, and for each of its
-    ``users`` what stream user i mod U ended the stream with: its harness state, forked from its commit of the stream's
-    last round when the run has commits (:func:`committed`) and copied otherwise (:func:`copy_states`), its kept
-    programs and pairs, and the team's demonstration cache. Returns what the test starts from, for its frozen.json."""
+    ``users`` the one state the stream ended with, forked from its commit of the stream's last round when the run has
+    commits (:func:`committed`) and copied otherwise (:func:`copy_states`). Returns what the test starts from, for its
+    frozen.json."""
     played = run / "play"
-    n, last = stream_users(run), stream_rounds(run) - 1
+    if (played / "demo-cache").is_dir():
+        raise SystemExit(f"{run} keeps its demonstration cache in play/demo-cache/, as row dc did before its cache was its "
+                         "users' one state, which holds none of it: its tests have no memory to start from")
     if committed(run):
         from continual_arc_baselines import frozen as forks
         # play/ as the run's driver spelt it, never resolved: the harnesses name their folders by that path
-        memory = {"memory": "test user i a fork of stream user i mod stream_users at its commit of the stream's last "
-                            "round, relocated", **forks.seed(played, test_dir, users)}
+        memory = {"memory": "every test user a fork of the run's one state at its commit of the stream's last round, "
+                            "relocated", **forks.seed(played, test_dir, users)}
     else:
-        memory = {"memory": "test user i from stream user i mod stream_users, relocated",
+        memory = {"memory": "every test user a copy of the run's one state, relocated",
                   "relocated": copy_states(run, test_dir, users)}
-    if (played / "library").is_dir():   # a bare program library's memory, by round and user
-        (test_dir / "library").mkdir()
-        for user in range(users):
-            shutil.copy2(played / "library" / f"r{last:04d}-u{user % n:03d}.json",
-                         test_dir / "library" / f"r{last:04d}-u{user:03d}.json")
-    if (played / "demo-cache").is_dir():   # the team's demonstration cache, a file a round
-        shutil.copytree(played / "demo-cache", test_dir / "demo-cache")
-    return {**memory, "stream_users": n, "stream_rounds": last + 1}
+    return {**memory, "stream_users": stream_users(run), "stream_rounds": stream_rounds(run)}
 
 
 def check_served(base_url: str, served: str, adapter: Path) -> None:
@@ -287,8 +280,7 @@ def cmd_play(o: argparse.Namespace) -> None:
         from continual_arc_training import references
         key = os.environ["OPENROUTER_API_KEY"]
         if row in references.BARE_ROWS:
-            result = references.play_bare_round(o.player, row, play_dir, schedule, api_key=key,
-                                                rounds_done=0 if reference else stream_rounds(run))
+            result = references.play_bare_round(o.player, row, play_dir, schedule, api_key=key)
         else:
             result = references.play_round(o.player, row, play_dir, schedule, api_key=key)
     print(json.dumps({"test": o.test, "records": len(result.records),

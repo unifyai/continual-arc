@@ -11,7 +11,7 @@ the benchmark's README at the repository root.
 | **Task** | One hidden grid rule. |
 | **Instance** | One freshly generated puzzle for a task (a new test input). A task can have many instances. |
 | **Game** | One instance played from start to end. |
-| **User** (`u000`, `u001`, ...) | One player slot in a schedule. A user plays one instance a round and keeps its own harness memory from round to round. |
+| **User** (`u000`, `u001`, ...) | One player slot in a schedule. A user plays one instance a round, from the one harness memory every user shares (see State log). |
 | **Schedule** | The fixed list of instances a play goes through, round by round. |
 | **Stream** | `arc1`'s 200 rounds (workstreams order, seed 0), served to 1, 2 or 4 users, each over 25 tasks of their own. |
 | **Epilogue** | 100 rounds after the stream in the schedule, in which every user meets the 100 held-out tasks once each. No measure reads it; the held-out test's instances are its user 0's. |
@@ -22,7 +22,7 @@ the benchmark's README at the repository root.
 | **Frozen tests** | The two tests after the stream, each one round of 100 users played at once by the system as the stream left it, its model and memory, nothing learnt during the test and nothing passed from one test instance to another: the **held-out test**, one instance of each of 100 **held-out tasks** (ARC-AGI-1 evaluation tasks the stream never uses), and the **seen test**, four new instances of each of the stream's 25 tasks at one user, and at more the same 100 spread over every user's own tasks, one of each task once they bring more than 100. |
 | **Transfer** | The benchmark's headline: the share of the budget a run saves on a frozen test's instances against the learner reset (row H0) on the same instances. |
 | **Aliases** | Per-run task names (from a run's `alias-salt`), by which a harness's memory names tasks. Two plays with the same aliases see identical prompts. |
-| **State log** | Every user's harness memory at the end of every round, one git commit in the user's `system/state.git`, listed by round in `system/state-log.jsonl` (the baselines' `CollectiveHarnessLearner`). |
+| **State log** | The harness memory at the end of every round, one git commit in user 0's `system/state.git`, listed by round in `system/state-log.jsonl` (the baselines' `CollectiveHarnessLearner`). At several users the memory is one for all of them: every user's game of a round starts from a copy of it, and what every user wrote is merged into it as the round ends, each round's merge recorded in `system/state-merges.jsonl`. |
 
 ## The harness
 
@@ -44,7 +44,7 @@ the benchmark's README at the repository root.
 | **H, H0** | The model in prime-agent, untrained: H keeps the harness's memory, H0 wipes it before every instance (the learner reset). |
 | **HPL, HPL0, HA** | H told the program library's procedure; HPL wiped before every instance; H asked after every verdict to save what could help later. |
 | **HG, HPLG, HGPL** | The turn after each verdict driven by GLM (the storer) instead of the player: HG plain, HPLG with both told the procedure, HGPL with the storer alone told it. |
-| **DC, F** | The bare model behind the benchmark's protocol: DC (the demo-cache floor) with the demos bought for a task shown again when the task returns, one cache for the team; F (the stateless floor, `bare`) with nothing kept. |
+| **DC, F** | The bare model behind the benchmark's protocol: DC (the demo-cache floor) with the demos bought for a task shown again when the task returns, one cache for the team, as every row's memory is one; F (the stateless floor, `bare`) with nothing kept. |
 | **M, M0** | The program library on the bare model: every submission a program, the last that reproduces all of a task's pairs kept and run first when the task returns; M0 wiped before every instance. |
 | **DAgger, OPSD, PG** | The trained rows: a LoRA adapter of Qwen3.5-9B trained between rounds with a one-round lag. |
 

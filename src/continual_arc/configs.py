@@ -307,7 +307,7 @@ def test_schedule(
     the configuration's tasks at one user, the same number spread evenly over every user's tasks at more, and one of
     each task once the users bring more tasks than that, at instance seeds of their own (``derive_seed(seed,
     "seen-test", i)``), which no stream slot draws, in a seeded order. Instance i is a task of user i mod U, of the
-    stream's U users, whose state test user i starts from.
+    stream's U users, and every instance meets the learner's one state as the stream left it.
 
     Every instance is played from the system's state at the stream's end and nothing passes from one
     to another. ``width`` users play at once, every instance by default: one round, each user's own

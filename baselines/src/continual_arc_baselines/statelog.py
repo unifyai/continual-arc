@@ -37,6 +37,15 @@ def _git(repo: Path, *args: str, tree: Path | None = None) -> str:
                           check=True, capture_output=True, text=True).stdout
 
 
+def ensure_repo(repo: Path) -> None:
+    """A state's repository at ``repo``, made if there is none: bare, but for a work tree named at every call, and never
+    repacked by itself, since a repack mid-run would hold the run stopped while it ran."""
+    if not (repo / "HEAD").exists():
+        subprocess.run(["git", "init", "--quiet", "--bare", str(repo)], env={**os.environ, **GIT_ENV}, check=True)
+        _git(repo, "config", "core.bare", "false")
+        _git(repo, "config", "gc.auto", "0")
+
+
 def _descendants(root: int) -> list[int]:
     """Every live process below ``root``, from Linux's /proc; none on a host without it."""
     children: dict[int, list[int]] = {}
@@ -69,11 +78,7 @@ class StateLog:
     def __init__(self, tree: Path, repo: Path, log: Path):
         self.tree, self.repo, self.log = Path(tree).resolve(), Path(repo).resolve(), Path(log).resolve()
         self.tree.mkdir(parents=True, exist_ok=True)
-        if not (self.repo / "HEAD").exists():
-            subprocess.run(["git", "init", "--quiet", "--bare", str(self.repo)], env={**os.environ, **GIT_ENV},
-                           check=True)
-            _git(self.repo, "config", "core.bare", "false")
-            _git(self.repo, "config", "gc.auto", "0")  # a repack mid-run would hold the run stopped while it ran
+        ensure_repo(self.repo)
         self.rounds = sum(1 for _ in self.log.open()) if self.log.exists() else 0
 
     def commit(self) -> str:

@@ -1,13 +1,17 @@
-"""A team served at once: the collective regime with an off-the-shelf harness per user.
+"""A team served at once: the collective regime with an off-the-shelf harness, one process per user and one state for
+all of them.
 
 In the collective regime (``continual_arc``: a configuration's ``users``) every user walks a stream
-of their own and a round serves one instance per user, concurrently. Here every user runs a harness
-of their own (one hermes-agent, openclaw or prime-agent with its own private state: memories,
-skills, sessions, workspace), as each person on a team runs their own copy, and every harness calls
-the same model through the same server. What the users share is the model, and only the model: its
-weights may change between rounds (the trained rows), nothing else passes from one user to another.
-The benchmark's contract therefore holds by construction: a user's harness changes its own state
-only while that user works, and each user works on one instance per round.
+of their own and a round serves one instance per user, concurrently. Here every user's instance is played by a
+harness process of its own (a hermes-agent, openclaw or prime-agent, a floor or a program library), every one calling
+the same model through the same server, and the learner keeps one state for all of them, as it keeps one model: what
+the harness stores (its memories, skills, programs, sessions and workspace), as whatever weights a trained row trains
+between rounds, serves every user (:mod:`continual_arc_baselines.shared`). Every user's instance of a round starts from
+the one state as the round began, each harness writes a copy of its own while it plays, and what they wrote is merged
+into the one state, user by user, once the round is over: the benchmark's contract, that the state changes only
+between rounds, holds by construction. A run of one user keeps its user's state in place, as it always has. A frozen
+test's round is played from forks of the stream's end that nothing after it reads, so its users' writes are kept apart,
+each in its fork's own history, and never merged (:mod:`continual_arc_baselines.frozen`).
 
 Each user's harness talks to a tracking proxy of its own (:class:`LLMProxy`), so the usage the
 runner charges to an instance is that user's (:meth:`CollectiveHarnessLearner.user_resources`), and
@@ -23,12 +27,13 @@ the proxy (from that user's thread: it must not block). ``call_hook`` receives e
 model calls as it ends, so that a driver can keep every call on disk as it is made and resume a
 round cut short from its last call rather than from its start.
 
-Every user's harness adapter is attached with its state logged (``SystemLearner.attach``'s ``log_state``), so at
-the end of every round each user's harness state is committed to that user's own history,
-``users/uNNN/system/state.git`` and its ``state-log.jsonl`` (``SystemLearner.end_round``,
-:mod:`continual_arc_baselines.statelog`): ``git diff HEAD~1 HEAD`` there is what the user's harness
-wrote in the round, and a run's frozen tests can fork every user's commit at the end of the stream
-(:func:`continual_arc_baselines.frozen.seed`).
+The one state is user 0's (``users/u000/system/state``), whose harness adapter is attached with its state logged
+(``SystemLearner.attach``'s ``log_state``), so at the end of every round the one state, every user's writes merged into
+it, is committed to ``users/u000/system/state.git`` and listed in its ``state-log.jsonl`` (``SystemLearner.end_round``,
+:mod:`continual_arc_baselines.statelog`): ``git diff HEAD~1 HEAD`` there is what the round wrote, and
+``state-merges.jsonl`` beside it what each user wrote and how it was merged. A run's frozen tests fork its commit at the
+end of the stream (:func:`continual_arc_baselines.frozen.seed`). The other users' folders hold their harnesses' logs
+and the copy each worked on in the round.
 
 The users' harnesses are started lazily, on each user's first action, and serve concurrently
 (``concurrent_users``): the runner calls :meth:`act` and :meth:`observe` for different users from
@@ -59,9 +64,10 @@ from typing import Any
 from continual_arc.arc3.env import DemonstrationFeedback
 from continual_arc.env import Action, DemosFeedback, Feedback, LearnerObservation, SubmitFeedback
 from continual_arc.learner import BaseLearner
-from continual_arc.schedule import Schedule
+from continual_arc.schedule import TESTS, Schedule
 
 from continual_arc_baselines.proxy import LLMProxy
+from continual_arc_baselines.shared import SharedState
 from continual_arc_baselines.systems.base import SystemLearner
 from continual_arc_baselines.tracking import LLMCall, Tracker, instance_ended
 
@@ -322,11 +328,20 @@ class _User:
 
 
 class CollectiveHarnessLearner(BaseLearner):
-    """One harness per user, every user's instance of a round served concurrently.
+    """A harness process per user and one state for all of them, every user's instance of a round served concurrently.
 
     ``make_system(user)`` builds a user's harness adapter (a
     :class:`continual_arc_baselines.systems.base.SystemLearner`), not yet attached. ``schedule`` is the one the
-    runner serves, read for the traces' slot bookkeeping alone. Each user's
+    runner serves, read for the traces' slot bookkeeping and for its number of users. At more than one user, unless the
+    schedule is a frozen test, the users keep one state (the module's docstring, :class:`SharedState`): user 0's
+    ``system/state``, of which every other user's harness gets a copy as each round begins, and into which what every
+    user wrote is merged as the round ends. Between the rounds every user's system is stopped (``close``, which a
+    harness adapter starts again from at its next action, a system that keeps its state in memory having written it
+    with ``save_state`` first and reading it again with ``load_state`` after), so that none holds a state while it is
+    merged or copied; only user 0's system ends the round (``end_round``: a harness adapter's commits the one state).
+    A round stays open until its merge is committed, so a learner made on a run stopped in one settles it before its
+    next round begins (:meth:`SharedState.recover`), and a run whose users kept stores of their own is refused. Each
+    user's
     proxy (:class:`~continual_arc_baselines.proxy.LLMProxy`) forwards to ``upstream`` (with ``api_key``), sets
     ``body_defaults`` where the harness left a field out, forces ``body_overrides``, removes ``body_drop``, renames
     message roles by ``role_map`` and gives every past assistant turn its reasoning under ``thinking_field``; with
@@ -334,8 +349,9 @@ class CollectiveHarnessLearner(BaseLearner):
     ``snapshot`` copies every user's harness state at the start of each round, for a writer to
     see what the user's memory held when their instance began. ``call_hook(trace, call)`` runs as each of an
     instance's calls ends (from the proxy's thread: it must not block), and ``instance_hook(trace)`` as each instance
-    ends. As the round ends, the ``end_round`` of every system that has one (a harness adapter's
-    commits its state) runs for each user who played it, in user order, before ``round_hook``. An
+    ends. As the round ends, before ``round_hook``, a team's writes are merged into the one state and user 0's system
+    ends the round (``end_round``: a harness adapter's commits the state); at one user, and in a frozen test, every
+    system that has an ``end_round`` runs it, in user order. An
     instance reaches the instance and round hooks once the proxy has reported the end of
     every call its harness started for it, and the call hook has had each, waiting at most
     ``calls_wait_s``: a call still open then is left out of the instance's calls (for both hooks
@@ -377,6 +393,14 @@ class CollectiveHarnessLearner(BaseLearner):
         # left running (a compaction, a housekeeping call) can take minutes, and one it abandoned ends when the
         # proxy next writes to it, or when the upstream finishes
         self.calls_wait_s = calls_wait_s
+        # the one state of a team (the module's docstring); a frozen test's users are forks of the stream's end, whose
+        # writes no round reads
+        self.shared = (SharedState(lambda user: self.user_dir(user) / "system", schedule.users)
+                       if schedule.users > 1 and schedule.meta.get("test") not in TESTS else None)
+        if self.shared is not None and any((self.user_dir(user) / "system" / "state-log.jsonl").is_file()
+                                           for user in range(1, schedule.users)):
+            raise SystemExit(f"{run_dir}'s users kept stores of their own, as collective runs did before every learner "
+                             "kept one state for its team, so it cannot go on with one state")
         self._users: dict[int, _User] = {}
         self._users_lock = threading.Lock()
         self._round: list[InstanceTrace] = []
@@ -411,15 +435,17 @@ class CollectiveHarnessLearner(BaseLearner):
                 log.warning("user %d: port %d is taken (%s); the user's proxy listens on another", user, port, error)
                 proxy = self.proxy(self.upstream, **settings).start()
             system = self.make_system(user)
-            if isinstance(system, SystemLearner):
-                system.attach(workdir / "system", proxy.environ(), tracker=tracker, log_state=True)
+            if isinstance(system, SystemLearner):   # the one state's history is user 0's
+                system.attach(workdir / "system", proxy.environ(), tracker=tracker,
+                              log_state=self.shared is None or user == 0)
             else:   # a system of its own kind, which keeps its state as it does
                 system.attach(workdir / "system", proxy.environ(), tracker=tracker)
             found = self._users[user] = _User(user, workdir, system, proxy, tracker, self.capture, self.call_hook)
             return found
 
     def state_dir(self, user: int) -> Path:
-        """Where a user's harness keeps everything it persists."""
+        """Where a user's harness keeps everything it persists: the one state for user 0, and for every other user of a
+        team the copy of it they work on in the round."""
         return self.user_dir(user) / "system" / "state"
 
     def set_overrides(self, **fields: Any) -> None:
@@ -446,6 +472,21 @@ class CollectiveHarnessLearner(BaseLearner):
         with self._round_lock:
             self._round = []
             self._round_index = None
+        if self.shared is not None:
+            # a round a stopped process left open first: one the runner had recorded is merged and committed now, and
+            # one cut short while it played is undone (SharedState.recover)
+            if self.shared.recover(self._recorded_rounds()) is not None:
+                self._commit()
+                self.shared.close_round()
+            # every user's instance starts from the one state as the round begins: each other user's harness, stopped
+            # since the round before ended, starts again on a copy of it, and a system that keeps its state in memory
+            # reads its copy now
+            self.shared.begin_round()
+            with self._users_lock:
+                started = dict(self._users)
+            for user, u in started.items():
+                if user and hasattr(u.system, "load_state"):
+                    u.system.load_state()
         if self.snapshot:
             # every user with state, started here or not: a resumed run's first round would otherwise keep the
             # snapshot an earlier launch took of an earlier round
@@ -505,17 +546,24 @@ class CollectiveHarnessLearner(BaseLearner):
         with self._round_lock:
             instances = sorted(self._round, key=lambda t: t.slot)
             index = self._round_index
+        if self.shared is not None and instances:
+            # the runner has written the round's records: from here a stop leaves the round to be merged, not played
+            # again
+            self.shared.ending(index if index is not None else -1)
         deadline = time.monotonic() + self.calls_wait_s
         for t in instances:  # each settled as it ended; one that never ended in observe settles now
             self._user(t.user).settle(t, deadline)
-        # every user's state as the round left it, the round's commit in their own history (SystemLearner.end_round),
-        # before the round hook: a hook may train for hours, or fail, once the round's records are written, and a round
-        # left without its commits would number every later one a round early (a state log counts its own rounds). One
-        # user at a time, since a commit holds every other process of the run stopped (statelog.StateLog.commit).
-        for t in instances:
-            system = self._user(t.user).system
-            if hasattr(system, "end_round"):
-                system.end_round()
+        # the state as the round left it, the round's commit (SystemLearner.end_round), before the round hook: a hook may
+        # train for hours, or fail, once the round's records are written, and a round left without its commit would
+        # number every later one a round early (a state log counts its own rounds). One user at a time, since a commit
+        # holds every other process of the run stopped (statelog.StateLog.commit).
+        if self.shared is None:
+            for t in instances:
+                system = self._user(t.user).system
+                if hasattr(system, "end_round"):
+                    system.end_round()
+        elif instances:
+            self._merge_round(index if index is not None else -1)
         if self.round_hook is not None and instances:
             overrides = self.round_hook(RoundData(index=index if index is not None else -1, instances=instances))
             if overrides:
@@ -523,12 +571,50 @@ class CollectiveHarnessLearner(BaseLearner):
         for t in instances:  # the bodies were for the hook; keep the metadata in the call logs only
             t.calls = []
 
-    def reset(self) -> None:
-        """Wipe every user's harness state (the fresh reference) and, through ``reset_hook``, the model's."""
+    def _merge_round(self, index: int) -> None:
+        """Every user's writes of round ``index`` merged into the one state, and the one state committed as the round's
+        (the class's docstring)."""
         with self._users_lock:
             users = list(self._users.values())
+        for u in users:   # every system's state on disk and none of them running
+            if hasattr(u.system, "save_state"):
+                u.system.save_state()
+            if hasattr(u.system, "close"):
+                u.system.close()
+        self.shared.end_round(index)
+        self._commit()
+        self.shared.close_round()
+
+    def _recorded_rounds(self) -> int:
+        """How many whole rounds the run's records hold, in the run directory the runner writes them to (it writes only
+        whole rounds); none where there are none."""
+        records = self.run_dir / "records.jsonl"
+        if not records.is_file():
+            return 0
+        return sum(1 for line in records.read_text().splitlines() if line.strip()) // self.schedule.users
+
+    def _commit(self) -> None:
+        """The one state, every user's writes merged into it, read back by user 0's system, which ends the round with
+        it (a harness adapter commits it)."""
+        one = self._user(0).system
+        if hasattr(one, "load_state"):
+            one.load_state()
+        if hasattr(one, "end_round"):
+            one.end_round()
+
+    def reset(self) -> None:
+        """Wipe every user's harness state (the fresh reference) and, through ``reset_hook``, the model's: in a team every
+        user's, started in this process or not, and the round's base with them, since the round then begins from
+        nothing."""
+        if self.shared is not None:
+            users = [self._user(user) for user in range(self.schedule.users)]
+        else:
+            with self._users_lock:
+                users = list(self._users.values())
         with ThreadPoolExecutor(max_workers=max(1, min(32, len(users)))) as pool:
             list(pool.map(lambda u: u.system.reset(), users))
+        if self.shared is not None:
+            self.shared.rebase()
         if self.reset_hook is not None:
             self.reset_hook()
 
@@ -553,6 +639,7 @@ class CollectiveHarnessLearner(BaseLearner):
             first = next(iter(self._users.values()), None)
         system = first.system.describe() if first is not None and hasattr(first.system, "describe") else {}
         return {"learner": "collective-harness", "system": system, "users_started": len(self._users),
+                "shared_state": self.shared is not None,
                 "capture": self.capture, "snapshot": self.snapshot, "body_overrides": self.body_overrides,
                 "body_drop": list(self.body_drop)}
 

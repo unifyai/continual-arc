@@ -37,11 +37,11 @@ will help.
 
 The bare-model rows (:data:`BARE_ROWS`, :func:`play_bare_round`), the bare model behind the harness protocol at the
 player's request settings: dc, the demo-cache floor, the demonstrations it bought for a task shown again when the task
-returns, one cache for the team (a round's purchases joining it at the round's end, written to the run's
-``demo-cache/``); f, the stateless floor, the bare model alone; m, the program library on the bare model, every
-submission a program, the last that reproduces all of a task's pairs kept and run first when the task returns, its
-memory kept in the run's ``library/`` between rounds (:func:`keep_library`), since every round is a process of its own;
-and m0, row m wiped before every instance.
+returns; f, the stateless floor, the bare model alone; m, the program library on the bare model, every submission a
+program, the last that reproduces all of a task's pairs kept and run first when the task returns; and m0, row m wiped
+before every instance. Every row keeps one state for its users, as the baselines' ``CollectiveHarnessLearner`` keeps it
+(user 0's ``system/state``, committed round by round): a floor's cache and the library's programs and pairs are written
+there at every round's end and read back by the next round's process, every user's purchases and programs merged in.
 
 Subcommands (``python -m continual_arc_training.references ...``, with OPENROUTER_API_KEY in the environment; reference.sh
 keeps one going): ``play --player P --row R --run-dir D --users N``, every round of a harness row's stream not yet
@@ -75,7 +75,7 @@ REFERENCE_ROWS: dict[str, dict[str, Any]] = {"h": {}, "h0": {}, "hpl": {"program
 STATELESS_ROWS: tuple[str, ...] = (*play.STATELESS_ROWS, "hpl0")
 # each bare-model row's learner (the baselines' systems.bare) and its settings beyond play.FLOOR's
 BARE_ROWS: dict[str, tuple[str, dict[str, Any]]] = {
-    "dc": ("BareSharedDemoCacheLearner", {}), "f": ("BareModelLearner", {}),
+    "dc": ("BareDemoCacheLearner", {}), "f": ("BareModelLearner", {}),
     "m": ("BareProgramLibraryLearner", {}), "m0": ("BareProgramLibraryLearner", {"stateless": True})}
 # the rows whose turn after each verdict another player takes, and the rows whose storer reads the teacher's page
 STORERS: dict[str, str] = {"hg": "glm", "hplg": "glm", "hgpl": "glm"}
@@ -161,30 +161,12 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: 
         learner.close()
 
 
-def keep_library(system: Any, path: Path) -> None:
-    """Row m's memory once a round is played: the user's demonstration cache and kept programs, which the baselines'
-    ``BareProgramLibraryLearner`` holds in memory, written to ``path``."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"programs": system.library,
-                                "pairs": {task: [pair.to_json() for pair in pairs] for task, pairs in system.cache.items()}}))
-
-
-def restore_library(system: Any, path: Path) -> None:
-    """The memory :func:`keep_library` wrote to ``path``, given to the next round's learner."""
-    from continual_arc.tasks import Pair
-    kept = json.loads(path.read_text())
-    system.library = dict(kept["programs"])
-    system.cache = {task: [Pair.from_json(pair) for pair in pairs] for task, pairs in kept["pairs"].items()}
-
-
-def play_bare_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: str, rounds_done: int,
-                    registry: Any = None, max_tokens: int = play.MAX_TOKENS) -> Any:
+def play_bare_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: str, registry: Any = None,
+                    max_tokens: int = play.MAX_TOKENS) -> Any:
     """``player``'s bare-model ``row`` (the module docstring) over the rounds of ``schedule`` not yet in ``run_dir``'s
-    records, the first ``rounds_done`` of them in its records already: every user's bare model at the floor's settings
-    with a reply cap of ``max_tokens``, behind a proxy of its own taking the player's request settings as its defaults.
-    Row dc's users read one cache for the team opened on the run's ``demo-cache/`` after those rounds, whose round ends
-    with the round; row m's take up the memory the round before kept in the run's ``library/`` and keep theirs once the
-    round is played. The run's ``RunResult``."""
+    records: every user's bare model at the floor's settings with a reply cap of ``max_tokens``, behind a proxy of its
+    own taking the player's request settings as its defaults, on the row's one state as the rounds before left it. The
+    run's ``RunResult``."""
     from continual_arc.env import EnvConfig
     from continual_arc.runner import build_env
     from continual_arc.runner import run as run_stream
@@ -194,36 +176,22 @@ def play_bare_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_
 
     spec = PLAYERS[player]
     run_dir = Path(run_dir).expanduser()
+    if (run_dir / "demo-cache").is_dir():
+        raise SystemExit(f"{run_dir} keeps its demonstration cache in demo-cache/, as row dc did before its cache was its "
+                         "users' one state, which holds none of it: the run cannot go on")
     run_dir.mkdir(parents=True, exist_ok=True)
     name, settings = BARE_ROWS[row]
     floor = {"max_tokens": max_tokens, **play.FLOOR, **settings}
     (run_dir / "driver.json").write_text(json.dumps(
         {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "model": spec["model"],
          "learner": f"continual_arc_baselines.systems.bare:{name}", "floor": floor, "defaults": spec["body"]}, indent=1))
-    hooks: dict[str, Any] = {}
-    if row == "dc":
-        cache = bare.SharedDemoCache(run_dir / "demo-cache", rounds_done)
-
-        def make(user: int) -> Any:
-            return bare.BareSharedDemoCacheLearner(spec["model"], shared=cache, user=user, **floor)
-        hooks = {"round_hook": lambda data: cache.end_round(), "reset_hook": cache.clear}
-    else:
-        def make(user: int) -> Any:
-            return getattr(bare, name)(spec["model"], **floor)
-    learner = CollectiveHarnessLearner(make, run_dir, schedule=schedule, upstream=OPENROUTER, api_key=api_key,
-                                       body_defaults=spec["body"], capture=False, snapshot=False, **hooks)
-    library = run_dir / "library"
-    if row == "m" and rounds_done:
-        for user in range(schedule.users):
-            restore_library(learner._user(user).system, library / f"r{rounds_done - 1:04d}-u{user:03d}.json")
+    learner = CollectiveHarnessLearner(lambda user: getattr(bare, name)(spec["model"], **floor), run_dir,
+                                       schedule=schedule, upstream=OPENROUTER, api_key=api_key, body_defaults=spec["body"],
+                                       capture=False, snapshot=False)
     env = build_env(schedule, EnvConfig(), registry if registry is not None else TaskRegistry.default())
     try:
-        result = run_stream(learner, schedule, EnvConfig(), out_dir=run_dir, env=env, resume=True,
-                            learner_name=f"bare-{player}-{row}")
-        if row == "m":
-            for user in range(schedule.users):
-                keep_library(learner._user(user).system, library / f"r{schedule.rounds()[-1]:04d}-u{user:03d}.json")
-        return result
+        return run_stream(learner, schedule, EnvConfig(), out_dir=run_dir, env=env, resume=True,
+                          learner_name=f"bare-{player}-{row}")
     finally:
         learner.close()
 
@@ -243,7 +211,7 @@ def cmd_bare(a: argparse.Namespace) -> None:
     key = os.environ["OPENROUTER_API_KEY"]
     for r in range(len(prior_records(run_dir)) // a.users, a.rounds):
         result = play_bare_round(a.player, a.row, run_dir, play.schedule_cut(r, a.seed, a.users), api_key=key,
-                                 rounds_done=r, max_tokens=a.max_tokens)
+                                 max_tokens=a.max_tokens)
         print(json.dumps({"round": r, "records": len(result.records)}), flush=True)
 
 

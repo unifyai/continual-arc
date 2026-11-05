@@ -495,6 +495,36 @@ def test_round_report_reads_the_program_each_game_began_with(tmp_path):
     assert report["total"]["memory"]["programs"] == {"added": 0, "changed": 2, "removed": 0}
 
 
+def test_round_report_of_a_team_reads_every_game_against_the_one_state_and_counts_what_each_user_wrote(tmp_path):
+    """Two users who share one state (the baselines' CollectiveHarnessLearner): user 1's game opens the task's program
+    that user 0's game kept in round 0, since every game of round 1 begins from the one state, user 0's commit of the
+    round before; and each user's files are what the round's merge recorded them writing against that state, the
+    harness's bookkeeping left out as a snapshot leaves it, with no snapshot of any user taken."""
+    from continual_arc_baselines.shared import MERGES
+    run_dir, path = tmp_path / "run", f"workspace/programs/{TASK}.py"
+    _write_state(run_dir, 0, {path: PROGRAM})
+    _commit_state(run_dir, 0, 0)
+    written = [{"user": 0, "added": [], "changed": [path], "removed": []},
+               {"user": 1, "added": ["agent/skills/grid/SKILL.md", "sessions/s1.jsonl"], "changed": [],
+                "removed": ["workspace/scratch.json"]}]
+    with (memory.system_dir(run_dir, 0) / MERGES).open("w") as fp:
+        fp.write(json.dumps({"round": 1, "users": [{"user": u, "added": [], "changed": [], "removed": []}
+                                                   for u in (0, 1)]}) + "\n")   # a first play cut short
+        fp.write(json.dumps({"round": 1, "users": written}) + "\n")
+    _write_doc(run_dir, 1, 0, turns=[_turn("Submit")], calls=[_call(content="no program here", turn=0)])
+    _write_doc(run_dir, 1, 1, turns=[_turn("Submit")], calls=[_call(tool_results=[PROGRAM], turn=0)])
+
+    report = memory.round_report(run_dir, 1, users=2, round_dir_of=_round_dir, stateless=False)
+
+    assert report["users"]["1"]["reads"]["programs"] == 1 and report["users"]["1"]["reused_program"] is True
+    assert report["users"]["0"]["reads"]["programs"] == 0
+    assert report["users"]["0"]["memory"]["programs"] == {"added": 0, "changed": 1, "removed": 0}
+    assert report["users"]["1"]["memory"]["skills"] == {"added": 1, "changed": 0, "removed": 0}
+    assert report["users"]["1"]["memory"]["workspace_other"] == {"added": 0, "changed": 0, "removed": 1}
+    assert sum(n for area in report["users"]["1"]["memory"].values() for n in area.values()) == 2
+    assert not (_round_dir(run_dir, 1) / "memory" / "u001.json").exists()
+
+
 def test_round_report_a_wiped_row_reads_no_program(tmp_path):
     """A wiped row's game begins from nothing, though the commit of the round before holds what its last game wrote
     (the wipe comes after the commit): a program like the last one, written again and printed, is no kept program

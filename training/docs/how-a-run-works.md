@@ -83,8 +83,10 @@ again within a pass when it is found down.
   are misnamed, so the player sends a fixed prompt to both at temperature 0 and stops rather than play a round on an
   adapter that answers exactly as the base model does (`server.check_served_adapter`). `rounds/rNNNN/served.json`
   records the phase, the rounds it trained on and the lag. A round is played through the benchmark's runner by the
-  baselines' `CollectiveHarnessLearner`, every user's prime-agent behind a proxy that asks vLLM for the token ids, and
-  every game is saved as it ends, calls and ids whole, in the round's `captured/`.
+  baselines' `CollectiveHarnessLearner`, every user's prime-agent behind a proxy that asks vLLM for the token ids, all of
+  them on one harness memory, as they play one model (each user's game starts from a copy of it as the round began, and
+  what every user wrote is merged into it as the round ends), and every game is saved as it ends, calls and ids whole,
+  in the round's `captured/`.
 - **labeller** (DAgger and OPSD): the oracle (GLM-5.3 Flash at medium effort, through the relay) writes its own reply
   to every call the student made as the agent, each read exactly as the student read it with the oracle's working
   rules at the end of its last message, asked once, its reasoning left to it (`labeller`, `oracle`). The rules are
@@ -161,13 +163,13 @@ same instances (row H0).
 
 `frozen.sh RUN GPUS` plays a trained run's tests on its own node once its stream has ended. The model is the run's last
 phase, served on half of GPUS for each test by a server of its own on a port of its own (8120 plus its first GPU),
-launched as `serve.sh` launches the stream's. Test user i's harness memory is stream user i mod U's at the end of the
-stream, with every absolute path that named the stream user's folder renamed to the test user's: a prime-agent state
-names its folder in its Python environments, its daemon's records, its sessions and its SQLite databases' rows, and a
-state that kept them would read and write the stream user's own files. A run whose learner committed every user's
-state round by round (a state log) has each test user forked from its stream user's commit of the stream's last round
-by the baselines' own seeding, so `git diff HEAD~1 HEAD` in a test user's `system/state.git` is what it wrote in its
-test instance; a run without one has its users' states copied and renamed. Each test is a benchmark run of its own,
+launched as `serve.sh` launches the stream's. Every test user's harness memory is the run's one memory at the end of
+the stream, user 0's, with every absolute path that named user 0's folder renamed to the test user's: a prime-agent
+state names its folder in its Python environments, its daemon's records, its sessions and its SQLite databases' rows,
+and a state that kept them would read and write the stream's own files. A run whose learner committed its memory round
+by round (a state log) has each test user forked from its commit of the stream's last round by the baselines' own
+seeding, so `git diff HEAD~1 HEAD` in a test user's `system/state.git` is what it wrote in its test instance; a run
+without one has the memory copied and renamed. The test's users never share what they write: nothing reads it after. Each test is a benchmark run of its own,
 `RUNS/rt/RUN/frozen/held-out/play` and `frozen/seen/play`, with `frozen/summary.json` beside them; once it is recorded,
 its users' copies of the memory go (the memory itself is the run's) and every call, turn and game of the test stays.
 
@@ -218,12 +220,13 @@ ROUNDS=3` is a smoke test of a node's stack.
 - **Every stage leaves a marker.** `play.done` in a round's folder, `labels/split/split.json` for its labels, `DONE` and
   `rounds.json` in a phase's folder, `player.done`, `labeller.done` and `trainer.done` for a loop, `frozen/done` for the
   tests. Running the same command again skips what is done.
-- **Users are slots.** A user (`u000`, `u001`, ...) plays one instance a round, keeping its own harness memory from
-  round to round in `play/users/uNNN/`.
+- **Users are slots, and share one memory.** A user (`u000`, `u001`, ...) plays one instance a round; the harness
+  memory is one for all of them, kept in `play/users/u000/system/` and committed there round by round, and every other
+  user's `play/users/uNNN/` holds its harness's logs and the copy of the memory it played its last round on.
 - **A trained run's folder:** `play/` is one benchmark run (`records.jsonl`, `schedule.json`, `meta.json`,
   `summary.json`, `driver.json`), so `continual-arc report` reads it as any other. `play/rounds/rNNNN/` holds the
-  round's games as served (`captured/`), `served.json`, `memory.json` (the users' memory diffed against the round
-  before) and `labels/`. `train/pNNNN/` holds each phase's `adapter/`, `DONE`, `phase.json` (one line a step and every
+  round's games as served (`captured/`), `served.json`, `memory.json` (what each user wrote in the memory, against
+  the round before) and `labels/`. `train/pNNNN/` holds each phase's `adapter/`, `DONE`, `phase.json` (one line a step and every
   held-out measurement) and `rounds.json`; `train/kernels.json` the software the phases trained on. Older phases are
   pruned to their records, every 20th phase's adapter kept. `frozen/` holds the two tests.
 

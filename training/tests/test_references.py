@@ -161,7 +161,7 @@ def test_a_told_storer_reads_the_teachers_page_in_place_of_the_players_ask(tmp_p
     assert proxy.body_overrides == reference.overrides_of("qwen")
 
 
-def _bare_played(monkeypatch, player, row, run_dir, schedule, rounds_done=0):
+def _bare_played(monkeypatch, player, row, run_dir, schedule):
     """play_bare_round with the collective learner, the runner and the env faked: the systems it made."""
     import continual_arc.runner as runner
     import continual_arc.tasks as tasks
@@ -182,11 +182,12 @@ def _bare_played(monkeypatch, player, row, run_dir, schedule, rounds_done=0):
     monkeypatch.setattr(runner, "build_env", lambda *a, **k: None)
     monkeypatch.setattr(runner, "run", lambda *a, **k: SimpleNamespace(records=[], summary={}))
     monkeypatch.setattr(tasks.TaskRegistry, "default", staticmethod(lambda: None))
-    reference.play_bare_round(player, row, run_dir, schedule, api_key="k", rounds_done=rounds_done)
+    reference.play_bare_round(player, row, run_dir, schedule, api_key="k")
     return made
 
 
 @pytest.mark.parametrize("row,learner,stateless", [("f", "BareModelLearner", False),
+                                                  ("dc", "BareDemoCacheLearner", False),
                                                   ("m", "BareProgramLibraryLearner", False),
                                                   ("m0", "BareProgramLibraryLearner", True)])
 @pytest.mark.parametrize("player", reference.PLAYERS)
@@ -199,31 +200,35 @@ def test_a_bare_row_is_its_floor_at_the_players_settings(player, row, learner, s
     assert driver["row"] == row and driver["learner"].endswith(f":{learner}")
 
 
-def test_row_m_takes_up_the_programs_and_pairs_the_round_before_kept(tmp_path, monkeypatch):
+def test_row_m_takes_up_the_programs_and_pairs_its_one_state_holds(tmp_path):
+    """Every round is a process of its own: row m's programs and pairs reach the next round's learner through the one
+    state the row's users share, to which a round's end saves them and from which the next learner reads them back as
+    it is attached."""
     from continual_arc.tasks import Pair
     from continual_arc_baselines.systems.bare import BareProgramLibraryLearner
+    system = tmp_path / "play" / "users" / "u000" / "system"
     first = BareProgramLibraryLearner("m", **play.FLOOR)
+    first.attach(system, {}, log_state=True)   # as the collective learner attaches the system that keeps the state
     first.library = {"t1": "def transform(grid):\n    return grid\n"}
     first.cache = {"t1": [Pair.from_json({"input": [[1]], "output": [[2]]})]}
-    reference.keep_library(first, tmp_path / "play" / "library" / "r0004-u000.json")
-    schedule = SimpleNamespace(users=1, rounds=lambda: [0, 1, 2, 3, 4, 5])
-    (second,) = _bare_played(monkeypatch, "qwen", "m", tmp_path / "play", schedule, rounds_done=5)
+    first.save_state()
+    second = BareProgramLibraryLearner("m", **play.FLOOR)
+    second.attach(system, {}, log_state=True)
     assert second.library == first.library
     assert {t: [p.to_json() for p in ps] for t, ps in second.cache.items()} == \
         {t: [p.to_json() for p in ps] for t, ps in first.cache.items()}
-    assert (tmp_path / "play" / "library" / "r0005-u000.json").exists()
 
 
 @pytest.mark.parametrize("player", reference.PLAYERS)
-def test_the_demo_cache_floor_at_the_players_settings_has_one_cache_for_the_team(player, tmp_path,
-                                                                                        monkeypatch):
-    """Row dc: every user's bare model is the demo-cache floor (play.FLOOR, the player's reply cap) on one team
-    cache opened on the run's demo-cache/ after the rounds already played, the player's
-    request settings its proxy's defaults; a round's end ends the cache's round, and a reset wipes it."""
+def test_a_bare_rows_users_play_behind_proxies_with_the_players_settings_and_no_cache_of_their_own(player, tmp_path,
+                                                                                                   monkeypatch):
+    """Row dc: every user's bare model is the demo-cache floor (play.FLOOR, the player's reply cap), the player's
+    request settings its proxy's defaults, with no hook of the row's own: the team's cache is the users' one state, as
+    every row's memory is (the baselines' CollectiveHarnessLearner)."""
     import continual_arc.runner as runner
     import continual_arc.tasks as tasks
     import continual_arc_baselines.collective as collective
-    from continual_arc_baselines.systems.bare import BareSharedDemoCacheLearner
+    from continual_arc_baselines.systems.bare import BareDemoCacheLearner
     seen: dict = {}
 
     class Learner:
@@ -237,24 +242,16 @@ def test_the_demo_cache_floor_at_the_players_settings_has_one_cache_for_the_team
     monkeypatch.setattr(runner, "build_env", lambda *a, **k: None)
     monkeypatch.setattr(runner, "run", lambda *a, **k: SimpleNamespace(records=[], summary={}))
     monkeypatch.setattr(tasks.TaskRegistry, "default", staticmethod(lambda: None))
-    (tmp_path / "play" / "demo-cache").mkdir(parents=True)
-    (tmp_path / "play" / "demo-cache" / "r0000.json").write_text(json.dumps(
-        [{"user": 1, "task": "t1", "pairs": [{"input": [[1]], "output": [[2]]}]}]))
-    reference.play_bare_round(player, "dc", tmp_path / "play", None, api_key="k", rounds_done=1)
+    reference.play_bare_round(player, "dc", tmp_path / "play", None, api_key="k")
     spec = reference.PLAYERS[player]
     first, second = seen["users"]
-    assert isinstance(first, BareSharedDemoCacheLearner) and (first.user, second.user) == (0, 1)
-    assert first.shared is second.shared and first.cached_pairs("t1") == second.cached_pairs("t1") != []
+    assert all(type(user) is BareDemoCacheLearner for user in (first, second)) and first is not second
     assert (first.model, first.max_tokens, first.end, first.empty_reply, first.archive_wipes) == \
         (spec["model"], play.MAX_TOKENS, "finish", "reprompt", True)
     assert seen["upstream"] == reference.OPENROUTER and seen["api_key"] == "k"
     assert seen["body_defaults"] == spec["body"] and not seen["capture"]
-    seen["round_hook"](None)
-    assert (tmp_path / "play" / "demo-cache" / "r0001.json").exists()
-    seen["reset_hook"]()
-    assert first.cached_pairs("t1") == [] and not list((tmp_path / "play" / "demo-cache").glob("r*.json"))
-    driver = json.loads((tmp_path / "play" / "driver.json").read_text())
-    assert driver["row"] == "dc" and driver["learner"].endswith(":BareSharedDemoCacheLearner")
+    assert not {"round_hook", "reset_hook"} & set(seen)
+    assert not (tmp_path / "play" / "demo-cache").exists()
 
 
 def test_the_floor_plays_the_one_user_rows_stream():
@@ -273,3 +270,11 @@ def test_every_round_not_yet_played_is_played_in_turn(tmp_path, monkeypatch):
     (tmp_path / "records.jsonl").write_text("")
     reference.cmd_play(SimpleNamespace(run_dir=str(tmp_path), users=2, rounds=3, player="qwen", row="h", seed=0))
     assert played == [("qwen", "h", r, 2, "k") for r in range(3)]
+
+
+def test_a_dc_run_that_kept_its_cache_in_demo_cache_cannot_go_on(tmp_path):
+    """Row dc kept its team's cache in the run's demo-cache/ before its cache was its users' one state, which holds
+    none of it: such a run is refused rather than played on from an empty cache."""
+    (tmp_path / "play" / "demo-cache").mkdir(parents=True)
+    with pytest.raises(SystemExit, match="demo-cache"):
+        reference.play_bare_round("qwen", "dc", tmp_path / "play", None, api_key="k")

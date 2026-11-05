@@ -12,12 +12,15 @@ Two readings:
   different hash or, past :data:`SNAPSHOT_MAX_FILE_BYTES`, a different size or mtime) and removed. A wiped row's
   snapshot is taken after its round's instance (the wipe runs at the next call's start), so it shows that round's own
   churn; what the wipe guarantees is that no file survives unchanged into the next round, so ``changed`` stays 0 in
-  every area for a wiped row.
+  every area for a wiped row. In a run of several users, who share one state (the baselines'
+  ``continual_arc_baselines.shared``), a user's three counts are what the user wrote in the round against the state it
+  began from, as the round's merge recorded them (:func:`merged_writes`, :func:`diff_writes`), over the paths a
+  snapshot counts.
 - **Reads in play** (:func:`read_areas`): what each of a game's captured calls drew from those areas. Only the
   student's own calls in play count (:func:`in_play`: phase "turn", with tools offered), never the closing turns after
   the verdict, where a teacher's storer writes, nor the harness's own subsystems on the student's model (its context
   summarizer, its refinement), which offer no tools. A program is read only when its source comes back: the game's own
-  task's program (:func:`program_path`), as the folder held it when the game began (:func:`kept_at_start`), in the tool
+  task's program (:func:`program_path`), as the state the game began from held it (:func:`kept_at_start`), in the tool
   results the call answers (:func:`answered`, every tool message its request ends with) -- two of its distinctive
   lines (:func:`marks`), or its one. A path string is not enough: the student names the path when it writes over,
   deletes or lists the program and in calls to tools that do not exist, the summarizer names it too, and a path built
@@ -49,6 +52,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from continual_arc_baselines.shared import MERGES
+
 # What a snapshot leaves out: runtimes and caches the harness installs for itself, not what it has learned
 # ("kernel-venv" to "*.lock"; "kernel-venv" is the copy of the kernel's Python environment that the states earlier runs
 # of the prime-agent adapter saved hold, the paper's among them, and that the kernel never ran on), and its own
@@ -76,9 +81,28 @@ SCRATCH_AREAS = ("workspace_other", "other")
 
 def system_dir(run_dir: Path, user: int) -> Path:
     """User ``user``'s harness folder in a run, where the baselines' ``CollectiveHarnessLearner`` attaches its system:
-    its state (``state/``) and the state's history, a commit at the end of every round (``state.git``, listed by round
-    in ``state-log.jsonl``: :mod:`continual_arc_baselines.statelog`)."""
+    its state (``state/``) and, for user 0, whose state is the one the run's users share, the state's history, a commit
+    at the end of every round (``state.git``, listed by round in ``state-log.jsonl``:
+    :mod:`continual_arc_baselines.statelog`)."""
     return Path(run_dir) / "users" / f"u{user:03d}" / "system"
+
+
+def merged_writes(run_dir: Path, round_: int) -> dict[int, dict[str, list[str]]] | None:
+    """Every user's writes in round ``round_`` of a run whose users shared one state, as its merge recorded them (the
+    baselines' ``state-merges.jsonl``, in user 0's folder): by user, the paths added, changed and removed against the
+    state the round began from, the last record of the round should it have been played again. None for a run that
+    kept no such record: a run of one user, or a frozen test, whose users never share a state."""
+    path = system_dir(run_dir, 0) / MERGES
+    if not path.is_file():
+        return None
+    entries = [entry for entry in map(json.loads, path.read_text().splitlines()) if entry["round"] == round_]
+    return {written["user"]: written for written in entries[-1]["users"]}
+
+
+def start_system(run_dir: Path, user: int) -> Path:
+    """The harness folder whose state user ``user``'s games begin from: the one state, user 0's, in a run whose users
+    shared it (its merge record), the user's own in any other."""
+    return system_dir(run_dir, 0) if (system_dir(run_dir, 0) / MERGES).is_file() else system_dir(run_dir, user)
 
 
 def _hash_file(path: Path, max_bytes: int) -> str | None:
@@ -144,6 +168,25 @@ def area_of(rel_path: str) -> str:
     if parts[:2] == ("agent", "harness"):
         return "harness_store"
     return "other"
+
+
+def snapshot_counts(rel_path: str, *, exclude: tuple[str, ...] = SNAPSHOT_EXCLUDE,
+                    exclude_paths: tuple[str, ...] = SNAPSHOT_EXCLUDE_PATHS) -> bool:
+    """Whether a snapshot (:func:`snapshot_state`) counts the state-relative path ``rel_path``: none of its folders or
+    its own name is one of ``exclude``'s, and it is none of ``exclude_paths``."""
+    return (not any(fnmatch.fnmatch(part, pat) for part in Path(rel_path).parts for pat in exclude)
+            and not any(fnmatch.fnmatch(rel_path, pat) for pat in exclude_paths))
+
+
+def diff_writes(writes: dict[str, list[str]]) -> dict[str, dict[str, int]]:
+    """{area: {"added", "changed", "removed"}} of one user's writes in a round as a merge recorded them
+    (:func:`merged_writes`), over :data:`AREAS` and the paths a snapshot counts (:func:`snapshot_counts`)."""
+    out = {area: {"added": 0, "changed": 0, "removed": 0} for area in AREAS}
+    for kind in ("added", "changed", "removed"):
+        for path in writes[kind]:
+            if snapshot_counts(path):
+                out[area_of(path)][kind] += 1
+    return out
 
 
 def _changed(before: dict[str, Any], after: dict[str, Any]) -> bool:
@@ -253,8 +296,9 @@ def _committed(system: Path, round_: int) -> str:
 
 
 def kept_at_start(system: Path, round_: int, path: str, stateless: bool) -> str | None:
-    """The file at ``path`` (relative to the state folder) as a user's harness folder, ``system`` (:func:`system_dir`),
-    held it when round ``round_``'s game began: the state's commit at the end of the round before. None when the folder
+    """The file at ``path`` (relative to the state folder) as the harness folder a user's game began from, ``system``
+    (:func:`start_system`), held it when round ``round_``'s game began: the state's commit at the end of the round
+    before. None when the folder
     held no such file, and always for round 0 and for a row wiped before every game (``stateless``), whose games begin
     from nothing (the commit of the round before is the state its wipe then removed)."""
     if stateless or round_ == 0:
@@ -316,8 +360,8 @@ def game_memory_outcome(doc: dict[str, Any], call_areas: list[set[str]]) -> dict
 
 def game_reads(captured: Path, system: Path, round_: int, stateless: bool) -> dict[str, Any]:
     """One user's game of round ``round_`` (its captured game, ``captured``): reads per area (:func:`count_reads`) and
-    :func:`game_memory_outcome`'s two signals, its task's program as the user's harness folder, ``system``, held it when
-    the game began (:func:`kept_at_start`). A user with no captured game (the round never reached it) has no reads and
+    :func:`game_memory_outcome`'s two signals, its task's program as the harness folder the game began from,
+    ``system`` (:func:`start_system`), held it when the game began (:func:`kept_at_start`). A user with no captured game (the round never reached it) has no reads and
     neither signal."""
     if not captured.is_file():
         return {"reads": {area: 0 for area in DELIBERATE_AREAS}, "reused_program": False, "solved_without_demo": False}
@@ -341,28 +385,35 @@ def _total(per_user: dict[str, Any]) -> dict[str, Any]:
 def round_report(run_dir: Path, round_: int, users: int, round_dir_of: Callable[[Path, int], Path],
                  stateless: bool) -> dict[str, Any]:
     """Build and write ``round_dir_of(run_dir, round_) / "memory.json"``: this round's per-user and total files added,
-    changed and removed per area (each user's state, :func:`system_dir`, against the previous round's snapshot of it, or
-    nothing for round 0), reads per area, and how many games show :func:`game_memory_outcome`'s two signals
-    (:func:`game_reads`; ``stateless`` for a row wiped before every game). Each user's snapshot is kept beside it
-    (``memory/uNNN.json``) for the next round's diff, so this only ever needs the previous round's files. A user with
-    no captured game this round is counted on its snapshot alone, with no reads and neither signal."""
+    changed and removed per area, reads per area, and how many games show :func:`game_memory_outcome`'s two signals
+    (:func:`game_reads`, every game from the state it began from, :func:`start_system`; ``stateless`` for a row wiped
+    before every game). In a run whose users share one state, a user's files are what they wrote against the state the
+    round began from, as the round's merge recorded them (:func:`merged_writes`); in any other, each user's state
+    (:func:`system_dir`) against the previous round's snapshot of it, or nothing for round 0, each user's snapshot kept
+    beside the report (``memory/uNNN.json``) for the next round's diff, so that this only ever needs the previous
+    round's files. A user with no captured game this round is counted on its files alone, with no reads and neither
+    signal."""
     this_dir = round_dir_of(run_dir, round_)
     snap_dir = this_dir / "memory"
     snap_dir.mkdir(parents=True, exist_ok=True)
     prev_snap_dir = round_dir_of(run_dir, round_ - 1) / "memory" if round_ > 0 else None
+    merged = merged_writes(run_dir, round_)
 
     per_user: dict[str, Any] = {}
     for u in range(users):
-        system = system_dir(run_dir, u)
-        snapshot = snapshot_state(system / "state")
-        (snap_dir / f"u{u:03d}.json").write_text(json.dumps(snapshot))
-        previous: dict[str, dict[str, Any]] = {}
-        if prev_snap_dir is not None:
-            prev_file = prev_snap_dir / f"u{u:03d}.json"
-            if prev_file.is_file():
-                previous = json.loads(prev_file.read_text())
-        per_user[str(u)] = {"memory": diff_snapshot(previous, snapshot),
-                            **game_reads(this_dir / "captured" / f"u{u:03d}.json.gz", system, round_, stateless)}
+        if merged is not None:
+            files = diff_writes(merged[u])
+        else:
+            snapshot = snapshot_state(system_dir(run_dir, u) / "state")
+            (snap_dir / f"u{u:03d}.json").write_text(json.dumps(snapshot))
+            previous: dict[str, dict[str, Any]] = {}
+            if prev_snap_dir is not None:
+                prev_file = prev_snap_dir / f"u{u:03d}.json"
+                if prev_file.is_file():
+                    previous = json.loads(prev_file.read_text())
+            files = diff_snapshot(previous, snapshot)
+        per_user[str(u)] = {"memory": files, **game_reads(this_dir / "captured" / f"u{u:03d}.json.gz",
+                                                          start_system(run_dir, u), round_, stateless)}
 
     report = {"round": round_, "users": per_user, "total": _total(per_user)}
     (this_dir / "memory.json").write_text(json.dumps(report, indent=1))
@@ -382,7 +433,7 @@ def recount(run_dir: Path) -> list[dict[str, Any]]:
         report = json.loads(path.read_text())
         for user, entry in report["users"].items():
             u = int(user)
-            entry.update(game_reads(path.parent / "captured" / f"u{u:03d}.json.gz", system_dir(run_dir, u),
+            entry.update(game_reads(path.parent / "captured" / f"u{u:03d}.json.gz", start_system(run_dir, u),
                                     report["round"], stateless))
         report["total"] = _total(report["users"])
         path.write_text(json.dumps(report, indent=1))

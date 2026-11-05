@@ -229,7 +229,7 @@ def test_the_seen_test_covers_every_users_tasks_evenly(users, size, each):
     assert len(seen) == size and seen.users == size and set(seen.rounds()) == {0}   # one round, every instance a user
     assert set(Counter(s.task_id for s in seen.slots).values()) == {each}
     assert {s.task_id for s in seen.slots} == {t for b in blocks for t in b}
-    # instance i is a task of stream user i mod U, whose state test user i starts from
+    # instance i is a task of stream user i mod U
     assert all(s.task_id in blocks[i % users] for i, s in enumerate(seen.slots))
     stream = build_schedule(cfg, 1, rearc_task_ids=pool, eval_task_ids=evals)
     assert not {s.instance_seed for s in seen.slots} & {s.instance_seed for s in stream.slots}

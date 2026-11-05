@@ -1,5 +1,5 @@
-"""The collective regime with a harness per user: concurrency, capture, the round hook, overrides, every user's state
-committed at the end of every round."""
+"""The collective regime with a harness process per user and one state for all of them: concurrency, capture, the round
+hook, overrides, the one state committed at the end of every round (shared.py has its copies and its merge)."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from .fake_harness import FakeHarness, StoringHarness, late_reports
 from .fake_upstream import FakeUpstream
 
 
-def test_every_user_runs_a_harness_of_their_own_and_the_hook_sees_the_round(tmp_path):
+def test_every_user_runs_a_harness_and_the_hook_sees_the_round(tmp_path):
     source = FakeSource(n_tasks=2)
     registry = TaskRegistry({source.name: source})
     ids = source.task_ids()
@@ -64,9 +64,10 @@ def test_every_user_runs_a_harness_of_their_own_and_the_hook_sees_the_round(tmp_
     recs = result.records
     assert len(recs) == 18 and [r.user for r in recs] == [0, 1, 2] * 6
     assert FakeHarness.max_inside > 1  # users worked at the same time
-    # a user's own memory: the first meeting with a task costs a demonstration, later ones nothing
+    # the team's one memory: a task costs a demonstration only the first round anyone meets it, whoever meets it later
+    assert any(r.user_exposure_index == 0 < r.exposure_index for r in recs)
     for r in recs:
-        assert r.cost == (1.0 if r.user_exposure_index == 0 else 0.0), r
+        assert r.cost == (1.0 if r.exposure_index == 0 else 0.0), r
     # the hook saw every round, every user's instance with its calls, tagged and captured whole
     assert [d.index for d, _ in rounds] == list(range(6))
     for d, calls in rounds:
@@ -243,11 +244,11 @@ def test_a_resumed_run_snapshots_every_users_state_when_its_first_round_begins(t
     assert all("kept-in-round-1.md" in names and "memory.json" in names for names in before[2].values())
 
 
-def test_every_users_state_is_committed_at_the_end_of_every_round_one_user_at_a_time(tmp_path):
-    """Three users over four rounds: each user's harness state is committed to their own history as every round ends,
-    one user at a time and before the round hook, so a user's log has a commit per round and each commit's diff is
-    what that user wrote in its round. An update that fails once the round is recorded (round 1's here) leaves the
-    round's commits, and the relaunch numbers its rounds on from them."""
+def test_the_one_state_is_committed_at_the_end_of_every_round_before_the_hook(tmp_path):
+    """Three users over four rounds: as every round ends, every user's writes are merged into the one state, user 0's,
+    which is committed to its history before the round hook, one commit a round holding what every user wrote; no other
+    user keeps a history. An update that fails once the round is recorded (round 1's here) leaves the round's commit,
+    and the relaunch numbers its rounds on from it."""
     source = FakeSource(n_tasks=2)
     registry = TaskRegistry({source.name: source})
     users, rounds = 3, 4
@@ -280,26 +281,26 @@ def test_every_users_state_is_committed_at_the_end_of_every_round_one_user_at_a_
         second.close()
         server.stop()
     assert len(result.records) == users * rounds
-    # every round's commits were in when its hook ran, the failed update's round's too, and none overlapped another
-    assert hooked == [(r, [r + 1] * users) for r in range(rounds)]
+    # every round's commit was in when its hook ran, the failed update's round's too, and only user 0 commits
+    assert hooked == [(r, [r + 1, 0, 0]) for r in range(rounds)]
     assert CommittingHarness.most_committing == 1
     aliases = TaskAliases.for_run(run_dir)
-    played = {(r.round, r.user): r for r in result.records}
-    for user, system in enumerate(systems):
-        repo = system / "state.git"
-        log = [json.loads(line) for line in logs[user].read_text().splitlines()]
-        assert [entry["round"] for entry in log] == list(range(rounds))
-        assert git(repo, "log", "--format=%s").splitlines() == [f"round {r}" for r in reversed(range(rounds))]
-        assert git(repo, "rev-parse", "HEAD").strip() == log[-1]["commit"]
-        for r, entry in enumerate(log):
-            mine = played[(r, user)]
-            # the round's diff: its note, the rule of a task met for the first time, the harness's script in round 0
-            wrote = {"notes.md"} | ({"memory.json"} if mine.user_exposure_index == 0 else set()) | (
-                {"bin/tool"} if r == 0 else set())
-            assert set(git(repo, "show", "--name-only", "--format=", entry["commit"]).split()) == wrote
-        last = played[(rounds - 1, user)]
-        diff = git(repo, "diff", "HEAD~1", "HEAD")
-        assert f"+user {user} solved {aliases.alias(last.task_id)} in round {rounds - 1}\n" in diff
+    repo = systems[0] / "state.git"
+    log = [json.loads(line) for line in logs[0].read_text().splitlines()]
+    assert [entry["round"] for entry in log] == list(range(rounds))
+    assert git(repo, "log", "--format=%s").splitlines() == [f"round {r}" for r in reversed(range(rounds))]
+    assert git(repo, "rev-parse", "HEAD").strip() == log[-1]["commit"]
+    for r, entry in enumerate(log):
+        mine = [rec for rec in result.records if rec.round == r]
+        # the round's diff: every user's note, the rule of a task the team met for the first time, the script in round 0
+        wrote = {"notes.md"} | ({"memory.json"} if any(rec.exposure_index == 0 for rec in mine) else set()) | (
+            {"bin/tool"} if r == 0 else set())
+        assert set(git(repo, "show", "--name-only", "--format=", entry["commit"]).split()) == wrote
+        diff = git(repo, "show", "--format=", entry["commit"], "--", "notes.md")
+        assert all(f"+user {rec.user} solved {aliases.alias(rec.task_id)} in round {r}\n" in diff for rec in mine)
+    # the script names user 0's folder in the one state, and each user's copy names their own
+    assert git(repo, "show", "HEAD:bin/tool") == f"#!{systems[0]}/state/venv/bin/python\n"
+    assert all((s / "state" / "bin" / "tool").read_text() == f"#!{s}/state/venv/bin/python\n" for s in systems)
 
 
 def test_snapshot_leaves_out_runtimes_and_large_files(tmp_path):

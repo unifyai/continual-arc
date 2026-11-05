@@ -250,11 +250,13 @@ class SystemLearner(BaseLearner):
 
     def save_state(self) -> None:
         """Write into :attr:`state_dir` whatever the learner keeps in memory rather than in files, before the round's
-        commit (:meth:`end_round`). Nothing for a harness, whose state is its files already."""
+        commit (:meth:`end_round`) and before a team's users' writes are merged into its one state
+        (:mod:`continual_arc_baselines.shared`). Nothing for a harness, whose state is its files already."""
 
     def load_state(self) -> None:
-        """Read back what :meth:`save_state` wrote, when the learner is attached to a state directory that holds it (a
-        run forked from a round, a collective test's user forked from the stream's end)."""
+        """Read back what :meth:`save_state` wrote, or nothing where it wrote nothing, when the learner is attached to a
+        state directory that holds it (a run forked from a round, a collective test's user forked from the stream's end)
+        and whenever a team's state has been copied to it or merged into it."""
 
     def transcript_paths(self) -> list[Path]:
         """The system's own transcripts and logs (not its caches, environments or skills), copied out before a wipe

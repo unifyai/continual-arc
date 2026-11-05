@@ -6,11 +6,12 @@ so that none of the pinned ARC data is needed.
 
 As one round of users (--collective): every test user a fork of the commit at the stream's end, its folder's paths
 renamed to the user's (in text files, links and a SQLite database's rows, its write-ahead log taken in) and committed
-apart from the test, every user's objects in one store reading the run's; a collective run's test users forking its
-users' own commits, user i mod U; a run that keeps nothing forking its empty end; a run with no stream starting every
-user from nothing; and a test played end to end from the run's own launch, the users solving from the memory the
-stream left without asking for a demonstration, their states committed as the next round and their working trees gone,
-but a stateless system's users, wiped before their instance, playing it from nothing."""
+apart from the test, every user's objects in one store reading the run's; a collective run's test users all forking its
+one state, user 0's, and committing their instances apart, and a run whose users kept stores of their own refused; a run
+that keeps nothing forking its empty end; a run with no stream starting every user from nothing; and a test played end
+to end from the run's own launch, the users solving from the memory the stream left without asking for a
+demonstration, their states committed as the next round and their working trees gone, but a stateless system's users,
+wiped before their instance, playing it from nothing."""
 
 import hashlib
 import json
@@ -545,8 +546,8 @@ def test_every_test_user_is_a_fork_of_the_streams_last_commit_in_a_folder_of_its
     run, system, log = stream_run
     out = tmp_path / "test"
     started = frozen.seed(run, out, 3)
-    assert started["from"] == {"round": 2, "systems": [{"system": str(system), "commit": log.commit_of(2),
-                                                       "relocated": 2, "databases": 1}]}
+    assert started["from"] == {"round": 2, "system": str(system), "commit": log.commit_of(2), "relocated": 2,
+                               "databases": 1}
     assert (out / "alias-salt").read_text() == SALT
     for user in range(3):
         mine = out / "users" / f"u{user:03d}" / "system"
@@ -573,11 +574,12 @@ def test_every_test_user_is_a_fork_of_the_streams_last_commit_in_a_folder_of_its
     assert git(system / "state.git", "rev-parse", "HEAD").strip() == log.commit_of(3)
 
 
-def test_a_collective_runs_test_user_i_forks_its_user_i_mod_u_and_commits_its_instance_on_top(tmp_path):
-    """A run of two users (CollectiveHarnessLearner, which commits every user's state as each round ends): test user i
-    starts from the run's user i mod 2 at the stream's end, that user's commit relocated to the test user's folder,
-    its log that user's rounds, and solves its task from that user's memory; the test round's commit is what the test
-    user wrote in its instance, and the run's users' histories are as the stream left them."""
+def test_a_collective_runs_test_users_all_fork_its_one_state_and_commit_their_instances_apart(tmp_path):
+    """A run of two users (CollectiveHarnessLearner, whose users share one state, user 0's, committed as each round
+    ends): every test user starts from that state at the stream's end, its commit relocated to the test user's folder,
+    its log the run's rounds, and solves its task, whichever stream user's it is, from the team's memory; the test
+    round's commit is what the test user wrote in its instance, never merged with another's, and the run's history is
+    as the stream left it."""
     ids = SOURCE.task_ids()
     stream = interleave_users([stream_schedule(ids, 3, seed=u, source=SOURCE.name) for u in range(2)], seed=0,
                               name="team")
@@ -589,8 +591,8 @@ def test_a_collective_runs_test_user_i_forks_its_user_i_mod_u_and_commits_its_in
             run_schedule(learner, stream, out_dir=run, registry=registry())
         finally:
             learner.close()
-        systems = [run / "users" / f"u{u:03d}" / "system" for u in range(2)]
-        ends = [commit_of(system / "state-log.jsonl", 2) for system in systems]
+        system = run / "users" / "u000" / "system"
+        end = commit_of(system / "state-log.jsonl", 2)
         out = tmp_path / "test"
         started = frozen.seed(run, out, 3)
         tasks = [next(s.task_id for s in stream.slots if s.user == user % 2) for user in range(3)]
@@ -604,24 +606,43 @@ def test_a_collective_runs_test_user_i_forks_its_user_i_mod_u_and_commits_its_in
             learner.close()
     finally:
         server.stop()
-    assert started["from"] == {"round": 2, "systems": [{"system": str(system), "commit": end, "relocated": 1,
-                                                       "databases": 0} for system, end in zip(systems, ends, strict=True)]}
+    assert started["from"] == {"round": 2, "system": str(system), "commit": end, "relocated": 1, "databases": 0}
     assert [(r.user, r.solved, r.cost) for r in result.records] == [(user, True, 0.0) for user in range(3)]
     aliases = TaskAliases.for_run(run)
     for user, task in enumerate(tasks):
-        mine, source = out / "users" / f"u{user:03d}" / "system", systems[user % 2]
+        mine = out / "users" / f"u{user:03d}" / "system"
         assert git(mine / "state.git", "log", "--format=%s").splitlines() == [
-            "round 3", f"relocated from {source}", "round 2", "round 1", "round 0"]
-        assert git(mine / "state.git", "rev-parse", "HEAD~2").strip() == ends[user % 2]
+            "round 3", f"relocated from {system}", "round 2", "round 1", "round 0"]
+        assert git(mine / "state.git", "rev-parse", "HEAD~2").strip() == end
         assert [json.loads(line)["round"] for line in (mine / "state-log.jsonl").read_text().splitlines()] == [0, 1, 2, 3]
         assert (mine / "state" / "bin" / "tool").read_text() == f"#!{mine}/state/venv/bin/python\n"
         assert git(mine / "state.git", "diff", "--name-only", "HEAD~1", "HEAD").split() == ["notes.md"]
-        assert f"+user {user} solved {aliases.alias(task)} in round 0\n" in git(mine / "state.git", "diff", "HEAD~1",
-                                                                                "HEAD")
+        diff = git(mine / "state.git", "diff", "HEAD~1", "HEAD")
+        assert f"+user {user} solved {aliases.alias(task)} in round 0\n" in diff and diff.count("\n+user") == 1
+    assert not (out / "users" / "u000" / "system" / "state-merges.jsonl").exists()
     alternates = (out / "objects.git" / "objects" / "info" / "alternates").read_text().splitlines()
     assert [(out / "objects.git" / "objects" / line).resolve() for line in alternates] == [
-        (system / "state.git" / "objects").resolve() for system in systems]
-    assert [git(system / "state.git", "rev-parse", "HEAD").strip() for system in systems] == ends
+        (system / "state.git" / "objects").resolve()]
+    assert git(system / "state.git", "rev-parse", "HEAD").strip() == end
+
+
+def test_a_collective_run_whose_users_kept_stores_of_their_own_has_no_one_state_to_fork(tmp_path):
+    """A collective run played before every learner kept one state for its team logged every user's state apart: its
+    stream's end is no one state, and its tests are refused rather than forked from user 0's alone."""
+    ids = SOURCE.task_ids()
+    run = tmp_path / "run"
+    run.mkdir()
+    stream = interleave_users([stream_schedule(ids, 2, seed=u, source=SOURCE.name) for u in range(2)], seed=0,
+                              name="team")
+    stream.save(run / "schedule.json")
+    (run / "records.jsonl").write_text("".join(json.dumps({"phase": s.phase}) + "\n" for s in stream.slots))
+    for user in range(2):
+        system = run / "users" / f"u{user:03d}" / "system"
+        log = StateLog(system / "state", system / "state.git", system / "state-log.jsonl")
+        for _ in range(2):
+            log.commit()
+    with pytest.raises(SystemExit, match="kept stores of their own"):
+        frozen.seed(run, tmp_path / "test", 2)
 
 
 def test_a_run_that_keeps_nothing_forks_its_empty_end(tmp_path):
@@ -691,7 +712,7 @@ def test_a_test_is_played_from_the_runs_own_launch_every_user_from_the_streams_m
         assert not (mine / "state").exists()   # its working tree gone, its state in its repository
         assert git(mine / "state.git", "log", "--format=%s").splitlines()[:2] == ["round 3", f"relocated from {system}"]
         assert json.loads((mine / "state-log.jsonl").read_text().splitlines()[-1])["round"] == 3
-    assert json.loads((out / "frozen.json").read_text())["from"]["systems"][0]["commit"] == log.commit_of(2)
+    assert json.loads((out / "frozen.json").read_text())["from"]["commit"] == log.commit_of(2)
     # a second call finds the round recorded and plays nothing
     assert frozen.play_forks(run, tmp_path / "seen.json") == out
 
@@ -758,7 +779,7 @@ def test_a_logged_runs_test_is_played_as_a_round_of_users_from_the_command_line(
     assert main(["test", str(run), "--schedule", str(tmp_path / "seen.json"), "--collective"]) == 0
     out = run / "frozen" / "seen" / "play"
     assert len((out / "records.jsonl").read_text().splitlines()) == 2
-    assert json.loads((out / "frozen.json").read_text())["from"]["systems"][0]["commit"] == log[-1]["commit"]
+    assert json.loads((out / "frozen.json").read_text())["from"]["commit"] == log[-1]["commit"]
     for user in range(2):
         repo = out / "users" / f"u{user:03d}" / "system" / "state.git"
         assert git(repo, "log", "--format=%s").splitlines()[:2] == ["round 4", f"relocated from {system}"]

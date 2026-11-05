@@ -14,10 +14,12 @@ reasoning, as chat templates render a past turn.
 The two floors of row F are built on it: :class:`BareModelLearner`, the stateless floor, is the model itself, choosing
 whatever actions it wants rather than following a policy of ours, and :class:`BareDemoCacheLearner`, the demo-cache
 floor, is the same model with a cache of the pairs it bought for each task, shown again at no cost when the task
-returns (:class:`BareSharedDemoCacheLearner`: one cache for a team of users); on an ARC-AGI-3 game it keeps the
-demonstrations it bought, the solver's plays of other levels of the game. :class:`BareProgramLibraryLearner` is the
-program library, row PL (named M in the run records), which plays the grid tracks alone. All of them take ``end="finish"`` in the grid, so their rules are
-the harness rows' (protocol.RULES_FINISH); the verdict is still not sent.
+returns; on an ARC-AGI-3 game it keeps the demonstrations it bought, the solver's plays of other levels of the game.
+:class:`BareProgramLibraryLearner` is the program library, row PL (named M in the run records), which plays the grid
+tracks alone. All of them take ``end="finish"`` in the grid, so their rules are the harness rows' (protocol.RULES_FINISH);
+the verdict is still not sent. At several users the cache and the programs are the team's, as any learner's state is
+(:mod:`continual_arc_baselines.shared`): each user's copy is read as the round begins (``load_state``), written as it
+ends (``save_state``), and merged into the one state with the other users' between them.
 """
 
 from __future__ import annotations
@@ -28,7 +30,6 @@ import subprocess
 import sys
 import tempfile
 import textwrap
-import threading
 from pathlib import Path
 from typing import Any
 
@@ -158,7 +159,7 @@ class BareDemoCacheLearner(BareModelLearner):
 
     name = "bare-demo-cache"
     # The cache, and the program library's programs, live in memory; they reach the state directory only for the
-    # commits of a logged state (save_state), so a state directory put back would not put them back.
+    # commits of a logged state and a team's merge (save_state), so a state directory put back would not put them back.
     state_in_files = False
 
     def __init__(self, model: str, *, cache_cap: int = 8, **kwargs: Any):
@@ -205,10 +206,12 @@ class BareDemoCacheLearner(BareModelLearner):
                                                                for task, pairs in self.cache.items()}))
 
     def load_state(self) -> None:
+        """The cache ``cache.json`` holds, none without it, each task's pairs up to the cap: a team's cache, merged from
+        its users' purchases in user order, can hold more of a task's pairs than one instance could buy."""
         path = self.state_dir / "cache.json"
-        if path.exists():
-            self.cache = {task: [Demonstration.from_json(p) if "steps" in p else Pair.from_json(p) for p in pairs]
-                          for task, pairs in json.loads(path.read_text()).items()}
+        kept = json.loads(path.read_text()) if path.exists() else {}
+        self.cache = {task: [Demonstration.from_json(p) if "steps" in p else Pair.from_json(p)
+                             for p in pairs[: self.cache_cap]] for task, pairs in kept.items()}
 
     def resources(self) -> dict[str, float]:
         out = super().resources()
@@ -217,98 +220,6 @@ class BareDemoCacheLearner(BareModelLearner):
 
     def describe(self) -> dict[str, Any]:
         return {**super().describe(), "system": self.name, "cache_cap": self.cache_cap}
-
-
-class SharedDemoCache:
-    """One demonstration cache for every user of a run, for :class:`BareSharedDemoCacheLearner`: each task's pairs, up
-    to ``cap``, whichever user bought them. A round's purchases join it only when the round ends (:meth:`end_round`),
-    the collective regime's contract (``continual_arc.learner``): every user of a round meets the cache the round began
-    with. Each round's purchases are kept as ``folder/rNNNN.json``, in user order, and a cache opened on a folder after
-    ``rounds`` rounds holds those of rounds 0 to ``rounds`` - 1, the rounds the run's records hold: the runner leaves a
-    learner's state to the learner, and a run resumed after a round that never finished plays it again from the cache
-    it began with, whatever that round had bought."""
-
-    def __init__(self, folder: Path, rounds: int, cap: int = 8):
-        self.folder, self.cap, self.round = Path(folder), cap, rounds
-        self.folder.mkdir(parents=True, exist_ok=True)
-        self.pairs: dict[str, list[Pair]] = {}
-        self._bought: dict[int, list[tuple[str, list[Pair]]]] = {}
-        self._lock = threading.Lock()
-        for r in range(rounds):
-            path = self.folder / f"r{r:04d}.json"
-            if path.exists():
-                self._merge(json.loads(path.read_text()))
-
-    def shown(self, task_id: str) -> list[Pair]:
-        """The pairs of ``task_id`` the round began with."""
-        return list(self.pairs.get(task_id, []))
-
-    def bought(self, user: int, task_id: str, pairs: list[Pair]) -> None:
-        """Pairs ``user`` bought for ``task_id`` this round, kept for the round's end."""
-        with self._lock:
-            self._bought.setdefault(user, []).append((task_id, list(pairs)))
-
-    def end_round(self) -> None:
-        """The round's purchases join the cache, user by user in their order, and are written down."""
-        with self._lock:
-            entries = [{"user": user, "task": task_id, "pairs": [p.to_json() for p in pairs]}
-                       for user in sorted(self._bought) for task_id, pairs in self._bought[user]]
-            self._bought = {}
-        path = self.folder / f"r{self.round:04d}.json"
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(entries))
-        tmp.replace(path)
-        self._merge(entries)
-        self.round += 1
-
-    def clear(self) -> None:
-        """Wipe the cache (the fresh reference): every round's purchases are dropped, on disk too."""
-        with self._lock:
-            self.pairs, self._bought = {}, {}
-        for path in self.folder.glob("r*.json"):
-            path.unlink()
-
-    def _merge(self, entries: list[dict[str, Any]]) -> None:
-        for entry in entries:
-            kept = self.pairs.setdefault(entry["task"], [])
-            kept.extend(Pair.from_json(p) for p in entry["pairs"][: max(self.cap - len(kept), 0)])
-
-
-class BareSharedDemoCacheLearner(BareDemoCacheLearner):
-    """The demo-cache floor at several users, in the collective regime: each user's bare model as
-    :class:`BareDemoCacheLearner`'s, reading and filling one cache for the team (:class:`SharedDemoCache`), so a task's
-    pairs bought by any user are shown to every user who meets the task in a later round. A cache of each user's own
-    would leave out of the floor a team's sharing of pairs, which needs no learning. With one user it is the demo-cache
-    floor itself."""
-
-    name = "bare-shared-demo-cache"
-
-    def __init__(self, model: str, *, shared: SharedDemoCache, user: int, **kwargs: Any):
-        super().__init__(model, cache_cap=shared.cap, **kwargs)
-        self.shared, self.user = shared, user
-
-    def cached_pairs(self, task_id: str) -> list:
-        return self.shared.shown(task_id)
-
-    def keep_pairs(self, task_id: str, pairs: list) -> None:
-        self.shared.bought(self.user, task_id, pairs)
-
-    def wipe_state(self) -> None:
-        BareModelLearner.wipe_state(self)   # the team's cache is the run's, wiped by the run (SharedDemoCache.clear)
-
-    def save_state(self) -> None:
-        """Nothing of a user's own: the team's cache keeps every round's purchases on disk itself (SharedDemoCache)."""
-
-    def load_state(self) -> None:
-        """Nothing of a user's own (:meth:`save_state`)."""
-
-    def resources(self) -> dict[str, float]:
-        out = BareModelLearner.resources(self)
-        out["state_bytes"] = float(len(json.dumps({k: [p.to_json() for p in v] for k, v in self.shared.pairs.items()})))
-        return out
-
-    def describe(self) -> dict[str, Any]:
-        return {**super().describe(), "system": self.name, "user": self.user}
 
 
 PROGRAM_NOTE = """\
@@ -563,8 +474,7 @@ class BareProgramLibraryLearner(BareDemoCacheLearner):
     def load_state(self) -> None:
         super().load_state()
         path = self.state_dir / "library.json"
-        if path.exists():
-            self.library = json.loads(path.read_text())
+        self.library = json.loads(path.read_text()) if path.exists() else {}
 
     def resources(self) -> dict[str, float]:
         out = super().resources()

@@ -113,29 +113,46 @@ def test_the_demo_cache_keeps_at_most_its_cap_and_is_wiped_with_the_state():
     assert cache.cache == {} and cache.instance_preface(o) == ""
 
 
-def test_the_shared_demo_cache_shows_a_rounds_pairs_to_every_user_from_the_next_round_and_survives_a_resume(tmp_path):
-    """SharedDemoCache and BareSharedDemoCacheLearner, the demo-cache floor at several users: a pair any user bought
-    is shown to every user, from the round after it was bought (the collective regime's contract), the round's purchases
-    joining in user order up to the cap; each round's are written down, so a cache opened after k rounds holds rounds
-    0..k-1 alone, as a run resumed from its records needs; and a reset wipes it."""
-    from continual_arc_baselines.systems.bare import BareSharedDemoCacheLearner, SharedDemoCache
+def test_a_teams_demo_cache_is_its_one_state_every_users_pairs_shown_to_all_from_the_next_round(tmp_path):
+    """The demo-cache floor at several users keeps one cache for the team, as every learner keeps one state
+    (continual_arc_baselines.shared): each user's cache is read from their copy of it as the round begins and written as
+    the round ends, and the round's purchases are merged in user order, so a pair any user bought is shown to every
+    user from the next round on, the earlier users' first up to the cap, and within its round it reaches no one else."""
+    from continual_arc_baselines.shared import SharedState
+    from continual_arc_baselines.systems.bare import BareDemoCacheLearner
 
-    cache = SharedDemoCache(tmp_path / "demo-cache", 0, cap=2)
-    users = [BareSharedDemoCacheLearner("vendor/model", shared=cache, user=u) for u in range(2)]
-    bought = lambda user, *pairs: users[user].observe(obs(task="t1"), RequestDemos(), DemosFeedback(  # noqa: E731
-        pairs=[_pair(a, a) for a in pairs], refused=False, demo_requests_used=1))
-    bought(0, 1)
-    assert users[1].instance_preface(obs(task="t1")) == ""   # not within the round it was bought in
-    cache.end_round()
-    assert "Earlier pair 1 input (1x1):\n1" in users[1].instance_preface(obs(task="t1"))
-    bought(1, 2)
-    bought(0, 3)
-    cache.end_round()
-    assert [p.input for p in cache.shown("t1")] == [[[1]], [[3]]]   # user 0's first, then the cap
-    assert [p.input for p in SharedDemoCache(tmp_path / "demo-cache", 2, cap=2).shown("t1")] == [[[1]], [[3]]]
-    assert [p.input for p in SharedDemoCache(tmp_path / "demo-cache", 1, cap=2).shown("t1")] == [[[1]]]
-    assert users[0].resources()["state_bytes"] > 0
-    users[0].wipe_state()   # a user's conversation, never the team's cache
-    assert cache.shown("t1")
-    cache.clear()
-    assert cache.shown("t1") == [] and not list((tmp_path / "demo-cache").glob("r*.json"))
+    systems = [tmp_path / "users" / f"u{u:03d}" / "system" for u in range(2)]
+    team = SharedState(lambda user: systems[user], 2)
+    users = [BareDemoCacheLearner("vendor/model", cache_cap=2) for _ in systems]
+    for user, system in zip(users, systems, strict=True):
+        user.attach(system, {})
+
+    def bought(user, *inputs):
+        users[user].observe(obs(task="t1"), RequestDemos(), DemosFeedback(
+            pairs=[_pair(a, a) for a in inputs], refused=False, demo_requests_used=1))
+
+    def round_(play, index):
+        team.begin_round()
+        for user in users:
+            user.load_state()
+        play()
+        for user in users:
+            user.save_state()
+        team.end_round(index)
+        users[0].load_state()
+
+    def first():
+        bought(0, 1)
+        assert users[1].instance_preface(obs(task="t1")) == ""   # not within the round it was bought in
+
+    def second():
+        assert "Earlier pair 1 input (1x1):\n1" in users[1].instance_preface(obs(task="t1"))
+        bought(1, 2)
+        bought(0, 3)
+
+    round_(first, 0)
+    round_(second, 1)
+    assert [p.input for p in users[0].cache["t1"]] == [[[1]], [[3]]]   # user 0's first, then the cap
+    team.begin_round()
+    users[1].load_state()
+    assert [p.input for p in users[1].cache["t1"]] == [[[1]], [[3]]]
