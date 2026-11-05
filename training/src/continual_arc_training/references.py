@@ -155,7 +155,7 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: 
         result = run_stream(learner, schedule, EnvConfig(), out_dir=run_dir, env=env, resume=True,
                             learner_name=f"reference-{player}-{row}")
         play.refresh_meta_protocol(run_dir, result.summary["protocol"])
-        play.report_round_memory(learner, schedule, run_dir)
+        play.report_round_memory(schedule, run_dir, row in STATELESS_ROWS)
         return result
     finally:
         learner.close()

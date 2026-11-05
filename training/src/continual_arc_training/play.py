@@ -196,14 +196,14 @@ def refresh_meta_protocol(run_dir: Path, protocol: dict[str, Any]) -> None:
     path.write_text(json.dumps(meta, indent=1))
 
 
-def report_round_memory(learner: Any, schedule: Any, run_dir: Path) -> None:
+def report_round_memory(schedule: Any, run_dir: Path, stateless: bool) -> None:
     """The round's memory-use counters (:func:`continual_arc_training.memory.round_report`), the round being the cut's
-    last. A failure here is logged and never costs the round its result."""
+    last; ``stateless`` for a row wiped before every game, whose games begin from nothing. A failure here is logged and
+    never costs the round its result."""
     from continual_arc_training import memory
     round_ = schedule.rounds()[-1]
     try:
-        report = memory.round_report(run_dir, round_, schedule.users, lambda u: learner._user(u).system.state_dir,
-                                     round_dir)
+        report = memory.round_report(run_dir, round_, schedule.users, round_dir, stateless)
     except Exception:  # noqa: BLE001
         logging.exception("could not compute round %s's memory-use counters", round_)
         return
@@ -260,7 +260,7 @@ def play_round(row: str, run_dir: Path, schedule: Any, *, base_url: str, served_
                             learner_name=f"paper-{row}")
         refresh_meta_protocol(run_dir, result.summary["protocol"])
         if row != "bare":   # the bare model has no harness, so no memory to count
-            report_round_memory(learner, schedule, run_dir)
+            report_round_memory(schedule, run_dir, row in STATELESS_ROWS)
     finally:
         learner.close()
     return result
