@@ -9,7 +9,7 @@ OpenRouter key. A submitted learner, any adapter or harness it brings included, 
 * the learner runs in :mod:`learner_host` (standard library and the public ``continual_arc`` only), started with
   the submission's own interpreter and speaking JSON lines;
 * it reads its virtual environment, its checkout, the Python runtime the environment was made from and the operating
-  system, nothing else;
+  system's programs and libraries, nothing else;
 * it writes a private state directory under the attempt, kept for the whole run (it is the thing that learns, and
   its working directory), and its own HOME and TMPDIR;
 * it reaches the network only through the tracking proxy (on Linux a private network namespace and the bridge of
@@ -22,7 +22,17 @@ set aside as the stream left them, and before every instance its host is ended a
 keeps in its files or its processes reaches the next instance, whatever its code.
 
 Installing a submission runs its build code, so :func:`install_submission` (``arc-baselines install-submission``)
-installs it under the sandbox too, with the network, the new virtual environment and a cache of its own writable.
+installs it under the sandbox too, with the new virtual environment and a cache of its own writable and the network only
+through a filter to the package index and the code host (:mod:`continual_arc_baselines.systems.connect_filter`).
+
+Everything those trees hold is the submission's to write, so nothing on this side of the sandbox believes it: no path
+written there decides what the sandbox binds, a link there is never followed and nothing is read from or written to a
+file there. What the install records, the interpreter's runtime among them, lies beside the environment, where the build
+cannot reach (:func:`record_of`).
+
+:class:`ServedLearner` is what any learner in another process shares: the protocol's calls over JSON lines, each reply
+bounded, since the far side is untrusted. :class:`~continual_arc_baselines.systems.remote.RemoteLearner` serves the same
+learner from a machine of its own.
 """
 
 from __future__ import annotations
@@ -56,14 +66,15 @@ from continual_arc.learner import BaseLearner
 
 from continual_arc_baselines.frozen import HELD, delete, put_back
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
+from continual_arc_baselines.systems.connect_filter import ConnectFilter
 from continual_arc_baselines.systems.sandbox import (
+    CONFINED,
     SandboxSpec,
     darwin_user_dirs,
     default_mask_paths,
     install_root,
     package_manager_roots,
     proxy_port,
-    python_runtime_root,
     resolve_backend,
     start_bridge,
     wrap_command,
@@ -76,8 +87,11 @@ PUBLIC_BENCHMARK = next(url for name, _, url in (r.partition(" @ ") for r in met
                         if name.split("[")[0] == "continual-arc")
 """The benchmark the baselines themselves depend on (their pyproject's URL), installed for a submission that does not
 bring ``continual-arc`` itself."""
-SUBMISSION_RECORD = "arc-submission.json"
-"""What :func:`install_submission` installed, written into the virtual environment once the install is done."""
+MAX_REPLY = 16 * 2**20
+"""The longest line a learner may send, in characters: its replies are grids and counters, and an unbounded line would
+exhaust this process's memory."""
+MAX_RESOURCES = 64
+"""How many counters a learner's ``resources`` may report, each of which goes in every record."""
 INHERITED_ENV = ("LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
 BASE_URL_VARIABLES = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENROUTER_BASE_URL", "ARC_LLM_BASE_URL")
 KEY_VARIABLES = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ARC_LLM_API_KEY")
@@ -103,40 +117,173 @@ def _tail(path: Path, chars: int = 4000) -> str:
         return ""
 
 
-class HostedLearner(BaseLearner):
-    """A submission's learner, ``package.module:Class``, run under the sandbox with the interpreter ``python`` of the
-    virtual environment it was installed into, ``code`` its checkout (read only).
+class ServedLearner(BaseLearner):
+    """A learner in another process, its calls and replies JSON lines over that process's stdin and stdout, as
+    :mod:`learner_host` speaks them, one reply bounded by :data:`MAX_REPLY`.
 
     One user at a time (``concurrent_users`` stays False): the runner makes one call at a time. ``timeout_s`` bounds
-    each call and ``startup_timeout_s`` the import and construction; past either the run stops. ``reset`` is
-    forwarded like every other call: wiping its own state when asked is the learner's part of the benchmark's
-    contract, and the state directory is kept for the whole run. Once the learner is frozen (:meth:`freeze`), a reset
-    puts its files back as its stream left them instead, and starts it again.
-    """
+    each call and ``startup_timeout_s`` the import and construction; past either the run stops."""
 
     concurrent_users = False
 
-    def __init__(self, python: str, learner: str, code: str | None = None, sandbox: str = "auto",
-                 timeout_s: float = 3600.0, startup_timeout_s: float = 600.0, close_timeout_s: float = 60.0):
-        self.python = Path(python).expanduser().absolute()  # the venv's own path, not the interpreter it links to
-        self.learner = learner
-        self.code = Path(code).expanduser().resolve() if code else None
-        self.sandbox = sandbox
+    def __init__(self, timeout_s: float = 3600.0, startup_timeout_s: float = 600.0, close_timeout_s: float = 60.0):
         self.timeout_s = timeout_s
         self.startup_timeout_s = startup_timeout_s
         self.close_timeout_s = close_timeout_s
         self.workdir: Path | None = None
-        self.base_url: str | None = None
         self.tracker: Any = None
         self.hello: dict[str, Any] = {}
-        self.frozen: Path | None = None  # the learner's files as its stream left them, put back before every instance
         self._round: int | None = None   # the round the runner has begun and not yet ended
-        self._backend: str | None = None
-        self._tmp_dir: Path | None = None
         self._proc: subprocess.Popen | None = None
-        self._bridge: subprocess.Popen | None = None
         self._replies: queue.Queue = queue.Queue()
         self._log = None
+
+    @property
+    def log_path(self) -> Path:
+        """The host's stderr: the learner's prints and logs, and any traceback."""
+        return self.workdir / "learner.log"
+
+    @property
+    def state_in_files(self) -> bool:
+        """Whether everything the learner keeps between instances is files under its state directory and HOME, so that
+        putting them back puts the learner back: its own word, in the host's hello (``state_in_files`` on its class,
+        as the baselines' ``SystemLearner`` says)."""
+        return bool(self.hello.get("state_in_files"))
+
+    def _serve_from(self, argv: list[str], **popen: Any) -> None:
+        """Start the far side and wait for its hello."""
+        self._replies = queue.Queue(maxsize=8)  # a flood of lines waits in its pipe, not in this process's memory
+        self._proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log, text=True,
+                                      encoding="utf-8", errors="replace", bufsize=1, start_new_session=True, **popen)
+        threading.Thread(target=self._pump, args=(self._proc, self._replies), daemon=True,
+                         name="served-learner-out").start()
+        self.hello = self._receive("start", self.startup_timeout_s, startup=True)
+
+    @staticmethod
+    def _pump(proc: subprocess.Popen, replies: queue.Queue) -> None:
+        assert proc.stdout is not None
+        while line := proc.stdout.readline(MAX_REPLY):
+            replies.put(line)
+        replies.put(None)
+
+    def _note(self, message: str) -> None:
+        """Into learner.log beside the host's own output, marked as the adapter's."""
+        log.info(message)
+        if self._log is not None:
+            self._log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} [hosted] {message}\n")
+            self._log.flush()
+
+    def _fail(self, message: str) -> HostedLearnerError:
+        self._kill()
+        tail = _tail(self.log_path) if self.workdir else ""
+        return HostedLearnerError(f"{message}\n--- the end of {self.log_path} ---\n{tail}" if tail else message)
+
+    def _receive(self, what: str, timeout_s: float, startup: bool = False) -> Any:
+        deadline = time.monotonic() + timeout_s
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise self._fail(f"the learner did not answer {what} within {timeout_s:g}s")
+            try:
+                line = self._replies.get(timeout=remaining)
+            except queue.Empty:
+                continue
+            if line is None:
+                try:
+                    code = self._proc.wait(timeout=5) if self._proc is not None else None
+                except subprocess.TimeoutExpired:
+                    code = None  # it closed the channel and lives on
+                raise self._fail(f"the learner's host exited (code {code}) during {what}")
+            if len(line) >= MAX_REPLY:
+                raise self._fail(f"the learner sent a line of {MAX_REPLY} characters or more during {what}")
+            try:
+                reply = json.loads(line)
+            except (ValueError, RecursionError):
+                reply = None
+            if not isinstance(reply, dict) or "ok" not in reply:
+                if startup:  # what the interpreter's start-up (a .pth file) printed before the host took stdout
+                    self._note(f"before the host started: {line.rstrip()[:500]}")
+                    continue
+                raise self._fail(f"the learner's host broke the protocol during {what}: {line[:300]!r}")
+            if not reply["ok"]:
+                raise HostedLearnerError(f"the learner raised in {what}: {reply.get('error')}\n"
+                                         f"{reply.get('traceback', '')}")
+            return reply.get("result")
+
+    def _call(self, op: str, timeout_s: float | None = None, **fields: Any) -> Any:
+        if self._proc is None:
+            raise HostedLearnerError(f"the learner is not running ({op})")
+        assert self._proc.stdin is not None
+        try:
+            self._proc.stdin.write(json.dumps({"op": op, **fields}, default=str) + "\n")
+            self._proc.stdin.flush()
+        except (BrokenPipeError, OSError) as error:
+            raise self._fail(f"the learner's host is gone ({op}: {error})") from error
+        return self._receive(op, self.timeout_s if timeout_s is None else timeout_s)
+
+    def _kill(self) -> None:
+        proc, self._proc = self._proc, None
+        if proc is not None:
+            try:  # the whole session: the host and anything the learner started
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.wait(timeout=30)
+
+    # -- the learner interface -----------------------------------------------
+
+    def begin_round(self, n_instances: int) -> None:
+        self._round = int(n_instances)
+        self._call("begin_round", n=self._round)
+
+    def end_round(self) -> None:
+        self._call("end_round")
+        self._round = None
+
+    def act(self, obs: LearnerObservation):
+        return decode_action(self._call("act", obs=encode_observation(obs)))
+
+    def observe(self, obs: LearnerObservation, action, feedback) -> None:
+        self._call("observe", obs=encode_observation(obs), action=encode_action(action),
+                   feedback=encode_feedback(feedback))
+
+    def resources(self) -> dict[str, float]:
+        """The learner's own counters, then the proxy's, which win: the model calls are measured, not reported."""
+        reported = self._call("resources")
+        if not isinstance(reported, dict):
+            raise self._fail(f"resources() returned {reported!r}, not a dict")
+        numbers = [(str(k), float(v)) for k, v in reported.items() if isinstance(v, int | float)]
+        out = dict(numbers[:MAX_RESOURCES])
+        usage = getattr(self.tracker, "usage", None)
+        if usage is not None:
+            out.update(usage.as_resources())
+        return out
+
+
+class HostedLearner(ServedLearner):
+    """A submission's learner, ``package.module:Class``, run under the sandbox with the interpreter ``python`` of the
+    virtual environment it was installed into, ``code`` its checkout (read only), ``runtime`` the paths the interpreter's
+    Python comes from when it is not one of the system's, as :func:`install_submission` found them.
+
+    ``reset`` is forwarded like every other call: wiping its own state when asked is the learner's part of the
+    benchmark's contract, and the state directory is kept for the whole run. Once the learner is frozen (:meth:`freeze`),
+    a reset puts its files back as its stream left them instead, and starts it again.
+    """
+
+    def __init__(self, python: str, learner: str, code: str | None = None, runtime: list[str] | None = None,
+                 sandbox: str = "auto", timeout_s: float = 3600.0, startup_timeout_s: float = 600.0,
+                 close_timeout_s: float = 60.0):
+        super().__init__(timeout_s, startup_timeout_s, close_timeout_s)
+        self.python = Path(python).expanduser().absolute()  # the venv's own path, not the interpreter it links to
+        self.learner = learner
+        self.code = Path(code).expanduser().absolute() if code else None
+        self.runtime = [Path(path).expanduser().absolute() for path in runtime or ()]
+        self.sandbox = sandbox
+        self.base_url: str | None = None
+        self.frozen: Path | None = None  # the learner's files as its stream left them, put back before every instance
+        self._backend: str | None = None
+        self._tmp_dir: Path | None = None
+        self._bridge: subprocess.Popen | None = None
 
     # -- paths ---------------------------------------------------------------
 
@@ -154,18 +301,6 @@ class HostedLearner(BaseLearner):
     def home_dir(self) -> Path:
         return self.workdir / "home"
 
-    @property
-    def log_path(self) -> Path:
-        """The host's stderr: the learner's prints and logs, and any traceback."""
-        return self.workdir / "learner.log"
-
-    @property
-    def state_in_files(self) -> bool:
-        """Whether everything the learner keeps between instances is files under its state directory and HOME, so that
-        putting them back puts the learner back: its own word, in the host's hello (``state_in_files`` on its class,
-        as the baselines' ``SystemLearner`` says)."""
-        return bool(self.hello.get("state_in_files"))
-
     # -- the sandbox ---------------------------------------------------------
 
     def child_env(self) -> dict[str, str]:
@@ -178,6 +313,7 @@ class HostedLearner(BaseLearner):
             "VIRTUAL_ENV": str(self.venv),
             "ARC_STATE_DIR": str(self.state_dir),
             "PYTHONDONTWRITEBYTECODE": "1",
+            CONFINED: "1",
         })
         if self.base_url:
             env.update(dict.fromkeys(BASE_URL_VARIABLES, self.base_url))
@@ -185,18 +321,14 @@ class HostedLearner(BaseLearner):
         return env
 
     def sandbox_spec(self) -> SandboxSpec:
-        reads = [self.venv, self.workdir / HOST.name, self.workdir / "netbridge.py"]
-        runtime = python_runtime_root(self.python)
-        if runtime:
-            reads.append(runtime)
-        if self.code:
-            reads.append(self.code)
-        for path in list(reads):
+        reads = [self.workdir / HOST.name, self.workdir / "netbridge.py", *self.runtime]
+        for path in self.runtime:
             reads += package_manager_roots(path)
         port = proxy_port(self.base_url) if self.base_url else None
         temp_dirs = darwin_user_dirs()
         return SandboxSpec(read_paths=reads, write_paths=[self.state_dir, *temp_dirs], tmp_dir=self._tmp_dir,
                            home=self.home_dir, mask_paths=default_mask_paths(),
+                           opaque_paths=[self.venv, *([self.code] if self.code else [])],
                            loopback_ports=[port] if port else [], unix_socket_dirs=temp_dirs)
 
     # -- the host process ----------------------------------------------------
@@ -236,86 +368,14 @@ class HostedLearner(BaseLearner):
             inner, self._bridge = start_bridge(inner, proxy_port(self.base_url) if self.base_url else None,
                                                self._tmp_dir / "proxy.sock", self.workdir / "netbridge.py")
         argv = wrap_command(self._backend, inner, self.sandbox_spec(), self.workdir / "sandbox.sb")
-        self._replies = queue.Queue()
-        self._proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self._log,
-                                      cwd=self.state_dir, env=self.child_env(), text=True, encoding="utf-8",
-                                      bufsize=1, start_new_session=True)
-        threading.Thread(target=self._pump, args=(self._proc, self._replies), daemon=True,
-                         name="hosted-learner-out").start()
-        self.hello = self._receive("start", self.startup_timeout_s, startup=True)
+        self._serve_from(argv, cwd=self.state_dir, env=self.child_env())
         if self.hello.get("concurrent_users"):
             self._note("the learner says it serves users concurrently; it is served one call at a time")
         self._note(f"started {self.hello.get('learner')} (python {self.hello.get('python')}, continual_arc "
                    f"{self.hello.get('continual_arc')}, sandbox {self._backend})")
 
-    @staticmethod
-    def _pump(proc: subprocess.Popen, replies: queue.Queue) -> None:
-        assert proc.stdout is not None
-        for line in proc.stdout:
-            replies.put(line)
-        replies.put(None)
-
-    def _note(self, message: str) -> None:
-        """Into learner.log beside the host's own output, marked as the adapter's."""
-        log.info(message)
-        if self._log is not None:
-            self._log.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} [hosted] {message}\n")
-            self._log.flush()
-
-    def _fail(self, message: str) -> HostedLearnerError:
-        self._kill()
-        tail = _tail(self.log_path) if self.workdir else ""
-        return HostedLearnerError(f"{message}\n--- the end of {self.log_path} ---\n{tail}" if tail else message)
-
-    def _receive(self, what: str, timeout_s: float, startup: bool = False) -> Any:
-        deadline = time.monotonic() + timeout_s
-        while True:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise self._fail(f"the learner did not answer {what} within {timeout_s:g}s")
-            try:
-                line = self._replies.get(timeout=remaining)
-            except queue.Empty:
-                continue
-            if line is None:
-                try:
-                    code = self._proc.wait(timeout=5) if self._proc is not None else None
-                except subprocess.TimeoutExpired:
-                    code = None  # it closed the channel and lives on
-                raise self._fail(f"the learner's host exited (code {code}) during {what}")
-            try:
-                reply = json.loads(line)
-            except ValueError:
-                reply = None
-            if not isinstance(reply, dict) or "ok" not in reply:
-                if startup:  # what the interpreter's start-up (a .pth file) printed before the host took stdout
-                    self._note(f"before the host started: {line.rstrip()[:500]}")
-                    continue
-                raise self._fail(f"the learner's host broke the protocol during {what}: {line[:300]!r}")
-            if not reply["ok"]:
-                raise HostedLearnerError(f"the learner raised in {what}: {reply.get('error')}\n"
-                                         f"{reply.get('traceback', '')}")
-            return reply.get("result")
-
-    def _call(self, op: str, timeout_s: float | None = None, **fields: Any) -> Any:
-        if self._proc is None:
-            raise HostedLearnerError(f"the learner is not running ({op})")
-        assert self._proc.stdin is not None
-        try:
-            self._proc.stdin.write(json.dumps({"op": op, **fields}, default=str) + "\n")
-            self._proc.stdin.flush()
-        except (BrokenPipeError, OSError) as error:
-            raise self._fail(f"the learner's host is gone ({op}: {error})") from error
-        return self._receive(op, self.timeout_s if timeout_s is None else timeout_s)
-
     def _kill(self) -> None:
-        proc, self._proc = self._proc, None
-        if proc is not None:
-            try:  # the whole session: the host and anything the learner started
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-            proc.wait(timeout=30)
+        super()._kill()
         bridge, self._bridge = self._bridge, None
         if bridge is not None:
             bridge.terminate()
@@ -380,40 +440,12 @@ class HostedLearner(BaseLearner):
         self.frozen.rmdir()
         self.frozen = None
 
-    # -- the learner interface -----------------------------------------------
-
     def reset(self) -> None:
         if self.frozen is None:
             self._call("reset")
             return
         self._end_host()
         self._start_frozen()
-
-    def begin_round(self, n_instances: int) -> None:
-        self._round = int(n_instances)
-        self._call("begin_round", n=self._round)
-
-    def end_round(self) -> None:
-        self._call("end_round")
-        self._round = None
-
-    def act(self, obs: LearnerObservation):
-        return decode_action(self._call("act", obs=encode_observation(obs)))
-
-    def observe(self, obs: LearnerObservation, action, feedback) -> None:
-        self._call("observe", obs=encode_observation(obs), action=encode_action(action),
-                   feedback=encode_feedback(feedback))
-
-    def resources(self) -> dict[str, float]:
-        """The learner's own counters, then the proxy's, which win: the model calls are measured, not reported."""
-        reported = self._call("resources")
-        if not isinstance(reported, dict):
-            raise self._fail(f"resources() returned {reported!r}, not a dict")
-        out = {str(k): float(v) for k, v in reported.items() if isinstance(v, int | float)}
-        usage = getattr(self.tracker, "usage", None)
-        if usage is not None:
-            out.update(usage.as_resources())
-        return out
 
     def close(self) -> None:
         """End the host, whose errors are noted rather than raised, since this runs while the run unwinds and an error
@@ -429,7 +461,7 @@ class HostedLearner(BaseLearner):
                 self._log = None
 
     def describe(self) -> dict[str, Any]:
-        record = self.venv / SUBMISSION_RECORD
+        record = record_of(self.venv)
         return {"system": "hosted", "learner": self.learner, "python": str(self.python),
                 "code": str(self.code) if self.code else None, "sandbox": self._backend or self.sandbox,
                 "timeout_s": self.timeout_s, "host": dict(self.hello),
@@ -489,20 +521,27 @@ def _empty_dir(path: Path, what: str) -> None:
     path.mkdir(parents=True, exist_ok=True)
 
 
+def record_of(venv: Path) -> Path:
+    """What :func:`install_submission` installed, beside the virtual environment, out of its build code's reach."""
+    return venv.with_name(venv.name + ".submission.json")
+
+
 def install_submission(repo: str, commit: str, venv: str | Path, *, checkout: str | Path | None = None,
                        cache: str | Path | None = None, python: str = "3.12", sandbox: str = "auto",
                        benchmark: str = PUBLIC_BENCHMARK, read_paths: list[str | Path] = (),
-                       timeout_s: float = 3600.0) -> dict[str, Any]:
+                       https_proxy: str | None = None, timeout_s: float = 3600.0) -> dict[str, Any]:
     """Make a new virtual environment at ``venv`` with uv and install ``git+<repo>@<commit>`` into it, then the
     public benchmark (``benchmark``) when the submission did not bring ``continual-arc`` itself, and clone the
     repository at ``commit`` into ``checkout`` when one is given (the run's ``code``).
 
-    Installing runs the package's build code, so every step runs under the sandbox (``share_net``: the index and
-    the repository host): it reads the operating system, uv, the interpreter (``uv python find --system
-    <python>``) and ``read_paths`` (a local repository, for tests), and writes only ``venv``, ``checkout`` and a
-    cache of the submission's own (``<venv>-cache`` by default, holding uv's cache, HOME and TMPDIR), so one
-    submission's build cannot plant anything in another's. Returns the learner kwargs' paths and what went in;
-    ``<venv>/arc-submission.json`` records the same for the run's parameters."""
+    Installing runs the package's build code, so every step runs under the sandbox: it reads the operating system, uv, the
+    interpreter (``uv python find --system <python>``) and ``read_paths`` (a local repository, for tests), and writes only
+    ``venv``, ``checkout`` and a cache of the submission's own (``<venv>-cache`` by default, holding uv's cache and HOME), so one
+    submission's build cannot plant anything in another's. Its network is a bridge to the HTTPS proxy at ``https_proxy``,
+    a :class:`~continual_arc_baselines.systems.connect_filter.ConnectFilter` that the caller holds, or one started here.
+    Returns the learner kwargs' paths and what went in. This process's own files, the install's log and :func:`record_of`,
+    lie beside the environment in folders the sandbox does not show, since a link the build plants in anything it can
+    write would send this process's writes wherever it names."""
     backend = resolve_backend(sandbox)
     venv = Path(venv).expanduser().absolute()
     cache = Path(cache).expanduser().absolute() if cache else venv.with_name(venv.name + "-cache")
@@ -518,9 +557,12 @@ def install_submission(repo: str, commit: str, venv: str | Path, *, checkout: st
     _empty_dir(venv, "virtual environment")
     if checkout:
         _empty_dir(checkout, "checkout")
-    home, tmp = cache / "home", cache / "tmp"
-    for path in (cache / "uv", home, tmp):
+    home = cache / "home"
+    for path in (cache / "uv", home):
         path.mkdir(parents=True, exist_ok=True)
+    own = venv.with_name(venv.name + ".install")  # this process's: the log, the sandbox's profile and the bridge's script
+    own.mkdir(parents=True, exist_ok=True)
+    tmp = Path(tempfile.mkdtemp(prefix="arc-in-", dir="/tmp" if os.path.isdir("/tmp") else None))
 
     reads: list[Path] = [Path(uv).resolve(), interpreter, *[Path(p).expanduser().absolute() for p in read_paths]]
     root = install_root(str(interpreter))
@@ -529,17 +571,31 @@ def install_submission(repo: str, commit: str, venv: str | Path, *, checkout: st
     for path in list(reads):
         reads += package_manager_roots(path)
     temp_dirs = darwin_user_dirs()
+    # HOME is named only in the environment, since it lies in what the build can write
     spec = SandboxSpec(read_paths=reads, write_paths=[venv, cache, *([checkout] if checkout else []), *temp_dirs],
-                       tmp_dir=tmp, home=home, mask_paths=default_mask_paths(), unix_socket_dirs=temp_dirs)
+                       tmp_dir=tmp, mask_paths=default_mask_paths(), unix_socket_dirs=temp_dirs)
+    transcript = own / "install.log"
     env = {**_inherited(), "PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "HOME": str(home), "TMPDIR": str(tmp),
            "UV_CACHE_DIR": str(cache / "uv"), "UV_PYTHON_DOWNLOADS": "never", "UV_NO_CONFIG": "1",
-           "GIT_TERMINAL_PROMPT": "0"}
-    transcript = cache / "install.log"
+           "GIT_TERMINAL_PROMPT": "0", CONFINED: "1"}
 
-    def step(argv: list[str]) -> None:
-        wrapped = wrap_command(backend, argv, spec, cache / "install.sb", share_net=True)
-        out = subprocess.run(wrapped, env=env, cwd=cache, capture_output=True, text=True, timeout=timeout_s,
-                             check=False)
+    def note(line: str) -> None:
+        with transcript.open("a") as fh:
+            fh.write(f"[filter] {line}\n")
+
+    def step(argv: list[str], proxy: str) -> None:
+        inner, bridge = list(argv), None
+        if backend == "bwrap":
+            inner, bridge = start_bridge(argv, proxy_port(proxy), tmp / "proxy.sock", own / "netbridge.py")
+        wrapped = wrap_command(backend, inner, spec, own / "install.sb", share_net=backend != "bwrap")
+        proxied = {name: proxy for name in ("HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy")}
+        try:
+            out = subprocess.run(wrapped, env={**env, **proxied}, cwd=cache, capture_output=True, text=True,
+                                 errors="replace", timeout=timeout_s, check=False)
+        finally:
+            if bridge is not None:
+                bridge.terminate()
+                bridge.wait(timeout=30)
         with transcript.open("a") as fh:
             fh.write(f"$ {' '.join(argv)}\n{out.stdout}{out.stderr}[exit {out.returncode}]\n")
         if out.returncode != 0:
@@ -547,17 +603,30 @@ def install_submission(repo: str, commit: str, venv: str | Path, *, checkout: st
 
     target = venv / "bin" / "python"
     requirement = f"git+{repo}@{commit}"
-    step([uv, "venv", "--quiet", "--no-project", "--python", str(interpreter), str(venv)])
-    step([uv, "pip", "install", "--python", str(target), requirement])
-    brought = brings_benchmark(venv)
-    if not brought:
-        step([uv, "pip", "install", "--python", str(target), benchmark])
-    if checkout:
-        step(["git", "clone", "--quiet", repo, str(checkout)])
-        step(["git", "-C", str(checkout), "checkout", "--quiet", "--detach", commit])
+
+    def install(proxy: str) -> bool:
+        step([uv, "venv", "--quiet", "--no-project", "--python", str(interpreter), str(venv)], proxy)
+        step([uv, "pip", "install", "--python", str(target), requirement], proxy)
+        brought = brings_benchmark(venv)
+        if not brought:
+            step([uv, "pip", "install", "--python", str(target), benchmark], proxy)
+        if checkout:
+            step(["git", "clone", "--quiet", repo, str(checkout)], proxy)
+            step(["git", "-C", str(checkout), "checkout", "--quiet", "--detach", commit], proxy)
+        return brought
+
+    try:
+        if https_proxy:
+            brought = install(https_proxy)
+        else:
+            with ConnectFilter(note=note) as local:
+                brought = install(local.url)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     record = {"repo": repo, "commit": commit, "requirement": requirement,
               "benchmark": "the submission's own" if brought else benchmark, "python": str(interpreter),
-              "sandbox": backend, "installed_at": datetime.now(UTC).isoformat(timespec="seconds")}
-    (venv / SUBMISSION_RECORD).write_text(json.dumps(record, indent=1) + "\n")
+              "runtime": [str(root), str(interpreter)] if root else [str(interpreter)], "sandbox": backend,
+              "installed_at": datetime.now(UTC).isoformat(timespec="seconds")}
+    record_of(venv).write_text(json.dumps(record, indent=1) + "\n")
     return {"python": str(target), "code": str(checkout) if checkout else None, "venv": str(venv),
-            "cache": str(cache), **{k: record[k] for k in ("repo", "commit", "benchmark")}}
+            "cache": str(cache), **{k: record[k] for k in ("runtime", "repo", "commit", "benchmark")}}

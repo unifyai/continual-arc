@@ -9,26 +9,29 @@ truth before submitting.
 The rule is therefore: a system sees only what it needs, and the tracking proxy is
 its only way out.
 
-* read: the system's own installation, its Python runtime, the OS;
+* read: the system's own installation, its Python runtime, the OS's programs and libraries;
 * read and write: its private state under the attempt directory, a private HOME
   and a private temporary directory;
 * network: TCP to the proxy on the loopback interface, and UNIX sockets under its
   private temporary directory (for anything the system spawns for itself);
-* nothing else. In particular no other file under the user's home directory, so
-  neither the repositories nor the virtual environments are reachable.
+* nothing else. Under bubblewrap nothing else of the host's tree exists inside the sandbox, so neither the
+  repositories, the virtual environments, nor the sockets of the daemons outside it (a process that reaches
+  the systemd manager's socket under ``/run/user`` starts what it likes outside every namespace) are reachable.
 
-Backends: ``bwrap`` (bubblewrap on Linux, :func:`bwrap_command`), which also gives
-the system private network and pid namespaces, and ``seatbelt`` (macOS
-``sandbox-exec``, :func:`seatbelt_profile`); each wraps the command in place and
-applies to every descendant process. :func:`resolve_backend` never falls back to
-no sandbox silently: ``sandbox="none"`` has to be spelled out and is recorded in
-the run parameters.
+Backends: ``bwrap`` (bubblewrap on Linux, :func:`bwrap_command`), which also gives the system private user, network,
+pid, IPC, UTS and cgroup namespaces, a filter on what it may ask of the kernel (:mod:`continual_arc_baselines.systems.seccomp`)
+and limits on what it may consume (:data:`LIMITS`), and ``seatbelt`` (macOS ``sandbox-exec``,
+:func:`seatbelt_profile`); each wraps the command in place and applies to every descendant process.
+:func:`resolve_backend` never falls back to no sandbox silently: ``sandbox="none"`` has to be spelled out and is recorded
+in the run parameters, unless the process is itself inside a sandbox (:data:`CONFINED`).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import platform
+import resource
 import shutil
 import subprocess
 import sys
@@ -36,8 +39,14 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from continual_arc_baselines.systems import seccomp
+
 SEATBELT = "/usr/bin/sandbox-exec"
 BACKENDS = ("auto", "seatbelt", "bwrap", "none")
+CONFINED = "ARC_CONFINED"
+"""Set in the environment of a process already inside a sandbox: a harness adapter run whole in a submission's sandbox
+starts its harness with no sandbox of its own, since the filter refuses the namespaces another would need and the one
+around it already holds."""
 
 # A confined harness's environment is an allowlist: of the host's, these, its locale (``LC_*``) and the variables an
 # adapter is told to pass through; with a proxy, the proxy's address and placeholder key (PROXY_ENV); and its own key
@@ -78,6 +87,9 @@ class SandboxSpec:
     """Loopback TCP ports the system may listen on and connect to (a gateway it
     runs for itself, such as openclaw's)."""
     unix_socket_dirs: list[Path] = field(default_factory=list)
+    opaque_paths: list[Path] = field(default_factory=list)
+    """Trees written by the code being confined, a submission's environment and checkout: bound whole and read-only, and
+    no link inside them is followed to decide what else to bind, since a link there may name anything on the host."""
 
     def normalised(self) -> SandboxSpec:
         def fix(paths):
@@ -90,7 +102,7 @@ class SandboxSpec:
 
         return SandboxSpec(
             read_paths=fix(self.read_paths), write_paths=fix(self.write_paths),
-            mask_paths=fix(self.mask_paths),
+            mask_paths=fix(self.mask_paths), opaque_paths=fix(self.opaque_paths),
             tmp_dir=self.tmp_dir.resolve() if self.tmp_dir else None,
             home=self.home.resolve() if self.home else None,
             loopback_ports=list(self.loopback_ports),
@@ -104,7 +116,7 @@ def resolve_backend(requested: str = "auto") -> str:
     silent fallback to none."""
     if requested not in BACKENDS:
         raise ValueError(f"sandbox must be one of {BACKENDS}, got {requested!r}")
-    if requested == "none":
+    if requested == "none" or (requested == "auto" and os.environ.get(CONFINED)):
         return "none"
     system = platform.system()
     if requested == "seatbelt" or (requested == "auto" and system == "Darwin"):
@@ -269,19 +281,25 @@ def start_bridge(argv: list[str], port: int | None, sock_path: Path, script_path
     return inner, host
 
 
-# Trees a Linux sandbox hides whole before binding back what the system needs: every home directory (the
-# repositories, their virtual environments and secrets, every run's state and transcripts, caches, anything a
-# user leaves there), a container's volume, and the host's temporary directory (other systems' private
-# directories and sockets).
-HIDDEN_ROOTS = ("/home", "/root", "/workspace", "/mnt", "/tmp")
+# What a Linux sandbox shows of the host, read-only: its programs and their libraries, /etc and /opt. Nothing else of
+# the host's tree exists inside: not its home directories, container volumes or temporary directory, and not /run or
+# /var, where the sockets of the daemons outside it live.
+SYSTEM_ROOTS = ("/usr", "/etc", "/opt", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32")
+CPU_TOPOLOGY = "/sys/devices/system/cpu"  # how many processors there are, which numeric libraries read
+# What a sandbox may consume, for ``prlimit``: no core files, at most this many open files, processes and threads (counted
+# in its own user namespace on Linux 5.14 and later, and across the user's sandboxes above it), and bytes in one file.
+LIMITS = {"nofile": (resource.RLIMIT_NOFILE, 65_536), "nproc": (resource.RLIMIT_NPROC, 8_192),
+          "fsize": (resource.RLIMIT_FSIZE, 64 * 2**30), "core": (resource.RLIMIT_CORE, 0)}
 
 
-def hidden_roots() -> list[Path]:
-    roots = [Path(p) for p in HIDDEN_ROOTS]
-    home = Path.home()
-    if not any(home == r or r in home.parents for r in roots):
-        roots.append(home)  # a home outside them
-    return [r for r in roots if r.exists()]
+def _limits() -> list[str]:
+    """``prlimit``'s options for :data:`LIMITS`, each no higher than the hard limit this process itself has."""
+    options = []
+    for name, (which, wanted) in LIMITS.items():
+        hard = resource.getrlimit(which)[1]
+        value = wanted if hard == resource.RLIM_INFINITY else min(wanted, hard)
+        options.append(f"--{name}={value}:{value}")
+    return options
 
 
 def _under(path: Path, root: Path) -> bool:
@@ -309,38 +327,57 @@ def _links_to(path: str | Path) -> tuple[list[tuple[str, Path]], Path]:
     return links, current
 
 
-def bwrap_command(argv: list[str], spec: SandboxSpec, share_net: bool = False) -> list[str]:
-    """Bubblewrap, as an allowlist like the seatbelt profile. The operating system is readable, every home directory,
-    container volume and the host's temporary directory are hidden whole (:func:`hidden_roots`), and only what the
-    system is declared to need is bound back: its read paths and any existing absolute path its command line names
-    (its executable, the bridge script) read-only, then its private state, HOME and temporary directory writable. The
-    benchmark trees stay hidden wherever they lie, even under something bound back. Private network and pid
-    namespaces: loopback only (bubblewrap brings ``lo`` up), so the system reaches the tracking proxy through the
-    bridge of :func:`start_bridge` and nothing else. ``share_net`` (the host's network) is for a system's own
-    maintenance commands that must reach a gateway it runs, and for installing a submission, whose build reaches the
-    package index and the repository host (never for a model-driven turn).
+def bwrap_command(argv: list[str], spec: SandboxSpec, share_net: bool = False, seccomp_file: Path | None = None) -> list[str]:
+    """Bubblewrap, as an allowlist like the seatbelt profile. The sandbox starts from an empty root and shows only
+    :data:`SYSTEM_ROOTS`, read-only, and what the system is declared to need: its read paths and any existing absolute
+    path its command line names (its executable, the bridge script) read-only, each followed through its links unless it
+    lies in what the system can write or in an opaque path, then its opaque paths read-only, then its private state, HOME
+    and temporary directory writable. The
+    benchmark trees stay hidden wherever they lie, even under something bound back. Private user, network, pid, IPC, UTS
+    and cgroup namespaces: loopback only (bubblewrap brings ``lo`` up), so the system reaches the tracking proxy through
+    the bridge of :func:`start_bridge` and nothing else, and no process, shared memory or message queue of the host's or
+    another sandbox's is in reach. ``share_net`` (the host's network) is for a system's own maintenance commands that must
+    reach a gateway it runs (never for a model-driven turn). ``seccomp_file`` holds the compiled filter
+    (:mod:`continual_arc_baselines.systems.seccomp`), which bubblewrap loads from a file descriptor, opened here by a
+    shell so that the command stays one argument list.
 
-    An allowlist rather than the whole filesystem with a list of benchmark trees hidden: under such a list a harness
-    reads whatever it does not name, other runs' transcripts and the host's ``.env`` among them."""
+    An allowlist rather than the whole filesystem with a list of trees hidden: under such a list a harness reads whatever
+    it does not name, other runs' transcripts and the host's ``.env`` among them, and reaches any socket it does not
+    name, the systemd manager's among them (a hostile learner did, from a test copy of a verification runner, on 5
+    November 2026, and so started a process outside every namespace)."""
     raw = spec
     spec = spec.normalised()
-    hidden = hidden_roots()
-    covered = hidden + [m for m in spec.mask_paths if not any(_under(m, h) for h in hidden)]
-    cmd = ["bwrap", "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc",
-           "--die-with-parent", "--unshare-pid", "--share-net" if share_net else "--unshare-net"]
-    for p in covered:
-        cmd += ["--tmpfs", str(p)]
-    hidden_here = lambda p: any(_under(p, c) for c in covered)  # noqa: E731
+    shown = lambda p: any(_under(p, Path(root)) for root in SYSTEM_ROOTS)  # noqa: E731
+    # what the confined code can write, or wrote, decides nothing: its links are not followed
+    unfollowed = [*spec.opaque_paths, *spec.write_paths, *(p for p in (spec.tmp_dir, spec.home) if p),
+                  *(Path(os.path.abspath(p)) for p in [*raw.opaque_paths, *raw.write_paths])]
+    cmd = ["bwrap", "--unshare-user", "--unshare-ipc", "--unshare-pid", "--unshare-uts", "--unshare-cgroup-try",
+           "--hostname", "sandbox", "--die-with-parent", "--share-net" if share_net else "--unshare-net"]
+    if seccomp_file is not None:
+        cmd += ["--seccomp", "9"]
+    for root in SYSTEM_ROOTS:
+        if os.path.islink(root):
+            cmd += ["--symlink", os.readlink(root), root]
+        elif os.path.isdir(root):
+            cmd += ["--ro-bind", root, root]
+    cmd += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp", "--tmpfs", "/var/tmp", "--dir", "/run"]
+    if os.path.isdir(CPU_TOPOLOGY):
+        cmd += ["--ro-bind", CPU_TOPOLOGY, CPU_TOPOLOGY]
     reals: set[Path] = set()
     links: dict[Path, str] = {}
-    for path in [*raw.read_paths, *(a for a in argv if a.startswith("/"))]:
+    named = [*raw.read_paths, *(a for a in argv if a.startswith("/"))]
+    if share_net:
+        named.append("/etc/resolv.conf")  # on most systems a link into /run, where the resolver writes it
+    for path in named:
+        if any(_under(Path(os.path.abspath(Path(path).expanduser())), u) for u in unfollowed):
+            continue
         chain, real = _links_to(path)
         if not real.exists():
             continue
-        if hidden_here(real):
+        if not shown(real):
             reals.add(real)
-        links.update({link: target for target, link in chain if hidden_here(link)})
-    ro: list[Path] = []
+        links.update({link: target for target, link in chain if not shown(link)})
+    ro: list[Path] = list(spec.opaque_paths)
     for real in sorted(reals, key=lambda p: (len(p.parts), str(p))):
         # parents first; a path inside a directory already bound back is visible through it
         if not any(d.is_dir() and _under(real, d) for d in ro):
@@ -357,7 +394,41 @@ def bwrap_command(argv: list[str], spec: SandboxSpec, share_net: bool = False) -
     for m in spec.mask_paths:
         if any(_under(m, d) and m != d for d in [*ro, *rw]):
             cmd += ["--tmpfs", str(m)]
-    return cmd + ["--", *argv]
+    cmd += ["--remount-ro", "/", "--", *argv]
+    limited = ["prlimit", *_limits(), *cmd]
+    return ["/bin/sh", "-c", 'exec 9<"$1"; shift; exec "$@"', "sh", str(seccomp_file), *limited] if seccomp_file else limited
+
+
+SELF_CHECK = r"""
+import ctypes, json, os, sys
+libc = ctypes.CDLL(None, use_errno=True)
+libc.syscall.restype = ctypes.c_long
+refused = {}
+for name, number, args in (("unshare", 272, (0x10000000,)), ("mount", 165, (0, 0, 0, 0, 0)), ("bpf", 321, (0, 0, 0)),
+                           ("io_uring_setup", 425, (1, 0)), ("keyctl", 250, (0, 0, 0, 0, 0))):
+    result = libc.syscall(ctypes.c_long(number), *[ctypes.c_long(a) for a in args])
+    refused[name] = result < 0 and ctypes.get_errno() == 1
+json.dump({"refused": refused, "pids": len([p for p in os.listdir("/proc") if p.isdigit()]), "host": os.uname().nodename,
+           "shown": [p for p in ("/run/user", "/run/dbus", "/run/systemd", "/var/log", "/var/lib", "/root", "/boot", "/sys/fs/cgroup",
+                                 "/proc/kcore", "/dev/kmsg") if os.path.lexists(p) and not (p == "/proc/kcore")]}, sys.stdout)
+"""
+
+
+def confinement_problems(profile_path: Path) -> list[str]:
+    """What a process in this machine's sandbox can do that it should not, from inside: a check that fails loudly where a
+    machine was set up with a bubblewrap, a kernel or a filter that holds less than this module says. Empty when the
+    sandbox holds."""
+    backend = resolve_backend("bwrap")
+    argv = wrap_command(backend, ["/usr/bin/python3", "-I", "-c", SELF_CHECK], SandboxSpec(), profile_path)
+    done = subprocess.run(argv, capture_output=True, text=True, timeout=60, check=False)
+    if done.returncode != 0:
+        return [f"the sandbox did not start (exit {done.returncode}): {done.stderr[-300:]}"]
+    seen = json.loads(done.stdout)
+    problems = [f"{name} was not refused" for name, was in seen["refused"].items() if not was]
+    problems += [f"{path} shows in the sandbox" for path in seen["shown"]]
+    if seen["pids"] > 3 or seen["host"] != "sandbox":
+        problems.append(f"the sandbox shares the host's processes or name ({seen['pids']} pids, {seen['host']})")
+    return problems
 
 
 def _sb_str(value: str) -> str:
@@ -374,7 +445,7 @@ def seatbelt_profile(spec: SandboxSpec, share_net: bool = False) -> str:
     if spec.home:
         rw.append(spec.home)
     socket_dirs = list(spec.unix_socket_dirs) + ([spec.tmp_dir] if spec.tmp_dir else [])
-    reads = [Path(p) for p in _SYSTEM_READ if Path(p).exists()] + spec.read_paths + rw
+    reads = [Path(p) for p in _SYSTEM_READ if Path(p).exists()] + spec.read_paths + spec.opaque_paths + rw
 
     lines = [
         "(version 1)",
@@ -419,19 +490,25 @@ def seatbelt_profile(spec: SandboxSpec, share_net: bool = False) -> str:
 
 def wrap_command(backend: str, argv: list[str], spec: SandboxSpec, profile_path: Path,
                  share_net: bool = False) -> list[str]:
-    """Return the command line that runs ``argv`` inside the sandbox."""
+    """Return the command line that runs ``argv`` inside the sandbox. ``profile_path`` is where the sandbox's profile goes
+    (Seatbelt's, or the compiled filter for bubblewrap), which must be outside everything the sandbox can write."""
     if backend == "none":
         return list(argv)
     if backend == "seatbelt":
         profile_path.write_text(seatbelt_profile(spec, share_net=share_net))
         return [SEATBELT, "-f", str(profile_path), *argv]
     if backend == "bwrap":
-        return bwrap_command(argv, spec, share_net=share_net)
+        program = seccomp.program()
+        if program is None:
+            return bwrap_command(argv, spec, share_net=share_net)
+        profile_path.write_bytes(program)
+        return bwrap_command(argv, spec, share_net=share_net, seccomp_file=profile_path)
     raise ValueError(f"unknown sandbox backend {backend!r}")
 
 
 def python_runtime_root(python: Path) -> Path | None:
-    """The installation a venv's interpreter comes from (``home`` in pyvenv.cfg)."""
+    """The installation a venv's interpreter comes from (``home`` in pyvenv.cfg): for a venv this package made or trusts.
+    A submission's build code can write its own venv's pyvenv.cfg, so it never names what a sandbox binds."""
     cfg = Path(python).absolute().parent.parent / "pyvenv.cfg"  # the venv, not the resolved binary
     if not cfg.is_file():
         return None

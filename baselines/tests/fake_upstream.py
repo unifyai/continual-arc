@@ -12,6 +12,7 @@ class FakeUpstream:
                  error: dict | None = None, reasoning: str | None = None, replies: list[str] | None = None,
                  broken: bool = False, window: int | None = None):
         self.reply, self.cost, self.error = reply, cost, error  # error: the JSON body of a non-streamed 4xx or 5xx
+        self.byok = False  # the replies say the call went through the key's own provider account, as OpenRouter's do
         # a vLLM server's max_model_len: a prompt (a token per character of its messages' text) and the reply budget a
         # call asks that together pass it are refused as vLLM refuses them, a 400 before any stream; a call that asks
         # no budget is refused only for a prompt that passes it alone
@@ -58,13 +59,14 @@ class FakeUpstream:
                 body = json.loads(self.rfile.read(length) or b"{}")
                 upstream.requests.append({"path": self.path, "body": body,
                                           "authorization": self.headers.get("Authorization"),
-                                          "rank": self.headers.get("X-data-parallel-rank")})
+                                          "rank": self.headers.get("X-data-parallel-rank"),
+                                          "headers": dict(self.headers.items())})
                 if upstream.window is not None and self.refuse_overrun(body):
                     return
                 gen = f"gen-{len(upstream.requests)}"
                 if upstream.replies:
                     upstream.reply = upstream.replies.pop(0) if len(upstream.replies) > 1 else upstream.replies[0]
-                usage = {"prompt_tokens": 12, "completion_tokens": 3,
+                usage = {"prompt_tokens": 12, "completion_tokens": 3, "is_byok": upstream.byok,
                          "completion_tokens_details": {"reasoning_tokens": 2}, "cost": upstream.cost}
                 # a vLLM server asked for return_token_ids: the prompt's ids (here: one per message,
                 # then 1, 2) and the reply's (7, 8)

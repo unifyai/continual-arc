@@ -1029,7 +1029,6 @@ def test_the_kernel_runs_on_the_learners_own_venv_which_the_sandbox_binds_read_o
     own = learner.own_venv
     assert env["PRIME_AGENT_KERNEL_PYTHON"] == str(own / "bin" / "python")
     assert own.parent == learner.workdir and learner.state_dir not in own.parents
-    monkeypatch.setattr(sandbox, "hidden_roots", lambda: [tmp_path])
     cmd = sandbox.bwrap_command(learner._argv(), spec)
     ro = [(cmd[i + 1], cmd[i + 2]) for i, arg in enumerate(cmd[:-2]) if arg == "--ro-bind"]
     rw = [cmd[i + 1] for i, arg in enumerate(cmd[:-2]) if arg == "--bind"]

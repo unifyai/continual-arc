@@ -11,6 +11,15 @@ can, reaches no other endpoint on the run's key: a completion, an embedding or a
 :attr:`~LLMProxy.body_overrides` names a model, as every row's overrides do (:func:`own_model` gives a learner's), each
 chat completion goes to that model, whatever model the call names.
 
+A verified run's learner is untrusted and its key is its submitter's, so its proxy is **confined**
+(:attr:`~LLMProxy.confined_to`, ``arc-baselines run --confine-models``): only the models its submission names go
+upstream, and only what cannot leave the model call. A request carries a plain chat completion and nothing an upstream
+would act on or show its account's owner apart from the conversation: no other model's name, no fallback list, no
+routing, no plugin or server-side tool, no URL for a provider to fetch, no header or field of its own (``X-Title``,
+``user``, ``metadata`` and the like, which OpenRouter's activity shows). Each call asks for endpoints that keep no data, a
+call served through the key's own provider account (OpenRouter's ``is_byok``) stops all the calls after it, and the pace
+and size of what it sends are bounded, since this process journals every call on the verifier's own disk.
+
 The proxy is transparent: no caching and no fallback models. Streaming responses are passed through byte for byte while
 the server-sent events are parsed on the side for the usage block. A request is changed only as follows, in
 chat completions alone:
@@ -89,6 +98,20 @@ HOP_BY_HOP = frozenset({
     "connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
     "transfer-encoding", "upgrade", "host", "content-length", "accept-encoding",
 })
+MODEL_ENTRY = re.compile(r"/models(/[A-Za-z0-9_~:.-]+)*")
+MAX_BODY = 32 * 2**20      # the largest request read: a window's worth of text is a few megabytes
+MAX_CLIENTS = 1024         # the connections served at once; past them a new one is closed
+IDLE_S = 900.0             # how long a client may sit on a blocked read or write
+# A confined proxy's request: the fields of a plain chat completion. Anything else is dropped before it goes up.
+CONFINED_FIELDS = frozenset({
+    "model", "messages", "stream", "stream_options", "temperature", "top_p", "top_k", "min_p", "top_a", "max_tokens",
+    "max_completion_tokens", "stop", "seed", "frequency_penalty", "presence_penalty", "repetition_penalty", "logit_bias",
+    "logprobs", "top_logprobs", "response_format", "structured_outputs", "tools", "tool_choice", "parallel_tool_calls",
+    "reasoning", "reasoning_effort", "include_reasoning", "verbosity", "usage", "cache_control",
+})
+# Where a confined proxy's calls may go: endpoints that keep nothing and train on nothing (OpenRouter's provider routing).
+CONFINED_ROUTING = {"zdr": True, "data_collection": "deny"}
+CONFINED_RATE = 20.0       # the calls a second a confined proxy forwards or refuses; more wait their turn
 
 
 def _int(value: Any) -> int | None:
@@ -108,11 +131,64 @@ def _endpoint(path: str) -> str:
 
 def forwarded(method: str, path: str) -> bool:
     """Whether the proxy sends a request upstream: a chat completion, or a read of the model list or of a model's
-    entry."""
+    entry, named plainly: a ``..`` in a path would reach any endpoint, since a client resolves it before it sends."""
     endpoint = _endpoint(path)
     if method == "POST":
         return endpoint == CHAT
-    return method == "GET" and (endpoint == MODELS or endpoint.startswith(MODELS + "/"))
+    return (method == "GET" and MODEL_ENTRY.fullmatch(endpoint) is not None
+            and not {".", ".."} & set(endpoint.split("/")))
+
+
+class Refused(Exception):
+    """A request a confined proxy will not send upstream: the status and the reason its client is told."""
+
+    def __init__(self, status: int, message: str):
+        super().__init__(message)
+        self.status = status
+
+
+def _confined_content(content: Any) -> None:
+    """A message's content in a confined request: text, or a list of parts each text or an image carried in the request
+    itself, since a provider fetches any URL it is given, query string and all."""
+    if content is None or isinstance(content, str):
+        return
+    if not isinstance(content, list):
+        raise Refused(400, "a message's content is text or a list of parts")
+    for part in content:
+        kind = part.get("type") if isinstance(part, dict) else None
+        if kind == "text":
+            continue
+        url = part.get("image_url") if kind == "image_url" else None
+        url = url.get("url") if isinstance(url, dict) else url
+        if not (isinstance(url, str) and url.startswith("data:")):
+            raise Refused(400, f"a message part may be text or an image in a data: URL, not {str(kind)[:40]}")
+
+
+def _confined(parsed: Any, models: dict[str, str | None]) -> dict:
+    """A confined chat completion's body: :data:`CONFINED_FIELDS` of it, once its model and what it carries are allowed,
+    with the reasoning effort the submission names for its model when the call names none."""
+    if not isinstance(parsed, dict):
+        raise Refused(400, "a chat completion is a JSON object")
+    if not isinstance(parsed.get("model"), str) or parsed["model"] not in models:
+        raise Refused(403, "the model is not one this submission names")
+    messages = parsed.get("messages")
+    if not isinstance(messages, list):
+        raise Refused(400, "a chat completion has a list of messages")
+    for message in messages:
+        if not isinstance(message, dict):
+            raise Refused(400, "a message is a JSON object")
+        _confined_content(message.get("content"))
+    tools = parsed.get("tools") or []
+    if not isinstance(tools, list) or not all(isinstance(t, dict) and t.get("type") == "function" for t in tools):
+        raise Refused(400, "a tool is a function the learner itself runs")
+    choice = parsed.get("tool_choice")
+    if isinstance(choice, dict) and choice.get("type") != "function":
+        raise Refused(400, "a tool is a function the learner itself runs")
+    body = {key: value for key, value in parsed.items() if key in CONFINED_FIELDS}
+    effort = models[parsed["model"]]
+    if effort and "reasoning" not in body and "reasoning_effort" not in body:
+        body["reasoning"] = {"effort": effort}
+    return body
 
 
 def own_model(learner_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -144,6 +220,7 @@ def _absorb(call: LLMCall, payload: dict) -> None:
         call.model = payload["model"]
     usage = payload.get("usage")
     if isinstance(usage, dict):
+        call.byok = call.byok or usage.get("is_byok") is True
         tokens = _usage_tokens(usage)
         for key in TOKEN_FIELDS:
             if tokens[key] is not None:
@@ -261,6 +338,28 @@ class _SSEParser:
         return events
 
 
+class _Server(ThreadingHTTPServer):
+    """One thread a connection, at most :data:`MAX_CLIENTS` at once, whose clients may be hostile."""
+
+    daemon_threads = True
+
+    def __init__(self, *args: Any, **kwargs: Any):
+        super().__init__(*args, **kwargs)
+        self._slots = threading.BoundedSemaphore(MAX_CLIENTS)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if self._slots.acquire(blocking=False):
+            super().process_request(request, client_address)
+        else:
+            self.close_request(request)
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._slots.release()
+
+
 class LLMProxy:
     """Serve ``http://127.0.0.1:<port>/v1`` and forward to ``upstream``."""
 
@@ -286,6 +385,7 @@ class LLMProxy:
         role_map: dict[str, str] | None = None,
         thinking_field: str | None = None,
         serve: Any = None,
+        confined_to: dict[str, str | None] | None = None,
     ):
         self.upstream = upstream.rstrip("/")
         self.api_key = api_key
@@ -317,6 +417,12 @@ class LLMProxy:
         # runs (_Handler._serve), so a None after its first KEEPALIVE_S is no longer forwarded but fails the call
         self.serve = serve
         self.capture_content = capture_content
+        # the models an untrusted learner may call and each one's reasoning effort, for a proxy in the confined mode this
+        # module's docstring describes
+        self.confined_to = confined_to
+        self.byok_seen = False   # a call came back served through the key's own provider account
+        self._pace_lock = threading.Lock()
+        self._next_turn = 0.0
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._client: httpx.Client | None = None
@@ -337,8 +443,7 @@ class LLMProxy:
         class Handler(_Handler):
             owner = proxy
 
-        self._server = ThreadingHTTPServer((self.host, self._port), Handler)
-        self._server.daemon_threads = True
+        self._server = _Server((self.host, self._port), Handler)
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True,
                                         name="llm-proxy")
         self._thread.start()
@@ -390,13 +495,41 @@ class LLMProxy:
     # -- forwarding ----------------------------------------------------------
 
     def upstream_url(self, path: str) -> str:
+        if self.confined_to is not None:
+            return self.upstream + _endpoint(path)  # no query string: nothing of the client's goes up in a URL
         for prefix in ("/api/v1", "/v1"):
             if path == prefix or path.startswith(prefix + "/"):
                 path = path[len(prefix):]
                 break
         return self.upstream + path
 
+    def pace(self) -> None:
+        """A confined proxy's turn for the next call, at :data:`CONFINED_RATE` a second."""
+        if self.confined_to is None:
+            return
+        with self._pace_lock:
+            now = time.monotonic()
+            turn = max(now, self._next_turn)
+            self._next_turn = turn + 1.0 / CONFINED_RATE
+        if turn > now:
+            time.sleep(turn - now)
+
     def prepare(self, headers: dict[str, str], body: bytes, path: str) -> tuple[dict[str, str], bytes, dict | None]:
+        if self.confined_to is not None:
+            # nothing of the client's headers goes up, and the body only as the fields allowed
+            kept = {k: v for k, v in headers.items() if k.lower() == "accept"}
+            headers = {**kept, "Content-Type": "application/json"}
+            if _endpoint(path) == CHAT:
+                if self.byok_seen:
+                    raise Refused(403, "a call went through this key's own provider account, so none go after it")
+                try:
+                    parsed = _confined(json.loads(body), self.confined_to)
+                except (ValueError, RecursionError):
+                    raise Refused(400, "a chat completion is a JSON object") from None
+                parsed["provider"] = dict(CONFINED_ROUTING)
+                body = json.dumps(parsed).encode()
+            else:
+                body = b""
         out = {k: v for k, v in headers.items() if k.lower() not in HOP_BY_HOP}
         incoming = out.get("Authorization") or out.get("authorization")
         for key in list(out):
@@ -530,6 +663,7 @@ def served_events(served: dict) -> list[dict]:
 class _Handler(BaseHTTPRequestHandler):
     owner: LLMProxy
     protocol_version = "HTTP/1.1"
+    timeout = IDLE_S
 
     def log_message(self, fmt: str, *args: Any) -> None:  # quiet by default
         if os.environ.get("ARC_PROXY_DEBUG"):
@@ -541,8 +675,16 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         self._forward("POST")
 
-    def _read_body(self) -> bytes:
-        length = int(self.headers.get("Content-Length") or 0)
+    def _read_body(self) -> bytes | None:
+        """The request's body, or None when it says it is longer than :data:`MAX_BODY` or has no honest length, unread,
+        so that the connection is closed once it is answered."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if not 0 <= length <= MAX_BODY:
+            self.close_connection = True
+            return None
         return self.rfile.read(length) if length else b""
 
     def _send_json(self, status: int, payload: dict) -> None:
@@ -643,14 +785,13 @@ class _Handler(BaseHTTPRequestHandler):
             owner.tracker.emit(_snapshot(call))
         return True
 
-    def _refuse(self, method: str, call: LLMCall, started: float) -> None:
-        """Answer a request the proxy does not forward (:func:`forwarded`) with 404, as an upstream answers an endpoint
-        it does not serve, and count it as a failed call; it ends once, whether or not its system is still there to
-        read the answer."""
-        message = f"the proxy forwards chat completions and the model list alone, not {method} {self.path}"
-        call.status, call.status_code, call.error = "failed", 404, f"HTTP 404: {message}"
+    def _refuse(self, status: int, message: str, call: LLMCall, started: float) -> None:
+        """Answer a request the proxy does not forward, as an upstream answers one it does not serve, and count it as a
+        failed call; it ends once, whether or not its system is still there to read the answer."""
+        call.status, call.status_code, call.error = "failed", status, f"HTTP {status}: {message[:200]}"
+        call.refused = True
         try:
-            self._send_json(404, {"error": {"message": message, "type": "proxy_refused", "code": 404}})
+            self._send_json(status, {"error": {"message": message, "type": "proxy_refused", "code": status}})
         except OSError:   # the system went away
             call.status, call.error = "cancelled", "client disconnected"
         finally:
@@ -660,18 +801,30 @@ class _Handler(BaseHTTPRequestHandler):
     def _forward(self, method: str) -> None:
         owner = self.owner
         assert owner._client is not None
+        owner.pace()
         body = self._read_body()
-        headers, body, parsed = owner.prepare(dict(self.headers.items()), body, self.path)
+        refusal: tuple[int, str] | None = None
+        headers: dict[str, str] = {}
+        parsed: dict | None = None
+        if body is None:
+            refusal = 413, f"the proxy reads requests of {MAX_BODY} bytes or fewer"
+        else:
+            try:
+                headers, body, parsed = owner.prepare(dict(self.headers.items()), body, self.path)
+                if not forwarded(method, self.path):
+                    refusal = 404, f"the proxy forwards chat completions and the model list alone, not {method} {self.path[:200]}"
+            except Refused as why:
+                refusal = why.status, str(why)
         stream = bool(parsed and parsed.get("stream"))
         call = LLMCall(
-            call_id=uuid.uuid4().hex, status="started", path=self.path, stream=stream,
+            call_id=uuid.uuid4().hex, status="started", path=self.path[:400], stream=stream,
             requested_model=(parsed or {}).get("model") if parsed else None,
             request_body=parsed if owner.capture_content else None,
         )
         owner.tracker.emit(_snapshot(call))
         started = time.monotonic()
-        if not forwarded(method, self.path):
-            self._refuse(method, call, started)
+        if refusal:
+            self._refuse(*refusal, call, started)
             return
         if (owner.serve is not None and parsed is not None and _endpoint(self.path) == CHAT
                 and self._serve(parsed, call, stream, started)):
@@ -802,4 +955,5 @@ class _Handler(BaseHTTPRequestHandler):
                 call.status, call.error = "failed", f"proxy {type(error).__name__}"
             raise
         finally:
+            owner.byok_seen = owner.byok_seen or call.byok
             owner.tracker.emit(_snapshot(call))

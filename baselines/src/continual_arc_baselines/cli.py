@@ -149,12 +149,12 @@ def stream_of(schedule):
 
 
 def can_freeze(learner) -> bool:
-    """Whether ``learner`` can play every instance of a test from the state its stream left: a hosted submission that
-    keeps everything it learns as files (``HostedLearner.freeze``), such as a harness, which holds one conversation
-    and so could not serve a round of users."""
-    from continual_arc_baselines.systems.hosted import HostedLearner
+    """Whether ``learner`` can play every instance of a test from the state its stream left: a submission served from
+    another process that keeps everything it learns as files (``HostedLearner.freeze``), such as a harness, which holds
+    one conversation and so could not serve a round of users."""
+    from continual_arc_baselines.systems.hosted import ServedLearner
 
-    return isinstance(learner, HostedLearner) and learner.state_in_files
+    return isinstance(learner, ServedLearner) and learner.state_in_files
 
 
 def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, registry, name, alias_style,
@@ -261,14 +261,18 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         defaults.setdefault("session_id", attempt.directory.name)
         tracker.subscribe(JournalSink(attempt, provider=args.provider, capture_content=args.capture_content))
         overrides = own_model(kwargs)
+        confined_to = None
+        if args.confine_models:
+            confined_to = {model: effort or None for model, _, effort in
+                           (entry.partition("=") for entry in args.confine_models.split(","))}
         proxy = LLMProxy(args.upstream, api_key=os.environ.get(args.upstream_key_env) or None,
                          declared_context_length=args.declared_context_length or None,
                          tracker=tracker, body_defaults=defaults, body_overrides=overrides,
-                         capture_content=args.capture_content).start()
+                         capture_content=args.capture_content, confined_to=confined_to).start()
         os.environ.update(proxy.environ())
         proxy_settings = {"enabled": True, "upstream": args.upstream, "provider": args.provider,
                           "body_defaults": defaults, "body_overrides": overrides, "base_url": proxy.base_url,
-                          "upstream_key_present": bool(proxy.api_key)}
+                          "upstream_key_present": bool(proxy.api_key), "confined_to": confined_to}
 
     # imported once the proxy's address is in the environment, which a learner's module may read as it loads
     make_learner = import_object(args.learner, "learner")
@@ -402,7 +406,8 @@ def cmd_install_submission(args) -> int:
     from continual_arc_baselines.systems.hosted import install_submission
 
     installed = install_submission(args.repo, args.commit, args.venv, checkout=args.checkout, cache=args.cache,
-                                   python=args.python, sandbox=args.sandbox)
+                                   python=args.python, sandbox=args.sandbox, https_proxy=args.https_proxy,
+                                   read_paths=args.read_paths)
     print(json.dumps(installed))
     return 0
 
@@ -461,6 +466,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="name of the environment variable that holds the upstream API key")
     g.add_argument("--provider", default="openrouter", help="provider label for the cost journal")
     g.add_argument("--llm-defaults", help='JSON of chat-completion fields to set when absent, e.g. {"reasoning_effort": "xhigh"}')
+    g.add_argument("--confine-models", help="the learner is untrusted, so the proxy forwards chat completions to these "
+                                            "models alone, in the fields and to the routes of proxy.LLMProxy's confined "
+                                            "mode: comma-separated, each MODEL or MODEL=EFFORT, the reasoning effort a "
+                                            "call to it that names none is given")
     g.add_argument("--declared-context-length", type=int, default=262_144,
                    help="context length the proxy reports on GET /models, the figure every adapter also declares "
                         "in its harness's provider entry (0 passes the provider's figure through)")
@@ -501,6 +510,10 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--cache", help="the install's own cache, HOME and TMPDIR (default: <venv>-cache)")
     i.add_argument("--python", default="3.12", help="the Python version for the environment (default 3.12)")
     i.add_argument("--sandbox", default="auto", help="auto | bwrap | seatbelt | none")
+    i.add_argument("--https-proxy", help="the filtering HTTPS proxy the install reaches the world through, on loopback "
+                                         "(default: one started here, to the package index and the code host)")
+    i.add_argument("--read-path", action="append", default=[], dest="read_paths",
+                   help="also show this path to the install, read-only (a local repository, for a check)")
     i.set_defaults(func=cmd_install_submission)
     return p
 

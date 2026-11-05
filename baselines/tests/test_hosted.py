@@ -19,11 +19,16 @@ from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.cli import main
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
 from continual_arc_baselines.systems.hosted import (
+    MAX_REPLY,
+    MAX_RESOURCES,
     HostedLearner,
     HostedLearnerError,
+    ServedLearner,
     brings_benchmark,
     install_submission,
+    record_of,
 )
+from continual_arc_baselines.systems.sandbox import python_runtime_root
 
 REPO = Path(__file__).resolve().parents[1]
 SECRET = "sk-upstream-secret"
@@ -338,9 +343,10 @@ def test_a_learner_that_keeps_its_state_in_files_plays_its_test_one_instance_at_
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENROUTER_API_KEY", SECRET)
     python = sys.executable if backend == "none" else submission_python(tmp_path)
+    runtime = [str(python_runtime_root(Path(python)))]
     out = tmp_path / "run"
     assert main(["run", "--learner", "continual_arc_baselines.systems.hosted:HostedLearner",
-                 "--learner-kwargs", json.dumps({"python": python, "learner": "file_toy:FileLearner",
+                 "--learner-kwargs", json.dumps({"python": python, "runtime": runtime, "learner": "file_toy:FileLearner",
                                                  "code": str(code), "sandbox": backend}),
                  "--schedule", str(tmp_path / "schedule.json"), "--test", str(tmp_path / "test.json"),
                  "--registry", "tests.fixtures:fake_registry", "--upstream", upstream.base_url,
@@ -425,8 +431,8 @@ def test_the_sandbox_confines_the_learner(tmp_path, monkeypatch, upstream, backe
     code = toy_package(tmp_path / "code", {"read": str(REPO / "pyproject.toml"),
                                            "connect": upstream._server.server_address[1]})
     system, records = run_hosted(tmp_path, monkeypatch, upstream, {
-        "python": submission_python(tmp_path), "learner": "toy_submission:Learner", "code": str(code),
-        "sandbox": backend})
+        "python": submission_python(tmp_path), "runtime": [str(python_runtime_root(tmp_path / "venv" / "bin" / "python"))],
+        "learner": "toy_submission:Learner", "code": str(code), "sandbox": backend})
     assert_learned(records)
     probe = assert_confined(system, upstream, records)
     assert probe["read"].startswith("failed") and probe["connect"].startswith("failed")
@@ -511,8 +517,8 @@ def test_a_submission_is_installed_under_the_sandbox_and_runs_from_its_environme
                                    benchmark=str(bench), read_paths=[repo, bench])
     assert installed["python"] == str(venv / "bin" / "python") and installed["code"] == str(checkout)
     assert installed["benchmark"] == str(bench) and brings_benchmark(venv)
-    record = json.loads((venv / "arc-submission.json").read_text())
-    assert record["commit"] == commit and record["sandbox"] == backend
+    record = json.loads(record_of(venv).read_text())
+    assert record["commit"] == commit and record["sandbox"] == backend and record["runtime"] == installed["runtime"]
     assert subprocess.run(["git", "-C", str(checkout), "rev-parse", "HEAD"], capture_output=True, text=True,
                           check=True).stdout.strip() == commit
     (site,) = venv.glob("lib/python*/site-packages")
@@ -527,7 +533,77 @@ def test_a_submission_is_installed_under_the_sandbox_and_runs_from_its_environme
                            python=f"{sys.version_info.major}.{sys.version_info.minor}")
 
     system, records = run_hosted(tmp_path / "run", monkeypatch, upstream, {
-        "python": installed["python"], "learner": "toy_submission:Learner", "code": installed["code"],
-        "sandbox": backend})
+        "python": installed["python"], "runtime": installed["runtime"], "learner": "toy_submission:Learner",
+        "code": installed["code"], "sandbox": backend})
     assert_learned(records)
     assert_confined(system, upstream, records)
+
+
+# A build that goes after the verifier's own side, as a hostile submission's did on a test copy of the runner: it plants
+# links where the install used to write and read outside the sandbox, and rewrites the environment's own file, which
+# the verifier used to read to decide what the sandbox binds.
+HOSTILE_BUILD = '''
+import os
+from pathlib import Path
+home = Path(os.environ["HOME"])
+cache = home.parent
+venv = cache.with_name(cache.name.removesuffix("-cache"))
+target = {target!r}
+for planted in (cache / "install.log", cache / "install.sb", venv / "arc-submission.json", venv / "bin" / "linked"):
+    planted.unlink(missing_ok=True)
+    planted.symlink_to(target)
+(venv / "pyvenv.cfg").write_text(f"home = {{target}}/bin\\n")
+'''
+
+
+@pytest.mark.skipif(shutil.which("uv") is None or shutil.which("git") is None or platform.system() != "Linux"
+                    or shutil.which("bwrap") is None, reason="needs uv, git and bubblewrap")
+def test_a_hostile_build_decides_nothing_on_the_verifiers_side(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "file"
+    victim.write_text("as it was")
+    repo = project(toy_package(tmp_path / "repo", {}), "toy-submission")
+    backend = repo / "_build" / "backend.py"
+    backend.write_text(HOSTILE_BUILD.format(target=str(victim)) + backend.read_text())
+    commit = git_repo(repo)
+    bench = project(tmp_path / "bench", "continual-arc")
+    shutil.copytree(Path(continual_arc.__file__).parent, bench / "continual_arc",
+                    ignore=shutil.ignore_patterns("__pycache__"))
+    venv = tmp_path / "sub" / "venv"
+    installed = install_submission(f"file://{repo}", commit, venv, sandbox="bwrap",
+                                   python=f"{sys.version_info.major}.{sys.version_info.minor}",
+                                   benchmark=str(bench), read_paths=[repo, bench])
+    assert victim.read_text() == "as it was"
+    assert (venv.with_name("venv.install") / "install.log").read_text().count("$ ") >= 2
+    assert json.loads(record_of(venv).read_text())["commit"] == commit
+    # the planted link is the build's own; the verifier wrote its record elsewhere, and what it binds comes from there
+    hosted = HostedLearner(installed["python"], "toy_submission:Learner", runtime=installed["runtime"], sandbox="bwrap")
+    hosted.workdir = tmp_path / "attempt"
+    spec = hosted.sandbox_spec()
+    assert not any(str(outside) in str(path) for path in spec.read_paths)
+    assert venv in spec.opaque_paths
+    assert hosted.describe()["submission"]["commit"] == commit
+
+
+def test_a_reply_past_the_bound_stops_the_run(tmp_path):
+    served = ServedLearner()
+    served.workdir = tmp_path
+    served._replies.put("x" * MAX_REPLY)
+    with pytest.raises(HostedLearnerError, match="characters or more"):
+        served._receive("act", 1.0)
+
+
+def test_a_learner_reports_few_counters_and_the_proxys_win(tmp_path):
+    class Usage:
+        def as_resources(self):
+            return {"llm_cost_usd": 0.25}
+
+    class Tracker:
+        usage = Usage()
+
+    served = ServedLearner()
+    served.workdir, served.tracker = tmp_path, Tracker()
+    served._call = lambda op: {**{f"c{i}": i for i in range(MAX_RESOURCES * 2)}, "llm_cost_usd": 1e9, "label": "x"}
+    out = served.resources()
+    assert out["llm_cost_usd"] == 0.25 and "label" not in out and len(out) <= MAX_RESOURCES + 1

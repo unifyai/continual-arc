@@ -125,6 +125,8 @@ def handle(learner, request: dict):
     if op == "close":
         close = getattr(learner, "close", None)
         return close() if callable(close) else None
+    if op in ("freeze", "describe"):  # asked only of a learner served from its own machine (remote.py)
+        return getattr(learner, op)()
     raise ValueError(f"unknown op {op!r}")
 
 

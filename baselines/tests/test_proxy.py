@@ -644,3 +644,151 @@ def test_a_serve_that_gives_up_once_the_stream_is_open_fails_the_call(upstream, 
     events = [json.loads(line[6:]) for line in raw.splitlines() if line.startswith("data: {")]
     assert events == [proxy_module.SERVE_FAILED] and events[0]["choices"][0]["finish_reason"] == "error"
     assert tracker.usage.as_resources()["llm_failed_requests"] == 1 and upstream.requests == []
+
+
+# -- a confined proxy: an untrusted learner on its submitter's key ------------------------------------------------------
+
+
+@pytest.fixture
+def confined(upstream):
+    tracker = Tracker()
+    with LLMProxy(upstream.base_url, api_key="sk-run", tracker=tracker, include_usage=True,
+                  confined_to={"vendor/named": "medium", "vendor/other": None}) as proxy:
+        yield proxy
+
+
+def post(proxy, body, **kwargs):
+    return httpx.post(proxy.base_url + "/chat/completions", json=body, timeout=30, **kwargs)
+
+
+def plain(model="vendor/named", **extra):
+    return {"model": model, "messages": [{"role": "user", "content": "hello"}], **extra}
+
+
+def test_a_confined_proxy_forwards_the_named_models_alone(confined, upstream):
+    assert post(confined, plain()).status_code == 200
+    assert post(confined, plain("vendor/other")).status_code == 200
+    for model in ("vendor/unnamed", "vendor/named:online", None):
+        response = post(confined, plain(model))
+        assert response.status_code == 403 and response.json()["error"]["type"] == "proxy_refused"
+    assert [r["body"]["model"] for r in upstream.requests] == ["vendor/named", "vendor/other"]
+    usage = confined.tracker.usage
+    assert usage.refused_requests == 3 and usage.failed_requests == 3 and usage.as_resources()["llm_refused_requests"] == 3
+
+
+def test_a_call_that_names_no_effort_is_given_its_models(confined, upstream):
+    assert post(confined, plain()).status_code == 200
+    assert post(confined, plain(reasoning={"effort": "high"})).status_code == 200
+    assert post(confined, plain("vendor/other")).status_code == 200
+    bodies = [r["body"] for r in upstream.requests]
+    assert bodies[0]["reasoning"] == {"effort": "medium"} and bodies[1]["reasoning"] == {"effort": "high"}
+    assert "reasoning" not in bodies[2]
+
+
+def test_a_confined_proxy_sends_a_plain_chat_completion_and_its_own_routing(confined, upstream):
+    extra = {"models": ["vendor/unnamed"], "route": "fallback", "provider": {"order": ["mine"]}, "plugins": [{"id": "web"}],
+             "user": "leak", "metadata": {"a": "leak"}, "session_id": "leak", "trace": {"t": "leak"}, "store": True,
+             "web_search_options": {}, "mcp_servers": [{"url": "leak"}], "transforms": ["leak"], "temperature": 0.5,
+             "tools": [{"type": "function", "function": {"name": "f", "parameters": {}}}], "max_tokens": 4}
+    headers = {"X-Title": "leak", "HTTP-Referer": "leak", "X-OpenRouter-Title": "leak", "X-Evil": "leak", "Cookie": "leak",
+               "User-Agent": "leak", "Anthropic-Beta": "leak", "Authorization": "Bearer leak"}
+    assert post(confined, plain(**extra), headers=headers).status_code == 200
+    seen = upstream.requests[0]
+    assert "leak" not in json.dumps(seen["body"])
+    assert seen["body"]["provider"] == {"zdr": True, "data_collection": "deny"}
+    assert seen["body"]["temperature"] == 0.5 and seen["body"]["max_tokens"] == 4 and seen["body"]["tools"]
+    assert seen["authorization"] == "Bearer sk-run"
+    assert "leak" not in json.dumps(seen.get("headers", {}))
+
+
+@pytest.mark.parametrize("message", [
+    [{"type": "image_url", "image_url": {"url": "https://example.com/leak.png"}}],
+    [{"type": "image_url", "image_url": "https://example.com/leak.png"}],
+    [{"type": "file", "file": {"filename": "a.pdf", "file_data": "https://example.com/leak.pdf"}}],
+    [{"type": "input_audio", "input_audio": {"data": "leak", "format": "wav"}}],
+    [{"type": "video_url", "video_url": {"url": "https://example.com/leak.mp4"}}],
+    {"not": "a part"},
+])
+def test_a_confined_proxy_refuses_what_a_provider_would_fetch(confined, upstream, message):
+    response = post(confined, {"model": "vendor/named", "messages": [{"role": "user", "content": message}]})
+    assert response.status_code == 400 and not upstream.requests
+
+
+def test_a_confined_proxy_carries_text_and_an_image_in_the_request_itself(confined, upstream):
+    content = [{"type": "text", "text": "hello"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]
+    assert post(confined, {"model": "vendor/named", "messages": [{"role": "user", "content": content}]}).status_code == 200
+    assert upstream.requests[0]["body"]["messages"][0]["content"] == content
+
+
+@pytest.mark.parametrize("tools", [
+    [{"type": "openrouter:web_search"}], [{"type": "web_search_20250305", "name": "web_search"}],
+    [{"type": "mcp", "server_url": "https://example.com"}], "not a list", ["not a tool"],
+])
+def test_a_confined_proxy_refuses_a_tool_the_provider_would_run(confined, upstream, tools):
+    assert post(confined, plain(tools=tools)).status_code == 400 and not upstream.requests
+
+
+@pytest.mark.parametrize("body,content_type", [
+    (json.dumps(plain("vendor/unnamed")), "text/plain"), (json.dumps(plain()), "text/plain"), ("not json", "application/json"),
+    ("[1, 2]", "application/json"), ("", "application/json"),
+])
+def test_a_confined_proxy_reads_every_body_itself(confined, upstream, body, content_type):
+    """A body the proxy does not read would go up past everything it enforces."""
+    response = httpx.post(confined.base_url + "/chat/completions", content=body, timeout=30,
+                          headers={"Content-Type": content_type})
+    if content_type == "text/plain" and "unnamed" not in body:
+        assert response.status_code == 200 and upstream.requests[0]["body"]["model"] == "vendor/named"
+    elif "unnamed" in body:
+        assert response.status_code == 403 and not upstream.requests
+    else:
+        assert response.status_code == 400 and not upstream.requests
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/models/../key"), ("GET", "/v1/models/../../v1/keys"), ("GET", "/v1/models/./x"), ("POST", "/v1/chat/completions/../key"),
+    ("GET", "/v1/key"), ("GET", "/v1/credits"), ("GET", "/v1/generation?id=1"), ("POST", "/v1/completions"), ("POST", "/v1/embeddings"),
+    ("GET", "/v1/models/%2e%2e/key"), ("GET", "http://example.com/v1/models"),
+])
+def test_only_the_endpoints_named_plainly_go_upstream(upstream, method, path):
+    """A ``..`` in a path reaches any endpoint: httpx resolves it before it sends."""
+    with LLMProxy(upstream.base_url, api_key="sk-run", tracker=Tracker()) as proxy:
+        import http.client
+        connection = http.client.HTTPConnection("127.0.0.1", proxy.port, timeout=30)
+        connection.request(method, path, b"{}" if method == "POST" else None, {"Content-Type": "application/json"})
+        assert connection.getresponse().status == 404
+        connection.close()
+    assert not upstream.requests
+
+
+def test_a_confined_proxy_sends_no_query_string(confined, upstream):
+    response = httpx.post(confined.base_url + "/chat/completions?leak=1", json=plain(), timeout=30)
+    assert response.status_code == 200 and upstream.requests[0]["path"].endswith("/chat/completions")
+    assert httpx.get(confined.base_url + "/models?leak=1", timeout=30).status_code == 200
+    assert "leak" not in upstream.requests[-1]["path"]
+
+
+def test_a_body_past_the_bound_is_refused_unread(confined, upstream):
+    from continual_arc_baselines.proxy import MAX_BODY
+
+    response = httpx.post(confined.base_url + "/chat/completions", content=b"x" * (MAX_BODY + 1), timeout=60,
+                          headers={"Content-Type": "application/json"})
+    assert response.status_code == 413 and not upstream.requests
+
+
+def test_a_call_through_the_keys_own_provider_account_stops_those_after_it(confined, upstream):
+    """OpenRouter says so on every reply (is_byok): the submitter's own provider account would show the prompts."""
+    upstream.byok = True
+    assert post(confined, plain()).status_code == 200
+    response = post(confined, plain())
+    assert response.status_code == 403 and "own provider account" in response.json()["error"]["message"]
+    assert len(upstream.requests) == 1 and confined.tracker.usage.byok_requests == 1
+
+
+def test_a_confined_proxy_paces_what_it_answers(confined, monkeypatch):
+    from continual_arc_baselines import proxy as module
+
+    monkeypatch.setattr(module, "CONFINED_RATE", 20.0)
+    started = time.monotonic()
+    for _ in range(11):
+        assert post(confined, plain("vendor/unnamed")).status_code == 403
+    assert time.monotonic() - started >= 0.45

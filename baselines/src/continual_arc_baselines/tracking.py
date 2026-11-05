@@ -67,6 +67,8 @@ class LLMCall:
     response_headers: dict[str, str] = field(default_factory=dict)
     request_body: dict[str, Any] | None = None
     response_body: dict[str, Any] | None = None
+    refused: bool = False  # the proxy answered it itself and sent nothing upstream
+    byok: bool = False     # the upstream says it went through the key's own provider account (OpenRouter's is_byok)
 
     @property
     def priced(self) -> bool:
@@ -84,6 +86,8 @@ class Usage:
     reasoning_tokens: int = 0
     cost_usd: Decimal = Decimal("0")
     unpriced_requests: int = 0  # completed requests with no provider-reported charge
+    refused_requests: int = 0   # requests the proxy refused
+    byok_requests: int = 0      # requests served through the key's own provider account
 
     def update(self, call: LLMCall) -> None:
         if call.status == "started":
@@ -91,6 +95,8 @@ class Usage:
             return
         if call.status in ("failed", "cancelled"):
             self.failed_requests += 1
+        self.refused_requests += call.refused
+        self.byok_requests += call.byok
         self.input_tokens += call.tokens.get("input") or 0
         self.output_tokens += call.tokens.get("output") or 0
         self.reasoning_tokens += call.tokens.get("reasoning") or 0
@@ -108,6 +114,8 @@ class Usage:
             "llm_reasoning_tokens": float(self.reasoning_tokens),
             "llm_cost_usd": float(self.cost_usd),
             "llm_unpriced_requests": float(self.unpriced_requests),
+            "llm_refused_requests": float(self.refused_requests),
+            "llm_byok_requests": float(self.byok_requests),
         }
 
 
