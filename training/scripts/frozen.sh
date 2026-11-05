@@ -126,6 +126,8 @@ py() { (cd "$PRIME_RL" && uv run --no-sync python -m continual_arc_training.froz
             left=1
             up "${ports[$i]}" || { say "the $n server does not answer: starting it again"; serve "$i" || { say "it did not start"; exit 1; }; }
             playing "$t" && continue
+            # a play that ended since the check above stopped whole: the next poll marks it done
+            [ "$(records "$n")" -ge "${wants[$i]}" ] && continue
             tries[$i]=$(( tries[i] + 1 ))
             [ "${tries[$i]}" -gt 3 ] && { say "the $n play stopped three times ($OUT/$n.log): stopping"; exit 1; }
             say "playing $n, attempt ${tries[$i]}"

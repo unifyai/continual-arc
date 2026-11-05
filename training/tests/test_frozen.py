@@ -335,8 +335,8 @@ def _stub(folder: Path, name: str, body: str) -> None:
 
 def _node(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     """A fake home with every node tool frozen.sh calls stubbed on its PATH (nvidia-smi, curl, sudo, setsid, uv,
-    vLLM's python, and vllm-serve.sh beside the scripts): a server answers once vllm-serve.sh has started it and serves
-    the adapters loaded into it; a play writes its test's records after a moment, the held-out test's first play
+    vLLM's python, and vllm-serve.sh beside the scripts): a server answers once vllm-serve.sh has started it, slowly
+    enough for a play to end during the check, and serves the adapters loaded into it; a play writes its test's records after a moment, the held-out test's first play
     stopping short without them; the model and the summary are the package's own."""
     home = tmp_path / "home"
     tools = home / ".local" / "bin"
@@ -357,7 +357,7 @@ def _node(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     _stub(tools, "curl", '''url=""; data=""; while [ $# -gt 0 ]; do case $1 in -d) data=$2; shift ;; localhost:*) url=$1 ;; esac; shift; done
 port=${url#localhost:}; port=${port%%/*}
 case $url in
-    */health) [ -f "$HOME/up-$port" ] ;;
+    */health) sleep 1.3; [ -f "$HOME/up-$port" ] ;;
     */v1/models) echo "{\\"data\\": [$(cat "$HOME/loaded-$port" 2>/dev/null)]}" ;;
     */v1/load_lora_adapter) name=$(echo "$data" | sed "s/.*lora_name\\": \\"\\([^\\"]*\\)\\".*/\\1/"); echo "{\\"id\\": \\"$name\\"}" >> "$HOME/loaded-$port"
         echo "$data" >> "$HOME/loads" ;;
