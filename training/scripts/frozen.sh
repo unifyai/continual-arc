@@ -9,7 +9,7 @@
 # deleted (the stream's own is the run's, and every call, turn and game of the test stays), the two servers stopped, and
 # OUT/done. Detached and resumable: run again, it takes up where it stopped.
 # ADAPTER and SERVED (both or neither) play another adapter, served under that name, instead of the run's last phase
-# (scratch.sh's retrain), with OUT another folder; OUT defaults to RUNS/rt/RUN/frozen. ROW (h0 or bare) plays that
+# (scratch.sh's retrain), with OUT another folder; OUT defaults to RUNS/rt/RUN/frozen. ROW (h0, h0c1 or bare) plays that
 # reference from nothing on the base model instead, into OUT/TEST-reference/play, with no run to wait for: RUN then
 # names its folder, RUNS/paper/RUN, OUT defaulting to its frozen/. MEMORY=none plays the adapter (the run's last phase,
 # or ADAPTER) from an empty harness memory under the run's own task names instead, its weights alone, into

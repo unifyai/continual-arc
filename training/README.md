@@ -22,7 +22,7 @@ The same package plays the reference rows on the open models, the two frozen tes
 | --- | --- | --- |
 | `realtime.sh` | A trained row on one 8-GPU node: the player, the labeller and the trainer side by side, round r played by the adapter trained on rounds 0..r-2 | DAgger at 1, 2 and 4 users, the stream's 200 rounds, and the OPSD and PG runs the paper does not report |
 | `frozen.sh` | A trained run's two frozen tests on its own node once its stream has ended | The trained rows' held-out and seen tests |
-| `refs.sh` | The untrained student on the trained rows' stack, from nothing, on both tests | Rows H0 and F on Qwen3.5-9B, the trained rows' references |
+| `refs.sh` | The untrained student on the trained rows' stack, from nothing, on both tests | Rows H0 and F on Qwen3.5-9B, the trained rows' references, and H0 told c1, the page alone |
 | `reference.sh` | A reference row with its model served by OpenRouter, no GPU | Rows h, h0, hpl, hg, ha, hpl0, hplg and hgpl (the paper's H, H0, H-E, H-T, H-A, H-E0, H-E-T-E and H-T-E) and the bare-model rows dc, f, m and m0, on GLM-5.3 Flash and Qwen3.5-9B |
 | `ref-tests.sh` | Each reference row's two frozen tests from its end-of-stream memory | The reference rows' held-out and seen tests |
 | `scratch.sh` | At a DAgger run's end: its last phase's weights alone on both tests, then that phase trained once more from the base model and tested | DAgger's training once at the end |
@@ -38,11 +38,11 @@ Three loops on one GPU node hand each other files in the run's folder ([how a ru
    differently from the base model; prime-agent plays the round's instances through the benchmark's runner, every
    model call saved with the token ids the server saw and sampled.
 2. **The labeller** (DAgger and OPSD) asks the oracle, GLM-5.3 Flash at medium effort through OpenRouter, for its own
-   reply to every call the student made, read exactly as the student read it with the oracle's working rules at the
-   end. One game in ten is held out.
+   reply to every call the student made, read exactly as the student read it with c1, the oracle's page of playing
+   rules, at the end. One game in ten is held out.
 3. **The trainer** trains phase k on rounds 0..k from phase k-1's adapter once round k is ready: nothing until 24
    games have been played, then a rank-128 LoRA adapter at LR 1e-4, 64 calls a step, its held-out loss measured every
-   5 steps and the phase stopped once 2 measurements in a row have not improved on the best.
+   5 steps and the phase stopped once 6 measurements in a row have not improved on the best.
 
 After the 200 rounds `frozen.sh` serves the run's last phase and plays the held-out test (one instance of each of 100
 tasks the stream never uses) and the seen test (four new instances of each stream task at one user, the same 100 spread
@@ -59,8 +59,8 @@ ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 TRAIN_GP
     > /dev/null 2>&1 < /dev/null)
 ```
 
-with `ROW` one of `dagger`, `opsd` and `pg` and `USERS` 1, 2 or 4. The DAgger runs take `DOSE=recent PATIENCE=4` once
-their phases stall ([settings](docs/settings.md#the-dose)).
+with `ROW` one of `dagger`, `opsd` and `pg` and `USERS` 1, 2 or 4. The settings left at their defaults are the
+paper's.
 
 ## What it needs
 

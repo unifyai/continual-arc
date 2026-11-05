@@ -26,7 +26,7 @@ from typing import Any
 # The DAgger runs' trainer settings (the same at 1, 2 and 4 users), but the run, the GPUs and the stop's, which the
 # retrain sets itself
 TRAINER_ARGV = ["--rounds", "200", "--row", "dagger", "--lag", "1", "--lr", "1e-4", "--batch", "64",
-                "--patience", "2", "--hold-every", "10", "--val-max-items", "1000", "--skip-first", "3",
+                "--patience", "6", "--hold-every", "10", "--val-max-items", "1000", "--skip-first", "3",
                 "--start-after", "24", "--dose", "aggregate", "--replay-ratio", "1"]
 # the held-out loss every this many steps (a pass over a run's label sets is 230 to 950 steps of 64)
 EVAL_STEPS = 25

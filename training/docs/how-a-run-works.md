@@ -87,9 +87,9 @@ again within a pass when it is found down.
   every game is saved as it ends, calls and ids whole, in the round's `captured/`.
 - **labeller** (DAgger and OPSD): the oracle (GLM-5.3 Flash at medium effort, through the relay) writes its own reply
   to every call the student made as the agent, each read exactly as the student read it with the oracle's working
-  rules at the end of its last message, its reasoning required (`labeller`, `oracle`). The rules are `ORACLE_RULES`'s:
-  the playing rules, c1 (`rules/c1.md`), and the program library's procedure (`library`, the default), or c1 alone
-  (`c1`). The student never reads them. The run's `guidelines.md` keeps them, and a labeller started again under
+  rules at the end of its last message, asked once, its reasoning left to it (`labeller`, `oracle`). The rules are
+  `ORACLE_RULES`'s: the playing rules, c1 (`rules/c1.md`), alone (`c1`, the default), or with the program library's
+  procedure (`library`). The student never reads them. The run's `guidelines.md` keeps them, and a labeller started again under
   other rules stops before it labels, rather than change the oracle mid-run. A game is labelled as it lands and the
   round once more when it is played. Then the label set, each label as the student writes it (DAgger's target), and
   its split, one game in `HOLD_EVERY` (10) held out (`labeller.held_game`). A held-out game is played and scored like
@@ -103,12 +103,12 @@ again within a pass when it is found down.
   games, the held-out stop, the step plan (`phase.plan`: every pass drawn before the first step, whole chains of a
   game's calls cut to fit a GPU's window), the settings and the checkpoints are one configuration for all three
   (`realtime.train_args`). The held-out loss is measured before the first step and every `EVAL_STEPS` (5) steps, the
-  best adapter is kept, and the phase stops once `PATIENCE` (2) measurements in a row have not improved on it, or at
+  best adapter is kept, and the phase stops once `PATIENCE` (6) measurements in a row have not improved on it, or at
   `MAX_STEPS` (120); until a held-out game exists, a phase makes one pass.
   - **DAgger:** supervised fine-tuning on the dose's labels (`DOSE=aggregate`: every round's training side so far),
     the oracle's reply, reasoning included, the target. Its held-out loss is the held-out targets' negative
-    log-likelihood per token. `DOSE=recent` trains each phase on the last 10 rounds' labels and as many from whole
-    earlier games drawn at random, under the same stop.
+    log-likelihood per token. `DOSE=recent`, which the paper's runs do not use, trains each phase on the last 10
+    rounds' labels and as many from whole earlier games drawn at random, under the same stop.
   - **OPSD:** DAgger's phase with SDFT's loss: the same label sets' calls in the same steps, the same held-out games,
     passes and stop. At each call the current student's own reply is drawn fresh from the model server, to which the
     student is published after every step, and graded by the frozen base model reading the call's label as a
@@ -190,7 +190,7 @@ in `scratch/summary.json`.
 The reference rows (H, H0, HPL, HG, HA, HPL0, HPLG, HGPL and the bare-model rows DC, F, M and M0) are played by
 `references`, kept going by `reference.sh`, exactly as `play.play_round` plays a trained row's round (the same stream
 cut a round at a time, the same harness with its compaction point and call budget, the same 131,072-token window and
-32,768-token replies), but with the model served by OpenRouter: GLM-5.3 Flash (the trained rows' oracle) or Qwen3.5-9B
+65,536-token replies), but with the model served by OpenRouter: GLM-5.3 Flash (the trained rows' oracle) or Qwen3.5-9B
 (their base model, untrained).
 
 ```bash

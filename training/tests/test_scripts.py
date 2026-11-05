@@ -193,13 +193,14 @@ def test_ref_tests_sh_counts_a_row_whose_play_keeps_failing(node):
 
 # -- refs.sh and scratch.sh ---------------------------------------------------------------------------------------
 
-def test_refs_sh_plays_both_references_from_nothing_once_the_runs_tests_are_done(node):
+def test_refs_sh_plays_the_three_references_from_nothing_once_the_runs_tests_are_done(node):
     home, scripts, tools, env = node
     (scripts / "frozen.sh").write_text('echo "$ROW $*" >> "$HOME/refs"\n')
     (home / "runs" / "rt" / "pg-u2-lag1" / "frozen").mkdir(parents=True)
     (home / "runs" / "rt" / "pg-u2-lag1" / "frozen" / "done").touch()
     assert _run(scripts, env, "refs.sh", "pg-u2-lag1", "0,1,2,3").returncode == 0
-    assert (home / "refs").read_text().splitlines() == ["h0 qwen-h0 0,1,2,3", "bare qwen-f 0,1,2,3"]
+    assert (home / "refs").read_text().splitlines() == ["h0 qwen-h0 0,1,2,3", "h0c1 qwen-h0c1 0,1,2,3",
+                                                       "bare qwen-f 0,1,2,3"]
 
 
 def test_scratch_sh_tests_the_weights_alone_trains_once_at_the_end_tests_the_fresh_adapter_and_summarises(node):

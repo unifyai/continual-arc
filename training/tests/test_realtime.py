@@ -76,7 +76,7 @@ def test_the_retrain_from_scratch_parses_the_dagger_runs_settings_with_its_own_s
     from continual_arc_training import scratch
     a = scratch.trainer_args(tmp_path, 8)
     assert (a.row, a.lr, a.batch, a.patience, a.skip_first, a.start_after, a.dose) == \
-           ("dagger", 1e-4, 64, 2, 3, 24, "aggregate")
+           ("dagger", 1e-4, 64, 6, 3, 24, "aggregate")
     assert (a.gpus, a.train_gpus, a.eval_steps, a.max_steps, a.max_minutes) == \
            (8, "0,1,2,3,4,5,6,7", scratch.EVAL_STEPS, scratch.MAX_STEPS, scratch.MINUTES)
 
@@ -702,12 +702,12 @@ def _realtime_sh(env: dict[str, str], then: str, home: Path = Path("/home/u")) -
 def test_realtime_sh_names_the_oracles_rules_in_its_started_line_for_the_labelled_rows_alone():
     tail = "batch 64, start after 24 games, dose aggregate (replay 1)"
     assert _realtime_sh({**SETTINGS, "ROW": "dagger"}, "started").stdout.endswith(
-        f"{tail}, oracle rules library, patience 2\n")
-    assert _realtime_sh({**SETTINGS, "ROW": "opsd", "ORACLE_RULES": "c1"}, "started").stdout == (
+        f"{tail}, oracle rules c1, patience 6\n")
+    assert _realtime_sh({**SETTINGS, "ROW": "opsd", "ORACLE_RULES": "library"}, "started").stdout == (
         "started: opsd, 4 users, 200 rounds, lag 1, LR 1e-4, serving on 0,1, training on 2,3,4,5,6,7, "
-        f"{tail}, oracle rules c1, patience 2\n")
-    assert _realtime_sh({**SETTINGS, "ROW": "pg", "ORACLE_RULES": "c1"}, "started").stdout.endswith(
-        f"{tail}, patience 2\n")
+        f"{tail}, oracle rules library, patience 6\n")
+    assert _realtime_sh({**SETTINGS, "ROW": "pg", "ORACLE_RULES": "library"}, "started").stdout.endswith(
+        f"{tail}, patience 6\n")
     refused = _realtime_sh({**SETTINGS, "ROW": "dagger", "ORACLE_RULES": "none"}, "started")
     assert refused.returncode == 1 and refused.stdout == "ORACLE_RULES must be library or c1, got none\n"
 
@@ -722,7 +722,7 @@ def test_a_runs_oracle_rules_are_read_back_from_its_last_started_line(tmp_path):
                   "no held-out stop\n")
     (tmp_path / "progress").write_text(before + phase_line)
     assert realtime.started_oracle_rules(tmp_path) == "library"
-    for env, rules in (({"ROW": "opsd", "ORACLE_RULES": "c1"}, "c1"), ({"ROW": "dagger"}, "library")):
+    for env, rules in (({"ROW": "opsd", "ORACLE_RULES": "library"}, "library"), ({"ROW": "dagger"}, "c1")):
         started = _realtime_sh({**SETTINGS, **env}, "started").stdout
         (tmp_path / "progress").write_text(f"{before}10-20 21:30 realtime.sh: {started}{phase_line}")
         assert realtime.started_oracle_rules(tmp_path) == rules

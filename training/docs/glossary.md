@@ -67,7 +67,7 @@ the benchmark's README at the repository root.
 | **Lag** | How many rounds behind play the playing model is: round r is played by phase r-1-LAG. |
 | **Warm-up** | The games the base model plays before the first phase trains (`START_AFTER`, 24). |
 | **Dose** | What a phase trains on: `aggregate`, every round's so far; `recent`, the last 10 rounds' and as many from whole earlier games. |
-| **Held-out stop** | One game in ten held out of training, its loss measured every 5 steps, the phase stopped once 2 measurements in a row have not improved on the best, the best adapter kept. |
+| **Held-out stop** | One game in ten held out of training, its loss measured every 5 steps, the phase stopped once 6 measurements in a row have not improved on the best, the best adapter kept. |
 | **Point / label** | A moment in a game (one call the student made as the agent) and the oracle's reply there. |
 | **Label set** | A round's labels as training targets: each rendered as the student writes it after its prompt, a game of labels a file. |
 | **DAgger** | The student plays; the oracle writes its own reply at every state the student met; the student is fine-tuned on those replies. |

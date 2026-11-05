@@ -283,15 +283,21 @@ def test_a_harness_row_plays_under_the_fixed_harness_and_records_its_settings(tm
                     registry=registry)
     play.play_round("opsd", tmp_path / "opsd", schedule, base_url="http://127.0.0.1:1/v1", served_name="r0",
                     registry=registry)
-    h0, opsd = captured
-    assert h0["stateless"] is True and opsd["stateless"] is False
-    for kw in (h0, opsd):
-        assert {k: kw[k] for k in play.HARNESS} == play.HARNESS and {k: kw[k] for k in play.BLOCK} == play.BLOCK
+    play.play_round("h0c1", tmp_path / "h0c1", schedule, base_url="http://127.0.0.1:1/v1", served_name="r0",
+                    registry=registry)
+    h0, opsd, h0c1 = captured
+    assert h0["stateless"] is True and opsd["stateless"] is False and h0c1["stateless"] is True
+    assert "rules_page" not in h0 and "rules_page" not in opsd
+    assert h0c1["rules_page"] == play.rules_page("c1") and h0c1["rules_page"].startswith("1. Your action is read")
+    assert json.loads((tmp_path / "h0c1" / "driver.json").read_text())["told"] == "c1"
+    for kw in (h0, opsd, h0c1):
+        assert {k: kw[k] for k in play.HARNESS} == play.HARNESS and {k: kw[k] for k in play.TURNS} == play.TURNS
         assert (kw["model"], kw["context_window"], kw["max_tokens"]) == (play.MODEL, play.CONTEXT_WINDOW,
                                                                          play.MAX_TOKENS)
     driver = json.loads((tmp_path / "h0" / "driver.json").read_text())
     assert driver == {"row": "h0", "served": "r0", "stateless": True, "model": play.MODEL, "harness": play.HARNESS,
-                      "harness_budget": {"name": "block", **play.BLOCK}, "sampling": play.SAMPLING}
+                      "harness_budget": {"name": "turns", **play.TURNS}, "max_tokens": play.MAX_TOKENS,
+                      "sampling": play.SAMPLING}
     with pytest.raises(ValueError, match="row must be one of"):
         play.play_round("h", tmp_path / "h", schedule, base_url="http://127.0.0.1:1/v1", served_name="r0")
 
@@ -353,7 +359,7 @@ def test_a_long_conversations_calls_are_answered_in_the_room_the_served_window_h
 
     model = _StreamingModel(window=play.CONTEXT_WINDOW)
     overrides = {"model": "r0", "chat_template_kwargs": dict(play.TEMPLATE_KWARGS), **play.SAMPLING,
-                 "return_token_ids": True}
+                 "return_token_ids": True, "max_completion_tokens": play.MAX_TOKENS}
     turn, compaction = min(play.MAX_TOKENS, 32_000), int(0.8 * (play.CONTEXT_WINDOW - play.HARNESS["compact_at"]))
     try:
         with LLMProxy(model.url, body_overrides=overrides, body_drop=VLLM_DROP, role_map=VLLM_ROLES,
@@ -365,7 +371,8 @@ def test_a_long_conversations_calls_are_answered_in_the_room_the_served_window_h
     finally:
         model.stop()
     assert [a.status_code for a in answers] == [200, 200]
-    assert [b.get("max_completion_tokens") for b in model.bodies] == [turn, None, compaction, None]
+    # the play's own reply cap replaces the harness's budget, and each call is answered in the room left
+    assert [b.get("max_completion_tokens") for b in model.bodies] == [play.MAX_TOKENS, None, play.MAX_TOKENS, None]
 
 
 def test_the_bare_row_is_the_bare_model_at_the_floor_settings_on_the_served_model(tmp_path):

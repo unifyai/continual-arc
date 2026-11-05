@@ -23,7 +23,8 @@ def test_players_play_at_the_trained_rows_settings():
     glm, qwen = reference.PLAYERS["glm"]["body"], reference.PLAYERS["qwen"]["body"]
     assert glm["reasoning"] == {"effort": "medium"}
     assert glm["provider"] == {"order": ["z-ai", "fireworks"], "allow_fallbacks": False}
-    assert {k: qwen[k] for k in play.SAMPLING} == {**play.SAMPLING, "top_k": 0}
+    assert {k: qwen[k] for k in ("temperature", "top_p", "top_k")} == {"temperature": 1.0, "top_p": 1.0, "top_k": 0}
+    assert not {"min_p", "presence_penalty"} & set(qwen)   # OpenRouter rows sample the whole distribution
     assert qwen["reasoning"] == {"enabled": True}
     assert qwen["provider"] == {"order": ["together", "venice", "deepinfra"], "allow_fallbacks": False}
 
@@ -65,7 +66,7 @@ def test_a_reference_row_plays_the_trained_rows_harness(tmp_path, monkeypatch, r
     harness, learner = _played(monkeypatch, reference.play_round, player, row, tmp_path / "ref", ONE_USER, api_key="k")
     trained, _ = _played(monkeypatch, play.play_round, PAPER_ROW[row], tmp_path / "trained", ONE_USER,
                          base_url="http://127.0.0.1:8101/v1", served_name="m")
-    told = {"rules_page": reference.rules_page(reference.TOLD_ROWS[row])} if row in reference.TOLD_ROWS else {}
+    told = {"rules_page": play.rules_page(reference.TOLD_ROWS[row])} if row in reference.TOLD_ROWS else {}
     assert {**harness, "model": None} == {**trained, "model": None, **reference.REFERENCE_ROWS[row], **told}
     assert learner["upstream"] == reference.OPENROUTER and learner["api_key"] == "k"
     assert learner["body_overrides"]["model"] == reference.PLAYERS[player]["model"]
@@ -78,7 +79,7 @@ def test_row_hpl_is_given_c1_then_the_program_library_and_keeps_its_memory(tmp_p
     harness, _ = _played(monkeypatch, reference.play_round, "qwen", "hpl", tmp_path / "ref", None, api_key="k")
     system = PrimeAgentLearner(**harness)
     assert system.program_library and system.end == "finish" and not system.stateless
-    assert system.rules_page == reference.rules_page("c1") and system.rules_page.startswith("1. Your action is read")
+    assert system.rules_page == play.rules_page("c1") and system.rules_page.startswith("1. Your action is read")
     assert json.loads((tmp_path / "ref" / "driver.json").read_text())["told"] == "c1"
 
 

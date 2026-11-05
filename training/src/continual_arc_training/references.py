@@ -1,6 +1,6 @@
 """The reference rows the trained rows are read against, played as :func:`continual_arc_training.play.play_round`
 plays a row (the same stream cut a round at a time, the same harness with its compaction point and call budget, the
-same 131,072-token window and 32,768-token replies), but with the model served by OpenRouter, so no GPU is needed.
+same 131,072-token window and 65,536-token replies), but with the model served by OpenRouter, so no GPU is needed.
 
 Two players (:data:`PLAYERS`):
 
@@ -65,7 +65,7 @@ PLAYERS: dict[str, dict[str, Any]] = {
         "reasoning": {"effort": "medium"},
         "provider": {"order": ["z-ai", "fireworks"], "allow_fallbacks": False}}},
     "qwen": {"model": "qwen/qwen3.5-9b", "body": {
-        **play.SAMPLING, "top_k": 0, "reasoning": {"enabled": True},
+        "temperature": 1.0, "top_p": 1.0, "top_k": 0, "reasoning": {"enabled": True},
         "provider": {"order": ["together", "venice", "deepinfra"], "allow_fallbacks": False}}},
 }
 # each harness row's additions to the harness settings
@@ -87,12 +87,7 @@ TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1", "hplg": "c1"}
 
 def overrides_of(player: str) -> dict[str, Any]:
     """The request fields ``player``'s calls carry in place of the harness's own: its model and its settings."""
-    return {"model": PLAYERS[player]["model"], **PLAYERS[player]["body"]}
-
-
-def rules_page(name: str) -> str:
-    """rules/``name``.md, a page of playing rules (c1 is the labeller's)."""
-    return (Path(__file__).resolve().parent / "rules" / f"{name}.md").read_text().strip()
+    return {"model": PLAYERS[player]["model"], "max_completion_tokens": play.MAX_TOKENS, **PLAYERS[player]["body"]}
 
 
 def hand_storage(user: Any, storer: dict[str, Any], *, told: bool = False) -> None:
@@ -133,17 +128,17 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: 
     run_dir = Path(run_dir).expanduser()
     run_dir.mkdir(parents=True, exist_ok=True)
     kwargs = {"model": spec["model"], "context_window": play.CONTEXT_WINDOW, "max_tokens": play.MAX_TOKENS,
-              "stateless": row in STATELESS_ROWS, **play.HARNESS, **play.BLOCK, **REFERENCE_ROWS[row]}
+              "stateless": row in STATELESS_ROWS, **play.HARNESS, **play.TURNS, **REFERENCE_ROWS[row]}
     overrides = overrides_of(player)
     storer = overrides_of(STORERS[row]) if row in STORERS else None
     (run_dir / "driver.json").write_text(json.dumps(
         {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "stateless": row in STATELESS_ROWS,
          "model": spec["model"], "harness": {**play.HARNESS, **REFERENCE_ROWS[row]},
-         "harness_budget": {"name": "block", **play.BLOCK}, "overrides": overrides,
+         "harness_budget": {"name": "turns", **play.TURNS}, "overrides": overrides,
          **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {}),
          **({"storer": {"player": STORERS[row], "overrides": storer, "told": row in TOLD_STORERS}} if storer else {})},
         indent=1))
-    told = {"rules_page": rules_page(TOLD_ROWS[row])} if row in TOLD_ROWS else {}
+    told = {"rules_page": play.rules_page(TOLD_ROWS[row])} if row in TOLD_ROWS else {}
     learner = CollectiveHarnessLearner(lambda user: PrimeAgentLearner(**kwargs, **told), run_dir, schedule=schedule,
                                        upstream=OPENROUTER, api_key=api_key, body_overrides=overrides,
                                        body_drop=("reasoning_effort",), role_map={"developer": "system"},
@@ -270,7 +265,7 @@ def main() -> None:
     s = sub.add_parser("bare", help="play every round of a bare-model row's stream not yet played, resumable")
     common(s, BARE_ROWS)
     s.add_argument("--max-tokens", type=int, default=play.MAX_TOKENS, dest="max_tokens",
-                   help="the reply cap: the rows' 32,768 by default; the demo-cache floors play at 128,000")
+                   help="the reply cap: the rows' 65,536 by default; the demo-cache floors play at 128,000")
     s.set_defaults(fn=cmd_bare)
     a = p.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

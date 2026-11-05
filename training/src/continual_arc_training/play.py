@@ -5,14 +5,17 @@ Rows (``ROWS``):
 
   h0      the base model in prime-agent, its harness wiped before every instance (the learner reset, transfer's
           reference on the held-out tasks)
+  h0c1    row h0 told c1, the page of playing rules DAgger's oracle labels under (:data:`TOLD_ROWS`), at the start of
+          every conversation: what the page alone gives the untrained student, beside what training on replies written
+          under it carries
   bare    the bare model with no harness (the baselines' ``BareModelLearner`` at the demo-cache floors' settings,
           :data:`FLOOR`), which keeps nothing from one instance to the next: the stateless floor
   dagger, opsd, pg  the trained rows, prime-agent's memory kept from round to round; the real-time driver plays their
           rounds (continual_arc_training.realtime), each on the adapter its round is served
 
 Every harness row plays under prime-agent with the finish protocol, compacting at 48k tokens and keeping 8k
-(:data:`HARNESS`), a 40-call cap on an action (:data:`BLOCK`), a 131,072-token window and 32,768-token replies, sampled
-at temperature 1 with no top-p or top-k cutoff, thinking on.
+(:data:`HARNESS`), a budget of 40 model calls per action and no seconds (:data:`TURNS`), a 131,072-token window and
+65,536-token replies, sampled at the model card's setting for thinking mode (:data:`SAMPLING`), thinking on.
 
 :func:`play_round` plays a cut of the schedule (:func:`schedule_cut`: ``Schedule.first_rounds(r + 1)``, a literal
 prefix) with the runner's own resume: every whole round already in the run directory's ``records.jsonl`` is restored and
@@ -49,25 +52,42 @@ SCHEDULE_USERS = 16
 # the conversation), and compaction at 48k tokens keeping 8k, where the untrained Qwen3.5-9B solved 16 of 48 games
 # against 10 at 32k, every call still inside the trainer's 65,536 tokens.
 HARNESS = {"compact_at": 49_152, "compact_keep": 8_000, "end": "finish", "empty_reply": "reprompt"}
-# The action budget: the 40-call cap is meant to be the only thing that routinely stops a turn, so the per-action and
-# follow-up seconds are raised close to the 1,800 s hard ceiling, not to it: at 1,800 the ceiling fires first and aborts
-# the whole turn with a restart instead of the budget's "decide now" with 60 s to answer. The follow-up's 6 calls stay.
-BLOCK = {"max_model_calls": 40, "action_budget_s": 1740.0, "reprompt_budget_s": 1740.0, "reprompt_max_model_calls": 6}
-SAMPLING = {"temperature": 1.0, "top_p": 1.0, "top_k": -1}
-# The served window (scripts/vllm-serve.sh's MAX_MODEL_LEN), declared to the harness as its model's, and the reply cap,
-# of which prime-agent asks min(it, 32,000) at every turn whatever room the conversation leaves. vLLM refuses a call
-# whose prompt and budget together pass the window, so the proxy sends such a call again without its budget and the
-# server gives the reply the room left (continual_arc_baselines.proxy).
-CONTEXT_WINDOW, MAX_TOKENS = 131_072, 32_768
+# The action budget, counted in turns: 40 model calls per action and 6 in its follow-up, with no seconds (NEVER_S), so
+# that no score depends on how fast the model is served; under budgets in seconds the same adapter's score moved with
+# the serving layout. TURN_LIVENESS_S, six hours, is the harness's hard ceiling on one turn, which aborts a turn that
+# has hung.
+NEVER_S, TURN_LIVENESS_S = 30 * 86_400.0, 6 * 3_600.0
+TURNS = {"max_model_calls": 40, "reprompt_max_model_calls": 6, "action_budget_s": NEVER_S,
+         "reprompt_budget_s": NEVER_S, "timeout_s": TURN_LIVENESS_S}
+# Qwen3.5-9B's model card for thinking mode on general tasks, forced on every call of every row the node serves, trained
+# or not: at temperature 1 with nothing cut, a trained adapter's long replies ran on into incoherent text up to the reply
+# cap, which they never did at the card's setting
+SAMPLING = {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5}
+# The served window (scripts/vllm-serve.sh's MAX_MODEL_LEN), declared to the harness as its model's, and the reply cap:
+# the longest reply that fits in the window above the harness's compaction point with REPLY_HEADROOM to spare for the
+# newest observation (131,072 - 49,152 - 16,384 = 65,536). A harness row's play sets it in the request itself
+# (max_completion_tokens), since prime-agent asks for at most 32,000 whatever its own setting, and a reply cut at the cap
+# carries no action. vLLM refuses a call whose prompt and budget together pass the window, so the proxy sends such a
+# call again without its budget and the server gives the reply the room left (continual_arc_baselines.proxy).
+CONTEXT_WINDOW, REPLY_HEADROOM = 131_072, 16_384
+MAX_TOKENS = CONTEXT_WINDOW - HARNESS["compact_at"] - REPLY_HEADROOM
 # The bare model's settings, every floor's: the harness rows' rules (end "finish"), an empty reply asked again, a wipe
 # archived first
 FLOOR = {"end": "finish", "empty_reply": "reprompt", "archive_wipes": True}
-ROWS = ("h0", "bare", "dagger", "opsd", "pg")
-STATELESS_ROWS = ("h0",)
+ROWS = ("h0", "h0c1", "bare", "dagger", "opsd", "pg")
+STATELESS_ROWS = ("h0", "h0c1")
+# the rows told a page of playing rules (rules/NAME.md) at the start of every conversation, as the baselines'
+# ``rules_page``: h0c1 reads c1, the page DAgger's oracle is told, which the trained student never reads
+TOLD_ROWS = {"h0c1": "c1"}
 # rows that keep nothing between instances, whose held-out instances may be dealt wider than the run's users
 TRANSFER_REFERENCES = ("h0", "bare")
 # a captured call's fields, as a game is saved
 CALL_FIELDS = ("call_id", "turn", "phase", "status", "finish_reason", "request", "response")
+
+
+def rules_page(name: str) -> str:
+    """rules/``name``.md, a page of playing rules (c1 is the one DAgger's oracle is told)."""
+    return (Path(__file__).resolve().parent / "rules" / f"{name}.md").read_text().strip()
 
 
 # -- schedules --------------------------------------------------------------------------------------------------
@@ -216,13 +236,15 @@ def play_round(row: str, run_dir: Path, schedule: Any, *, base_url: str, served_
         setting: dict[str, Any] = {"floor": FLOOR, "max_tokens": MAX_TOKENS}
     else:
         from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
+        told = {"rules_page": rules_page(TOLD_ROWS[row])} if row in TOLD_ROWS else {}
         kwargs = {"model": MODEL, "context_window": CONTEXT_WINDOW, "max_tokens": MAX_TOKENS,
-                  "stateless": row in STATELESS_ROWS, **HARNESS, **BLOCK}
+                  "stateless": row in STATELESS_ROWS, **HARNESS, **TURNS, **told}
 
         def system(user: int) -> Any:
             return PrimeAgentLearner(**kwargs)
-        overrides["return_token_ids"] = True
-        setting = {"harness": dict(HARNESS), "harness_budget": {"name": "block", **BLOCK}}
+        overrides.update(return_token_ids=True, max_completion_tokens=MAX_TOKENS)
+        setting = {"harness": dict(HARNESS), "harness_budget": {"name": "turns", **TURNS}, "max_tokens": MAX_TOKENS,
+                   **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {})}
     (run_dir / "driver.json").write_text(json.dumps(
         {"row": row, "served": served_name, "stateless": row in STATELESS_ROWS, "model": MODEL, **setting,
          "sampling": SAMPLING}, indent=1))

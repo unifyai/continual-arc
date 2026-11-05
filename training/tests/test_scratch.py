@@ -66,5 +66,5 @@ def test_the_retrain_trains_the_runs_phase_from_no_adapter_with_its_own_stop(tmp
                                             gpus=8))
     assert (seen["run"], seen["k"], seen["out"], seen["init"]) == (tmp_path / "view", 199, tmp_path / "model", None)
     assert seen["trainer_given"] == ("the trainer", 8) and (tmp_path / "model").is_dir()
-    assert seen["stop"] == (scratch.EVAL_STEPS, scratch.MAX_STEPS, scratch.MINUTES, 2, 1e-4)
+    assert seen["stop"] == (scratch.EVAL_STEPS, scratch.MAX_STEPS, scratch.MINUTES, 6, 1e-4)
     assert json.loads(capsys.readouterr().out) == {"steps": 300, "minutes": 100.0, "best_step": 275}

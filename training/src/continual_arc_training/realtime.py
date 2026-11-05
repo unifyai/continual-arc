@@ -291,7 +291,8 @@ def finish_round(a: argparse.Namespace, run: Path, round_: int) -> dict[str, Any
 
 def started_oracle_rules(run: Path) -> str:
     """What the run's oracle is told (realtime.sh's ORACLE_RULES), as the run's last "started:" line names it, the line
-    a relaunch takes the run's settings from; ``library``, realtime.sh's default, for a line that names none."""
+    a relaunch takes the run's settings from; ``library`` for a line that names none, the rules every run started
+    before the driver named them labelled under."""
     started = re.findall(r"realtime\.sh: started: .*", (run / "progress").read_text())[-1]
     named = re.search(r", oracle rules ([a-z0-9]+)(?:, patience \d+)?$", started)
     return named[1] if named else "library"
@@ -763,14 +764,14 @@ def parser() -> argparse.ArgumentParser:
     s = sub.add_parser("labeller")
     common(s)
     s.add_argument("--c1", default=str(oracle.RULES), help="the oracle's playing rules")
-    s.add_argument("--oracle-rules", choices=oracle.ORACLE_RULES, default="library", dest="oracle_rules",
-                   help="what the oracle is told: c1 and the program library's procedure (library), or c1 alone (c1)")
+    s.add_argument("--oracle-rules", choices=oracle.ORACLE_RULES, default="c1", dest="oracle_rules",
+                   help="what the oracle is told: c1 alone (c1), or c1 and the program library's procedure (library)")
     s.add_argument("--label-model", required=True, dest="label_model")
     s.add_argument("--label-effort", default="medium", dest="label_effort")
     s.add_argument("--relay-port", type=int, required=True, dest="relay_port")
     s.add_argument("--label-workers", type=int, default=256, dest="label_workers")
     s.add_argument("--label-set-workers", type=int, default=32, dest="label_set_workers")
-    s.add_argument("--need-thinking", type=int, default=4, dest="need_thinking",
+    s.add_argument("--need-thinking", type=int, default=0, dest="need_thinking",
                    help="asks again, up to this many more times, when a label has no reasoning or makes no move")
     s.add_argument("--label-round-budget", type=float, required=True, dest="label_round_budget")
     s.add_argument("--label-run-budget", type=float, required=True, dest="label_run_budget")
@@ -788,7 +789,7 @@ def parser() -> argparse.ArgumentParser:
         s.add_argument("--lora-rank", type=int, default=128, dest="lora_rank")
         s.add_argument("--max-seq-len", type=int, default=65536, dest="max_seq_len")
         s.add_argument("--eval-steps", type=int, default=5, dest="eval_steps", help="steps between held-out measurements")
-        s.add_argument("--patience", type=int, default=2,
+        s.add_argument("--patience", type=int, default=6,
                        help="measurements in a row without improving on the best that stop a phase")
         s.add_argument("--max-steps", type=int, default=120, dest="max_steps", help="a phase's cap")
         s.add_argument("--hold-every", type=int, default=10, dest="hold_every",

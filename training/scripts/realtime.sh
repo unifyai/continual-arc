@@ -36,26 +36,32 @@ LAG=${LAG:-1}
 NAME=${NAME:-$ROW-u$USERS-lag$LAG}
 SERVE_GPUS=${SERVE_GPUS:-0,1,2,3}; SERVE_DP=${SERVE_DP:-1}
 TRAIN_GPUS=${TRAIN_GPUS:-4,5,6,7}
-# the labels (DAgger and OPSD): GLM-5.3 Flash at medium effort through the relay, its reasoning required (asked again
-# up to NEED_THINKING times); every row holds one game in HOLD_EVERY out for its held-out loss; the relay asks Z.ai,
-# then Fireworks, since GMICloud's prompt cache returned malformed GLM replies
+# the labels (DAgger and OPSD): GLM-5.3 Flash at medium effort through the relay, asked once, its reasoning left to it
+# (NEED_THINKING=0; above 0, a label with no reasoning or no move is asked again up to that many times): labels made
+# to reason ran to some 6,000 characters of reasoning, and their students deliberated in prose until the reply cap cut
+# them off; every row holds one game in HOLD_EVERY out for its held-out loss; the relay asks Fireworks, then Z.ai: at
+# medium effort Fireworks' GLM gives no reasoning on an easy move and real reasoning on a hard one, where Z.ai's gives a
+# sliver to every move; GMICloud's prompt cache returned malformed GLM replies
 LABEL_MODEL=${LABEL_MODEL:-z-ai/glm-5.3-flash}; LABEL_EFFORT=${LABEL_EFFORT:-medium}
-RELAY_PORT=${RELAY_PORT:-18230}; RELAY_PROVIDERS=${RELAY_PROVIDERS:-z-ai,fireworks}
-NEED_THINKING=${NEED_THINKING:-4}; MIN_LABELLED_PCT=${MIN_LABELLED_PCT:-40}
+RELAY_PORT=${RELAY_PORT:-18230}; RELAY_PROVIDERS=${RELAY_PROVIDERS:-fireworks,z-ai}
+NEED_THINKING=${NEED_THINKING:-0}; MIN_LABELLED_PCT=${MIN_LABELLED_PCT:-40}
 LABEL_ROUND_BUDGET_USD=${LABEL_ROUND_BUDGET_USD:-20}; LABEL_RUN_BUDGET_USD=${LABEL_RUN_BUDGET_USD:-3000}
 HOLD_EVERY=${HOLD_EVERY:-10}
-# what the oracle is told at the end of its copy of each call: c1 and the program library's procedure, which the
-# student is never told (library), or c1 alone (c1). A run keeps its oracle's rules to the end: a labeller started under
-# others stops
-ORACLE_RULES=${ORACLE_RULES:-library}
+# what the oracle is told at the end of its copy of each call, which the student is never told: c1 alone (c1, the
+# paper's), or c1 and the program library's procedure (library: its students opened 47 to 78 percent of fresh puzzles
+# by checking an empty programs folder). A run keeps its oracle's rules to the end: a labeller started under others
+# stops
+ORACLE_RULES=${ORACLE_RULES:-c1}
 case $ORACLE_RULES in library | c1) ;; *) echo "ORACLE_RULES must be library or c1, got $ORACLE_RULES"; exit 1 ;; esac
 # a phase of any row: from the last phase's adapter on every round's training side so far, the held-out loss measured
-# every EVAL_STEPS steps, stopped once PATIENCE measurements in a row have not improved on it, at most MAX_STEPS steps
-EVAL_STEPS=${EVAL_STEPS:-5}; PATIENCE=${PATIENCE:-2}; MAX_STEPS=${MAX_STEPS:-120}; VAL_MAX_ITEMS=${VAL_MAX_ITEMS:-1000}
+# every EVAL_STEPS steps, stopped once PATIENCE measurements in a row have not improved on it, at most MAX_STEPS steps.
+# Six, not two: on every label so far a phase's first two measurements often both fall short of its start, and a stop
+# of two kept one run's starting adapter through six phases in a row; six give a phase 30 steps, the best still kept
+EVAL_STEPS=${EVAL_STEPS:-5}; PATIENCE=${PATIENCE:-6}; MAX_STEPS=${MAX_STEPS:-120}; VAL_MAX_ITEMS=${VAL_MAX_ITEMS:-1000}
 SKIP_FIRST=${SKIP_FIRST:-3}   # OPSD: SDFT's code leaves each reply's first 3 ids ungraded
 # no phase trains before rounds 0..k have played START_AFTER games (every user's), the base model playing until then;
-# each phase trains on every round's so far (DOSE=aggregate), or on the last 10 rounds' and REPLAY_RATIO times as many
-# from whole earlier games (DOSE=recent)
+# each phase trains on every round's so far (DOSE=aggregate, the paper's, from the first phase to the last), or on the
+# last 10 rounds' and REPLAY_RATIO times as many from whole earlier games (DOSE=recent, which the paper's runs do not use)
 START_AFTER=${START_AFTER:-0}; DOSE=${DOSE:-aggregate}; REPLAY_RATIO=${REPLAY_RATIO:-1}
 BATCH=${BATCH:-64}
 MAX_RESTARTS=${MAX_RESTARTS:-5}

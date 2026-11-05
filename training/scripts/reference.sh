@@ -3,7 +3,7 @@
 # played, and the driver is started again when it stops (every round resumes from the run's records), up to
 # MAX_RESTARTS times, a minute apart. The run is RUNS/paper/$PLAYER-$ROW-u$USERS (play/ the benchmark run, progress and
 # play.log beside it). ROW=dc, f, m or m0 plays one of the player's bare-model rows; MAX_TOKENS sets a bare-model row's
-# reply cap (32,768 unless set; the demo-cache floors play at 128,000).
+# reply cap (65,536 unless set; the demo-cache floors play at 128,000).
 # A reference machine needs no GPU: the model is served by OpenRouter. It needs prime-agent 0.9.6, Node 22, bubblewrap,
 # and an environment with this package, the benchmark and the baselines installed: the repository's own uv environment,
 # run from BASELINES (default the repository's baselines/), whose .env holds OPENROUTER_API_KEY.

@@ -15,16 +15,16 @@ variable of the script that starts the run, or a constant of the module named. T
 
 ## The harness and the model's sampling
 
-Every harness row, trained or reference, plays prime-agent under the same settings (`play.HARNESS`, `play.BLOCK`).
+Every harness row, trained or reference, plays prime-agent under the same settings (`play.HARNESS`, `play.TURNS`).
 
 | Setting | Value | Why |
 | --- | --- | --- |
 | End of an instance | the finish protocol (`end: finish`) | The harness saves what it wants after the verdict, then finishes. |
 | An empty reply | asked again in the same conversation (`empty_reply: reprompt`) | A restart loses the conversation. |
 | Compaction | at 49,152 tokens, keeping 8,000 | On the untrained Qwen3.5-9B, 48 games an arm, compacting at 48k solved 16 against 10 at 32k, and every call stays inside the trainer's 65,536 tokens. |
-| Action budget | 40 model calls; 1,740 s an action and its follow-up; 6 calls in the follow-up | The call cap is meant to be the only thing that routinely stops a turn: at the harness's 1,800 s hard ceiling the ceiling would fire first and restart the turn instead of the budget's "decide now". |
-| Window and replies | 131,072-token window, 32,768-token replies, or the room the window has left | The model's context, and room for long reasoning. prime-agent asks the same budget at every call (32,000 for a turn, 0.8 times its compaction reserve, 65,536, to compact), and vLLM refuses a call whose prompt and budget together pass the window, so the proxy sends such a call again without its budget and the reply gets the room left; a prompt that fills the window alone is refused, and prime-agent compacts. |
-| Sampling | temperature 1, top-p 1, no top-k | The model's own distribution, which every update trains on as played. |
+| Action budget | 40 model calls per action and 6 in its follow-up, no seconds; six hours the hard ceiling on one turn | Counted in turns, so that no score depends on how fast the model is served: under budgets in seconds, the same adapter's score moved with the serving layout. The ceiling only aborts a turn that has hung. |
+| Window and replies | 131,072-token window, 65,536-token replies set in each request (`max_completion_tokens`), or the room the window has left | The longest reply that fits above the compaction point with 16,384 tokens to spare for the newest observation. prime-agent asks at most 32,000 whatever its own setting, and a reply cut at the cap carries no action, so the play sets the cap in the request. vLLM refuses a call whose prompt and budget together pass the window, so the proxy sends such a call again without its budget and the reply gets the room left; a prompt that fills the window alone is refused, and prime-agent compacts. |
+| Sampling | the model card's for thinking mode: temperature 1, top-p 0.95, top-k 20, min-p 0, presence penalty 1.5 | At temperature 1 with nothing cut, a trained adapter's long replies ran on into incoherent text up to the reply cap, which they never did at the card's setting. Every row the node serves samples so, trained or not. |
 | Thinking | on (`enable_thinking`) | The model card's thinking mode, at every call. |
 | The bare model | the floors' settings: the finish protocol, empty replies asked again, wipes archived (`play.FLOOR`) | The bare-model rows are the benchmark's floors. |
 
@@ -49,12 +49,12 @@ Every harness row, trained or reference, plays prime-agent under the same settin
 | Setting | Value | Where | Why |
 | --- | --- | --- | --- |
 | Oracle | GLM-5.3 Flash at medium effort, thinking on | `realtime.sh` `LABEL_MODEL`, `LABEL_EFFORT` | A much stronger model than the student, at a cost a whole run can afford. |
-| Its hosts | gmicloud, parasail, fireworks, no fallback | `RELAY_PROVIDERS` | The relay pins every request to the one model and these hosts. |
-| Working rules | c1 and the program library's procedure (`ORACLE_RULES=library`), or c1 alone (`c1`) | `oracle.oracle_rules` | The procedure reaches the student's weights through the labels alone, since the student never reads it; c1 alone makes the procedure the one difference between two oracles. |
+| Its hosts | Fireworks, then Z.ai, no fallback | `RELAY_PROVIDERS` | The relay pins every request to the one model and these hosts. At medium effort Fireworks' GLM gives no reasoning on an easy move and real reasoning on a hard one, where Z.ai's gives a sliver to every move; GMICloud's prompt cache returned malformed replies. |
+| Working rules | c1 alone (`ORACLE_RULES=c1`, the paper's), or c1 and the program library's procedure (`library`) | `oracle.oracle_rules` | The rules reach the student's weights through the labels alone, since the student never reads them. Told the procedure too, the oracle taught students to open 47 to 78 percent of fresh puzzles by checking an empty programs folder. |
 | Where the rules go | the end of the call's last message, closed by a request to reason in its own words with the rules unspoken | `oracle.with_rules` | On one round's 380 moments this labelled 89% against 79% for the rules alone, and 45% with them in the system prompt, where the oracle mostly stopped reasoning. |
 | Asked again | with a note saying what was wrong, as if for the first time | `oracle.ask_label` | Told what was wrong, the oracle labelled 96% of the same moments against 89% when merely asked again. |
 | A label that names the rules or the note | asked again up to 3 times (`RULE_RETRIES`), then dropped | `oracle.MENTIONS_RULES`, `NOTE_LEAK` | The reply becomes the student's target, and the student never sees the rules. |
-| A label with no reasoning, or no move | asked again up to 4 times (`NEED_THINKING`), then dropped | `oracle.THINK_MIN_CHARS` (50) | A student trained on labels with no reasoning stopped thinking; a reply that only says what it will do teaches the student to spend a turn on nothing. On obvious moves the oracle reasons in 9 or 10 tokens and explains itself in its reply, so its reasoning and its visible prose count together. |
+| A label with no reasoning, or no move | a label with no move dropped and one with no reasoning kept (`NEED_THINKING=0`, the paper's); above 0, either asked again up to that many times, then dropped | `oracle.THINK_MIN_CHARS` (50) | Labels made to reason ran to some 6,000 characters of reasoning on average, and their students deliberated in prose until the reply cap cut them off. A reply that makes no move would teach the student to spend a turn on nothing. |
 | The student's target | all of the oracle's prose as the student's reasoning, only the action and tool calls in view | `labeller.student_message` | The student reasons in its thinking and acts in the text the harness reads; a student trained with the prose left in view wrote prose with no move in 16% of its replies, against 6%. |
 | A round's labels | at least 40% of its points labelled (`MIN_LABELLED_PCT`), at most $20 a round and $3,000 a run | `realtime.sh` | A round under the minimum means a dead relay or key, or an oracle that will not think. |
 | Reply cap and timeout | 32,768 tokens, 420 s, one retry | `oracle.MAX_TOKENS`, `TIMEOUT_S` | The budget covers the reasoning too (one moment took 15,000 tokens of it); the timeout sits under prime-agent's 600 s with room for one retry. |
@@ -70,21 +70,17 @@ Every harness row, trained or reference, plays prime-agent under the same settin
 | Batch | 64 calls a step (`BATCH`) | `--batch` | |
 | Window | 65,536 tokens a chain piece | `--max-seq-len` | A chain that the window cannot hold is cut at call boundaries; a call longer than the window is left out and counted. |
 | Chains | a head of at most 8 ids (`CHAIN_SLACK`), at most 16 calls a piece (`CHAIN_CALLS`) | `chains` | A game's calls whose prompts each extend the last are read in one pass. A prompt that differs from the trunk in its last few ids (an empty think block re-rendered) stays in the chain with those ids as an ungraded head. The piece cap keeps a step's plan the same on any number of GPUs. |
-| The held-out stop | measured before the first step and every 5 steps (`EVAL_STEPS`), stopped after 2 measurements in a row without a new best (`PATIENCE`), the best adapter kept | `phase.fit` | Each phase keeps the adapter that generalised best on held-out games, its starting one while none improves on it. |
+| The held-out stop | measured before the first step and every 5 steps (`EVAL_STEPS`), stopped after 6 measurements in a row without a new best (`PATIENCE`), the best adapter kept | `phase.fit` | Each phase keeps the adapter that generalised best on held-out games, its starting one while none improves on it. On every label so far a phase's first two measurements often both fall short of its start, and a stop of two kept one run's starting adapter through six phases in a row. |
 | Caps | at most 120 steps (`MAX_STEPS`), 20 passes (`--max-epochs`), 240 minutes (`--max-minutes`); one pass while there is no held-out game | `realtime.dose` | With nothing held out there is nothing to stop on, so a phase reads its data once. |
 | Held-out set | whole held-out games drawn until their calls reach 1,000 (`--val-max-items`) | `realtime.whole_games` | The held-out sides grow every round; the cost of a measurement does not. |
 | Seed | phase k plans its steps from `random.Random(k)` | `realtime.train_phase` | Every row draws the same steps from the same units; OPSD's steps are DAgger's. |
 
 ### The dose
 
-`DOSE=aggregate` (the default) trains each phase on every round's training side so far, DAgger's own aggregate.
-`DOSE=recent` trains on the last 10 rounds' (`realtime.RECENT_ROUNDS`) and `REPLAY_RATIO` (1) times as many labels from
-whole earlier games drawn at random, under the same stop. In long DAgger runs most phases kept the adapter they started
-from: the aggregate dose reshuffles every earlier round in every phase, so a phase stopped at step 10 reads almost only
-rounds the adapter has fitted already, and the held-out loss rose a little in the first steps before falling. Played
-past its stop on a stalled phase, the recent mix lowered the loss on the held-out set, on the next rounds' states and on
-the recent rounds steadily from step 10 (by 0.8%, 1.3% and 11.2% by step 40, against 0.1%, 0.5% and 3.5% for the
-aggregate). So DAgger runs take `DOSE=recent PATIENCE=4` once their phases stall; OPSD and PG train on the aggregate.
+`DOSE=aggregate` (the default, the paper's) trains each phase on every round's training side so far, DAgger's own
+aggregate, from the first phase to the last. `DOSE=recent` trains on the last 10 rounds' (`realtime.RECENT_ROUNDS`) and
+`REPLAY_RATIO` (1) times as many labels from whole earlier games drawn at random, under the same stop; the paper's runs
+do not use it.
 
 ### Each update
 
