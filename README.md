@@ -324,7 +324,8 @@ of users. A result is a point on the plane of the two tests' shares saved, with 
 and share solved beside them and the share learned over the stream as a secondary measure. Seeds 0, 1 and 2 are all canonical; the paper reports seed 0, and
 the leaderboard compares runs at seed 0. Every run's `summary.json` and `meta.json` carry a `protocol` block that
 names the track and says whether the run is canonical; any other configuration, order,
-seed or environment setting is an ablation and the report labels it as such.
+seed or environment setting is an ablation and the report labels it as such. `continual-arc report` prints the block
+a run recorded, as the release that played it judged it.
 
 ## Quickstart
 

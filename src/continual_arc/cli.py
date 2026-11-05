@@ -182,7 +182,11 @@ def cmd_report(args) -> int:
 
     summary = summarize(records, config, window=args.window,
                         checkpoints=(sched.meta.get("config") or {}).get("checkpoints", ()))
-    summary["protocol"] = protocol_of(sched, config)
+    # the protocol the run recorded as it ended, as rescore keeps it: a run reads as the release that played it judged
+    # it, its configuration under the name that release gave it; a run with no summary yet is judged now
+    played = Path(args.run_dir) / "summary.json"
+    recorded = json.loads(played.read_text()).get("protocol") if played.exists() else None
+    summary["protocol"] = recorded or protocol_of(sched, config)
     print(text_report(summary, title=f"{args.run_dir} ({sched.name})"))
     if args.plots:
         written = plot(summary, args.run_dir)

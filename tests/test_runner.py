@@ -410,6 +410,26 @@ def test_rescore_charges_an_old_run_as_the_benchmark_charges_now(fake_registry, 
     assert rescore(out) == 0
 
 
+def test_report_shows_the_protocol_the_run_recorded(fake_registry, fake_source, tmp_path, capsys):
+    """A run reads as the release that played it judged it: report prints the protocol block of its summary.json,
+    under the configuration's name then, and judges only a run with no summary yet."""
+    from continual_arc.cli import main
+
+    sched = stream_schedule(fake_source.task_ids()[:2], 4, seed=0, source=fake_source.name)
+    out = tmp_path / "run"
+    run(EchoLearner(), sched, out_dir=out, registry=fake_registry)
+    summary = json.loads((out / "summary.json").read_text())
+    assert not summary["protocol"]["canonical"]   # a bare stream of fake tasks is no configuration of a track
+    summary["protocol"] = {"track": "arc1", "config": "arc1-small", "mode": "workstreams", "seed": 0, "epilogue": True,
+                           "canonical": True, "deviations": []}   # as a run played before v0.6.0 records it
+    (out / "summary.json").write_text(json.dumps(summary))
+    main(["report", str(out)])
+    assert "protocol: arc1-small/workstreams seed 0   canonical: yes" in capsys.readouterr().out
+    (out / "summary.json").unlink()
+    main(["report", str(out)])
+    assert "canonical: NO (configuration" in capsys.readouterr().out
+
+
 def test_a_wide_round_can_be_served_a_few_users_at_a_time(fake_registry, fake_source):
     from continual_arc.testing import ConcurrentRoundMemoryLearner, RoundMemoryLearner
 
