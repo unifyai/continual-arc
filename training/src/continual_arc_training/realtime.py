@@ -1,4 +1,4 @@
-"""The real-time driver of the paper's trained rows, DAgger, OPSD and PG: the student plays ``arc1-small`` served to
+"""The real-time driver of the paper's trained rows, DAgger, OPSD and PG: the student plays ``arc1`` served to
 its users round after round while the oracle labels its games (DAgger and OPSD) and one resident trainer trains on
 them, and round r is played by the model trained on rounds 0..r-1-LAG, no more and no less. With LAG=1, the paper's,
 which model plays which round never depends on how fast the hardware is; LAG=0 is the strict, synchronous protocol.

@@ -5,9 +5,9 @@ Continual-ARC has a track for each ARC-AGI edition (:data:`TRACKS`): ARC-AGI-1 (
 instances of the ARC-AGI-1 training tasks from Re-ARC's generators; ARC-AGI-2 (``arc2``), its stream fresh instances
 of the ARC-AGI-2 training tasks new to the second edition from ARC-GEN's generators (``docs/arc2.md``); and ARC-AGI-3
 (``arc3``), its stream fresh levels of its stream games' first-level rules from generators of our own
-(:mod:`continual_arc.arc3`, ``docs/arc3.md``). Every configuration name carries its track (``arc1-small``), so a bare
-size such as ``small`` names nothing. Each
-track has one canonical protocol for each number of users served at once: its ``small`` configuration's stream and
+(:mod:`continual_arc.arc3`, ``docs/arc3.md``). Each track has one configuration, named as the track is (``arc1``),
+beside a smoke configuration for tests (``arc1-smoke``), and one canonical protocol for each number of users served
+at once: its configuration's stream and
 then its two frozen tests, at the default environment settings, at seeds 0, 1 and 2, at 1, 2, 4, 8 or 16 users on
 ARC-AGI-1, 1, 2 or 4 on ARC-AGI-2 and 1 on ARC-AGI-3, as far as each track's pool gives every user tasks of their own
 (:data:`CANONICAL_USERS`, :func:`canonical_protocol`); learners are compared only on the same track at the same
@@ -50,8 +50,10 @@ The canonical numbers of users are the powers of two from 1 to 16 (Dan, 18 Oct 2
 low-data regime by design, every update seeing at most 16 new instances, so that a learner
 that trains its weights between rounds finishes a whole stream on one machine in days, not
 weeks. A track serves as many of them as its pool has blocks: ARC-AGI-1's 400 tasks are 16
-blocks of ``arc1-small``'s 25, ARC-AGI-2's screened pool of 117 holds 4 of ``arc2-small``'s 25,
-and ARC-AGI-3's 15 stream games are ``arc3-small``'s one block.
+blocks of ``arc1``'s 25, ARC-AGI-2's screened pool of 117 holds 4 of ``arc2``'s 25,
+and ARC-AGI-3's 15 stream games are ``arc3``'s one block. Whatever the number of users, each
+walks the configuration's stream length and meets its held-out tasks: more users bring more
+tasks, never a longer stream.
 
 A configuration's ``stream_length`` is an observation window, not a ceiling on
 what a learner may learn from: the generators produce fresh instances forever.
@@ -202,8 +204,8 @@ CONFIGS: dict[str, BenchmarkConfig] = {
             concurrency=3, burst_mean=5.0, dormancy_median=20.0, dormancy_sigma=0.8, arrival_interval=10.0
         ),
     ),
-    "arc1-small": BenchmarkConfig(
-        name="arc1-small",
+    "arc1": BenchmarkConfig(
+        name="arc1",
         n_tasks=25,
         stream_length=200,
         n_epilogue_tasks=100,
@@ -211,26 +213,8 @@ CONFIGS: dict[str, BenchmarkConfig] = {
             concurrency=4, burst_mean=3.0, dormancy_median=30.0, dormancy_sigma=1.0, arrival_interval=2.0
         ),
     ),
-    "arc1-medium": BenchmarkConfig(
-        name="arc1-medium",
-        n_tasks=100,
-        stream_length=3000,
-        n_epilogue_tasks=100,
-        workstreams=StreamParams(
-            concurrency=5, burst_mean=6.0, dormancy_median=120.0, dormancy_sigma=1.0, arrival_interval=20.0
-        ),
-    ),
-    "arc1-full": BenchmarkConfig(
-        name="arc1-full",
-        n_tasks=400,
-        stream_length=12000,
-        n_epilogue_tasks=400,
-        workstreams=StreamParams(
-            concurrency=6, burst_mean=6.0, dormancy_median=300.0, dormancy_sigma=1.0, arrival_interval=20.0
-        ),
-    ),
-    # ARC-AGI-2: the first track's smoke and small shapes, the stream from the screened ARC-GEN pool and the held-out
-    # tasks from the 114 evaluation tasks new to the second edition
+    # ARC-AGI-2: the first track's shapes, the stream from the screened ARC-GEN pool and the held-out tasks from the 114
+    # evaluation tasks new to the second edition
     "arc2-smoke": BenchmarkConfig(
         name="arc2-smoke",
         n_tasks=8,
@@ -241,8 +225,8 @@ CONFIGS: dict[str, BenchmarkConfig] = {
         ),
         dataset=DATASET_ARC2,
     ),
-    "arc2-small": BenchmarkConfig(
-        name="arc2-small",
+    "arc2": BenchmarkConfig(
+        name="arc2",
         n_tasks=25,
         stream_length=200,
         n_epilogue_tasks=100,
@@ -251,8 +235,8 @@ CONFIGS: dict[str, BenchmarkConfig] = {
         ),
         dataset=DATASET_ARC2,
     ),
-    # ARC-AGI-3: the track's stream games, eight fresh levels each, as arc1-small serves its tasks, the stream's
-    # parameters scaled to its length; four fresh levels of each held-out game.
+    # ARC-AGI-3: the track's stream games, eight fresh levels each, as arc1 serves its tasks, the stream's parameters
+    # scaled to its length; four fresh levels of each held-out game.
     "arc3-smoke": BenchmarkConfig(
         name="arc3-smoke",
         n_tasks=2,
@@ -265,8 +249,8 @@ CONFIGS: dict[str, BenchmarkConfig] = {
         env=Arc3Config(),
         dataset=DATASET_ARC3,
     ),
-    "arc3-small": BenchmarkConfig(
-        name="arc3-small",
+    "arc3": BenchmarkConfig(
+        name="arc3",
         n_tasks=len(STREAM_GAMES),
         stream_length=8 * len(STREAM_GAMES),
         n_epilogue_tasks=len(HELD_OUT_GAMES),
@@ -281,33 +265,29 @@ CONFIGS: dict[str, BenchmarkConfig] = {
 
 
 CANONICAL_SEEDS = (0, 1, 2)
-CANONICAL_SIZE = "small"
 # The numbers of users a canonical score is read at, each a number of its own, by track: powers of two up to 16, a
 # low-data regime by design that one machine finishes in days (Dan, 18 Oct 2026), as far as the track's pool gives
 # every user a block of tasks of their own (task_order)
 CANONICAL_USERS = {DATASET_ARC1: (1, 2, 4, 8, 16), DATASET_ARC2: (1, 2, 4), DATASET_ARC3: (1,)}
 
 
-def canonical_config_name(track: str) -> str:
+def canonical_protocol(track: str) -> dict:
+    """The protocol whose score is *the* number for a track, one number for each canonical number of users, on the
+    track's configuration, which is named as the track is."""
     if track not in TRACKS:
         raise ValueError(f"track must be one of {TRACKS}, got {track!r}")
-    return f"{track}-{CANONICAL_SIZE}"
-
-
-def canonical_protocol(track: str) -> dict:
-    """The protocol whose score is *the* number for a track, one number for each canonical number of users."""
     return {
         "track": track,
-        "config": canonical_config_name(track),
+        "config": track,
         "mode": ORDER_WORKSTREAMS,
         "users": list(CANONICAL_USERS[track]),
         "tests": list(TESTS),
         "seeds": list(CANONICAL_SEEDS),
-        "env": get_config(canonical_config_name(track)).env.to_json(),
+        "env": get_config(track).env.to_json(),
     }
 
 
-# the seen test's instances of each stream task: arc1-small's 25 tasks give 100, as many as the held-out test's
+# the seen test's instances of each stream task: arc1's 25 tasks give 100, as many as the held-out test's
 SEEN_TEST_PER_TASK = 4
 
 
@@ -364,7 +344,7 @@ def test_schedule(
 def seen_instances(tasks: list[list[str]], seed: int, least: int) -> list[tuple[str, int]]:
     """The seen test's instances over each of U users' ``tasks``, as (task id, instance seed). With N tasks in all,
     the test has max(``least``, N) instances, each task the same number of times, refused unless that is whole (so
-    ``arc1-small``'s 4 of each of 25 at one user, 2 of each of 50 at two, and one of every task from four). Each
+    ``arc1``'s 4 of each of 25 at one user, 2 of each of 50 at two, and one of every task from four). Each
     user's tasks are sorted, each repeated that many times, and shuffled in place by one
     ``random.Random(derive_seed(seed, "seen-test"))``, user 0's list first, then user 1's and so on; instance i is
     entry i // U of user i mod U's list, at instance seed ``derive_seed(seed, "seen-test", i)``."""
@@ -401,8 +381,7 @@ def protocol_of(schedule, env_config=None) -> dict:
     order = meta.get("mode")
     seed = meta.get("seed", schedule.seed)
     if meta.get("test"):   # a frozen test is canonical when its configuration and seed are
-        deviations = ([f"configuration {name} is not {canonical_config_name(track)}"]
-                      if name != canonical_config_name(track) else [])
+        deviations = [f"configuration {name} is not {track}"] if name != track else []
         deviations += [f"seed {seed} is not one of the canonical seeds {CANONICAL_SEEDS}"] if seed not in CANONICAL_SEEDS else []
         return {"track": track, "config": name, "test": meta["test"], "width": meta.get("width", schedule.users),
                 "seed": seed, "canonical": not deviations, "deviations": deviations}
@@ -413,8 +392,8 @@ def protocol_of(schedule, env_config=None) -> dict:
     users = (int(epilogue_only["users"]) if epilogue_only
             else int(cfg_meta.get("users", cfg_meta.get("width", schedule.users))))  # "width" before 24 Sep 2026
     deviations: list[str] = []
-    if name != canonical_config_name(track):
-        deviations.append(f"configuration {name} is not {canonical_config_name(track)}")
+    if name != track:
+        deviations.append(f"configuration {name} is not {track}")
     if users not in CANONICAL_USERS[track]:
         deviations.append(f"{users} users is not one of {track}'s canonical numbers of users {CANONICAL_USERS[track]}")
     if not epilogue_only and order != ORDER_WORKSTREAMS:
@@ -440,17 +419,9 @@ def protocol_of(schedule, env_config=None) -> dict:
 def get_config(name_or_config: str | BenchmarkConfig) -> BenchmarkConfig:
     if isinstance(name_or_config, BenchmarkConfig):
         return name_or_config
-    try:
-        return CONFIGS[name_or_config]
-    except KeyError:
-        pass
-    sizes = sorted({n.split("-", 1)[1] for n in CONFIGS})
-    if name_or_config in sizes:
-        raise KeyError(
-            f"config {name_or_config!r} does not name its track; "
-            f"choose {', '.join(f'{t}-{name_or_config}' for t in TRACKS if f'{t}-{name_or_config}' in CONFIGS)}"
-        )
-    raise KeyError(f"unknown config {name_or_config!r}; choose from {sorted(CONFIGS)}")
+    if name_or_config not in CONFIGS:
+        raise KeyError(f"unknown config {name_or_config!r}; choose from {sorted(CONFIGS)}")
+    return CONFIGS[name_or_config]
 
 
 def with_users(config: str | BenchmarkConfig, users: int) -> BenchmarkConfig:
@@ -471,68 +442,46 @@ def select_tasks(pool: list[str], n: int, seed: int, label: str) -> list[str]:
     return sorted(rng.sample(pool, n))
 
 
-def _size_chain(cfg: BenchmarkConfig, attr: str) -> list[int]:
-    """The nested sizes of ``cfg``'s track, ascending: the ``attr`` of every configuration of
-    the same dataset but the smoke ones, whose draws stand alone (they are never in a paper)."""
-    sizes = {getattr(c, attr) for c in CONFIGS.values() if c.dataset == cfg.dataset and not c.name.endswith("-smoke")}
-    return sorted(sizes)
-
-
-def select_nested(pool: list[str], n: int, seed: int, label: str, chain: list[int]) -> list[str]:
-    """``n`` task ids from ``pool`` such that each size in ``chain`` contains every smaller one.
-
-    The smallest size is the plain seeded sample :func:`select_tasks` would draw, so fixing
-    the sets this way changes nothing for the small configurations already run; each larger
-    size adds a seeded sample from what the smaller sizes left. A size below the chain (a smoke
-    configuration) is drawn on its own.
-    """
-    chain = [s for s in chain if s <= n]
-    if not chain:
-        return select_tasks(pool, n, seed, label)
-    chosen: list[str] = []
-    remaining = sorted(set(pool))
-    for size in chain:
-        k = size - len(chosen)
-        chosen += select_tasks(remaining, k, seed, label if not chosen else f"{label}-{size}")
-        taken = set(chosen)
-        remaining = [t for t in remaining if t not in taken]
-    if len(chosen) < n:
-        chosen += select_tasks(remaining, n - len(chosen), seed, f"{label}-{n}")
-    return sorted(chosen)
-
-
 def config_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
-    """The stream task set of ``cfg`` at ``seed`` from ``pool``: nested across the sizes of its track."""
-    return select_nested(pool, cfg.n_tasks, seed, "tasks", _size_chain(cfg, "n_tasks"))
+    """The stream task set of ``cfg`` at ``seed`` from ``pool``, user 0's: the first draw of :func:`task_order`."""
+    return select_tasks(pool, cfg.n_tasks, seed, "tasks")
+
+
+# The nested sets ARC-AGI-1's task order is drawn in, by size (task_order): its configuration's 25 tasks, then 100,
+# then all 400. Drawn in steps of 25 like the other tracks', the order would hand users 1 to 15 other tasks, and every
+# collective run on the track would meet another stream.
+NESTED_TASK_SETS = {DATASET_ARC1: (25, 100, 400)}
 
 
 def task_order(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[str]:
     """Every task of ``pool`` that ``cfg``'s users may bring, in the order whose blocks of ``cfg.n_tasks`` are the
-    users' own (:func:`user_tasks`). The sizes are the track's nested task sets (its configurations', as
-    :func:`config_tasks` draws them, or a smoke configuration's own), then, while the pool lasts, further steps of the
-    smallest; for each in turn its set at ``seed`` (:func:`select_nested`) less the tasks already in the order is
-    sorted by task id and appended. So on ARC-AGI-1 the order is ``arc1-small``'s 25 sorted, then the 75
-    ``arc1-medium`` adds sorted, then the 300 ``arc1-full`` adds sorted: its first 25 are ``arc1-small``'s, its first
-    100 ``arc1-medium``'s and all 400 ``arc1-full``'s. ARC-AGI-2 has one configuration of 25 tasks, so its screened
-    pool of 117 continues in draws of 25 to 100; ARC-AGI-3's 15 stream games are ``arc3-small``'s alone."""
-    chain = _size_chain(cfg, "n_tasks")
-    if cfg.n_tasks not in chain:   # a smoke configuration's tasks are drawn on their own, so its order starts there
-        chain = [cfg.n_tasks]
+    users' own (:func:`user_tasks`). The order is drawn in nested sets of growing size: on ARC-AGI-1 those of
+    :data:`NESTED_TASK_SETS`, elsewhere (and on a smoke configuration) the configuration's own tasks, then, while the
+    pool lasts, further steps of the smallest set. Each set adds a seeded draw (:func:`select_tasks`) from the tasks the
+    smaller ones left, sorted by task id. So on ARC-AGI-1 the order is ``arc1``'s 25 tasks sorted, then 75 more sorted,
+    then the other 300 sorted, users 0 to 3 bringing the first 100 and users 0 to 15 all 400; the screened pool of
+    ARC-AGI-2 goes on from ``arc2``'s 25 in draws of 25 to 100, and ARC-AGI-3's 15 stream games are ``arc3``'s alone."""
+    sets = list(NESTED_TASK_SETS.get(cfg.dataset, ()))
+    if cfg.n_tasks not in sets:   # a smoke configuration's tasks are drawn on their own, so its order starts there
+        sets = [cfg.n_tasks]
     size = len(set(pool))
-    chain = [n for n in chain if n <= size] or [cfg.n_tasks]
-    while chain[-1] + chain[0] <= size:
-        chain.append(chain[-1] + chain[0])
+    sets = [n for n in sets if n <= size] or [cfg.n_tasks]
+    while sets[-1] + sets[0] <= size:
+        sets.append(sets[-1] + sets[0])
     order: list[str] = []
-    for n in chain:
-        order += sorted(set(select_nested(pool, n, seed, "tasks", chain)) - set(order))
+    remaining = sorted(set(pool))
+    for n in sets:
+        drawn = select_tasks(remaining, n - len(order), seed, f"tasks-{n}" if order else "tasks")
+        order += drawn
+        taken = set(drawn)
+        remaining = [t for t in remaining if t not in taken]
     return order
 
 
 def user_tasks(cfg: BenchmarkConfig, pool: list[str], seed: int) -> list[list[str]]:
     """Each of ``cfg``'s users' own tasks at ``seed``, by user: user k's are block k of :func:`task_order`, positions
     ``k * cfg.n_tasks`` to ``(k + 1) * cfg.n_tasks - 1``, so user 0's are the configuration's own task set
-    (:func:`config_tasks`), and on ARC-AGI-1 users 0-3 together bring ``arc1-medium``'s 100 and users 0-15
-    ``arc1-full``'s 400. A configuration served to more users than its pool has blocks is refused."""
+    (:func:`config_tasks`). A configuration served to more users than its pool has blocks is refused."""
     order = task_order(cfg, pool, seed)
     blocks = len(order) // cfg.n_tasks
     if cfg.users > blocks:
@@ -570,7 +519,7 @@ def epilogue_task_pool(cfg: BenchmarkConfig) -> list[str]:
 
 def _held_out_tasks(cfg: BenchmarkConfig, seed: int, eval_task_ids: list[str]) -> list[str]:
     """The configuration's held-out tasks at ``seed``, drawn from ``eval_task_ids``."""
-    return select_nested(eval_task_ids, cfg.n_epilogue_tasks, seed, "epilogue", _size_chain(cfg, "n_epilogue_tasks"))
+    return select_tasks(eval_task_ids, cfg.n_epilogue_tasks, seed, "epilogue")
 
 
 def _user_seeds(cfg: BenchmarkConfig, seed: int) -> list[int]:

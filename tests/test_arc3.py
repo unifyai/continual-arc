@@ -115,8 +115,8 @@ def test_the_track_s_games_split_once_into_stream_and_held_out_games():
     assert "arc3" in TRACKS
 
 
-def test_arc3_small_serves_every_stream_game_eight_times_and_tests_four_fresh_levels_of_each():
-    cfg = get_config("arc3-small")
+def test_arc3_serves_every_stream_game_eight_times_and_tests_four_fresh_levels_of_each():
+    cfg = get_config("arc3")
     assert cfg.track == "arc3" and isinstance(cfg.env, Arc3Config) and cfg.stream_source == SOURCE_ARC3
     stream = build_schedule(cfg, 0, epilogue=False)
     counts = {g: sum(s.task_id == g for s in stream.slots) for g in STREAM_GAMES}
@@ -135,7 +135,7 @@ def test_arc3_small_serves_every_stream_game_eight_times_and_tests_four_fresh_le
     assert {(s.task_id, s.instance_seed) for s in epilogue} == {(s.task_id, s.instance_seed) for s in held.slots}
     fresh = build_schedule(cfg, 0, order=FRESH)
     assert len(fresh) == 4 * len(HELD_OUT_GAMES) and all(s.reset_before for s in fresh.slots)
-    assert canonical_protocol("arc3")["config"] == "arc3-small"
+    assert canonical_protocol("arc3")["config"] == "arc3"
     assert frozen_test(cfg, 0, "seen", width=1).users == 1
 
 

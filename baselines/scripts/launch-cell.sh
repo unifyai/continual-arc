@@ -19,7 +19,7 @@
 # ask-acp (row HA, asked to store after every verdict), pl-harness and pl-acp (row HPL, told to keep a program library
 # as row PL does), stateless-pl-harness and stateless-pl-acp (row HPL0). The order is workstreams, the benchmark's
 # stream, or sequential or random, which the paper plays only to check that the order does not change a finding, or
-# fresh, the transfer reference; configuration arc1-small.
+# fresh, the transfer reference; configuration arc1.
 #
 # An empty reply is re-prompted like any unusable reply, and a system is restarted only when its process is dead or
 # silent. EMPTY_REPLY=restart gives the earlier rule, under which an empty reply restarted the system: the paper's
@@ -85,7 +85,7 @@ harness)
         "{\"model\": \"$model\", \"thinking\": \"$think\", \"end\": \"finish\"$REPLY_KW, \"action_budget_s\": 300, \"max_model_calls\": 15$STATELESS_KW$ASK_KW}" \
         "{\"reasoning_effort\": \"$effort\"}" "$cfg" "$order" "$seed" ;;
 acp)
-    order=$1; seed=$2; cfg=${3:-arc1-small}; preset=${4:-luna6-low}; only=${5:-all}; m=$(orderabbr "$order")
+    order=$1; seed=$2; cfg=${3:-arc1}; preset=${4:-luna6-low}; only=${5:-all}; m=$(orderabbr "$order")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac
@@ -102,7 +102,7 @@ floors)
     # per message, deciding itself when to request a pair and when to submit. BareModelLearner is the stateless floor;
     # BareDemoCacheLearner the demo-cache floor, the same model with the pairs it bought for a task (up to eight) shown
     # again free when the task returns. max_tokens is the model's maximum completion length (128k for GPT-6 Luna).
-    preset=$1; order=$2; seed=$3; cfg=${4:-arc1-small}; m=$(orderabbr "$order")
+    preset=$1; order=$2; seed=$3; cfg=${4:-arc1}; m=$(orderabbr "$order")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac
@@ -116,7 +116,7 @@ method)
     # BareProgramLibraryLearner): each program is checked free on the task's pairs, and the last one that reproduces
     # all of them is kept and run first when the task returns. Row PL0 (stateless-method) wipes the kept programs and
     # the demonstration cache before every instance. Their cells are named M and M0, as the run records name them.
-    preset=$1; order=$2; seed=$3; cfg=${4:-arc1-small}; m=$(orderabbr "$order")
+    preset=$1; order=$2; seed=$3; cfg=${4:-arc1}; m=$(orderabbr "$order")
     model_of "$preset"
     track=${cfg%%-*}; [ "$track" != arc1 ] && tag="$tag-$track"
     case $cfg in *-smoke) tag="$tag-smoke";; esac

@@ -2,7 +2,7 @@
 # A frozen row on the node's own vLLM, round by round with no lag (continual_arc_training.play): H0 (the base model in
 # prime-agent, wiped before every instance) or the bare model (ROW=h0 or bare), ROUNDS rounds from FIRST_ROUND (default
 # 0), every stage marked, so a kill at any step resumes there. Round r: serve.sh serves the base model, the driver plays
-# round r of arc1-small served to USERS users (default 100, the whole schedule's number: users 0..USERS-1 are exactly
+# round r of arc1 served to USERS users (default 100, the whole schedule's number: users 0..USERS-1 are exactly
 # the 100's first USERS, round by round), and the round's memory counters go to the progress log. With EPILOGUE=1 the
 # row plays the epilogue alone, served to EPILOGUE_USERS of the USERS users, and with WIDTH its instances dealt WIDTH to a
 # round: the held-out test's instances are user 0's of the epilogue, and neither row carries anything from one instance

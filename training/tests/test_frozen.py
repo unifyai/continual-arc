@@ -330,7 +330,7 @@ def test_the_schedules_are_the_benchmarks_own(test, users, size):
     from continual_arc import configs
     from continual_arc.schedule import Schedule
     kept = Schedule.load(frozen.schedule_path(test, users))
-    made = configs.test_schedule(configs.with_users("arc1-small", users), 0, test)
+    made = configs.test_schedule(configs.with_users("arc1", users), 0, test)
     assert kept.to_json() == json.loads(json.dumps(made.to_json()))   # as saved: a tuple is a list in JSON
     assert (kept.users, len(kept.slots), set(kept.rounds())) == (size, size, {0})
     assert frozen.schedule_path("held-out", users) == frozen.schedule_path("held-out")   # one at any number of users
@@ -361,7 +361,7 @@ def _node(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     for t in frozen.TESTS:   # each test cut to three instances
         d = json.loads(frozen.schedule_path(t).read_text())
         d["slots"], d["users"] = d["slots"][:3], 3
-        (schedules / f"arc1-small-{t}-test-seed0.json").write_text(json.dumps(d))
+        (schedules / f"arc1-{t}-test-seed0.json").write_text(json.dumps(d))
     _stub(tools, "nvidia-smi", "echo 0")
     _stub(tools, "sudo", "exit 0")
     _stub(tools, "setsid", 'exec "$@"')

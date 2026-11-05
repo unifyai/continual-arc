@@ -1,7 +1,7 @@
 """The two frozen tests after a run's stream, both played frozen and at once: a trained run's (its model on the node's
 vLLM), played on its own node once its stream has ended (frozen.sh), or a reference row's (its model on OpenRouter,
 continual_arc_training.references), played where the row's memory is (ref-tests.sh). The benchmark defines them
-(``configs.test_schedule``; those for ``arc1-small`` at seed 0 are in this package's ``schedules/``): the held-out
+(``configs.test_schedule``; those for ``arc1`` at seed 0 are in this package's ``schedules/``): the held-out
 test, one instance of each of the 100 held-out tasks, the same at any number of users, and the seen test, new
 instances of the stream's users' own tasks, four of each of 25 at one user, two of each of 50 at two, and one of every
 task from four users (100 at four, 200 at eight, 400 at sixteen), a file for each. Each is one round, every instance a
@@ -68,11 +68,11 @@ Found = tuple[list[str], list[tuple[str, str]], list[str]]
 
 
 def schedule_path(test: str, users: int = 1) -> Path:
-    """The test's schedule after a stream of ``arc1-small`` at seed 0 served to ``users`` (the benchmark's
+    """The test's schedule after a stream of ``arc1`` at seed 0 served to ``users`` (the benchmark's
     ``configs.test_schedule``): the held-out test is one at any number of users, the seen test one for each."""
     if test == "seen" and users > 1:
-        return SCHEDULES / f"arc1-small-seen-test-seed0-u{users}.json"
-    return SCHEDULES / f"arc1-small-{test}-test-seed0.json"
+        return SCHEDULES / f"arc1-seen-test-seed0-u{users}.json"
+    return SCHEDULES / f"arc1-{test}-test-seed0.json"
 
 
 def stream_users(run: Path) -> int:
@@ -319,7 +319,7 @@ def main() -> None:
     s.add_argument("--run", help="the run whose end-of-stream state the test starts from")
     s.add_argument("--row", help="a reference played from nothing instead (h0, h0c1 or bare), into --out")
     s.add_argument("--test", choices=TESTS, required=True)
-    s.add_argument("--schedule", help="the test's schedule (default this package's, arc1-small at seed 0)")
+    s.add_argument("--schedule", help="the test's schedule (default this package's, arc1 at seed 0)")
     s.add_argument("--base-url", dest="base_url", help="a trained run's: the server its model is served on")
     s.add_argument("--served", help="a trained run's: the name the server serves the adapter under")
     s.add_argument("--adapter", help="a trained run's: the adapter's own folder, for the served-adapter check")

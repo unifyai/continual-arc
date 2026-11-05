@@ -45,7 +45,7 @@ command line; [how a run works](how-a-run-works.md) says how they fit together.
 | `gpupool` | The trainer GPUs real-time runs on one node share: an even split among the runs with a phase to train, agreed through one state file under an flock. |
 | `stack` | The kernels Qwen3.5's linear-attention layers train through on a machine, written to a run's `train/kernels.json`, and a stop before training on a stack known to compute wrong gradients. Command line: this machine's stack. |
 | `scratch` | Training once at the end: a DAgger run's phase K trained again from the base model, and the summary comparing both adapters' held-out loss and frozen tests. Command line: `train`, `summary` (`scratch.sh`). |
-| `schedules/` | The two frozen tests' schedules for `arc1-small` at seed 0, the benchmark's own. |
+| `schedules/` | The two frozen tests' schedules for `arc1` at seed 0, the benchmark's own. |
 
 ## The scripts (`scripts/`)
 

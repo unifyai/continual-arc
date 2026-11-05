@@ -24,7 +24,7 @@ The run directory is one benchmark run (``records.jsonl``, ``schedule.json``, ``
 round's games are kept under ``rounds/rNNNN/captured/`` (:func:`round_dir`): every user plays every round under the same
 user id, and a round trains on its own games alone.
 
-The schedule (:func:`full_schedule`) is ``arc1-small`` served to its users, workstreams order, seed 0: the stream's 200
+The schedule (:func:`full_schedule`) is ``arc1`` served to its users, workstreams order, seed 0: the stream's 200
 rounds, then the epilogue's 100, in which every user meets the 100 held-out tasks once each. The held-out test's
 instances are user 0's of the epilogue, so a row that keeps nothing between instances plays the held-out instances by
 playing the epilogue alone (:func:`epilogue_cut`), dealt wider than its users to a round (:func:`wide_epilogue_cut`).
@@ -42,9 +42,9 @@ from typing import Any
 
 MODEL = "Qwen/Qwen3.5-9B"
 TEMPLATE_KWARGS = {"enable_thinking": True}   # the model card's thinking mode, at every call
-STREAM_CONFIG = "arc1-small"
+STREAM_CONFIG = "arc1"
 SEED = 0   # workstreams, seed 0: the schedule every row plays
-# The users the whole schedule is built for when none is given: 16, as many as can each bring arc1-small's number of
+# The users the whole schedule is built for when none is given: 16, as many as can each bring arc1's number of
 # tasks of their own from the 400 (continual_arc.configs.user_tasks). Users 0..N-1 of any larger number are exactly N
 # users' own, round by round (:func:`served`), so a run at 1, 2 or 4 users plays the first users of this schedule.
 SCHEDULE_USERS = 16
@@ -93,7 +93,7 @@ def rules_page(name: str) -> str:
 # -- schedules --------------------------------------------------------------------------------------------------
 
 def served(users: int = SCHEDULE_USERS) -> Any:
-    """``arc1-small`` served to ``users`` people at once, each over tasks of their own. User u's tasks and stream
+    """``arc1`` served to ``users`` people at once, each over tasks of their own. User u's tasks and stream
     depend only on the seed and u, so the first N users of any larger number are exactly N users' own."""
     from continual_arc.configs import with_users
     return with_users(STREAM_CONFIG, users)

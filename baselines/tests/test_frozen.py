@@ -664,7 +664,7 @@ def test_a_test_is_played_from_the_runs_own_launch_every_user_from_the_streams_m
     run, system, log = stream_run
     server = FakeUpstream().start()
     argv = ["run", "--learner", "tests.test_frozen:Remembering", "--learner-kwargs", '{"model": "vendor/row-model"}',
-            "--llm-defaults", '{"reasoning_effort": "low"}', "--config", "arc1-small", "--out", str(run),
+            "--llm-defaults", '{"reasoning_effort": "low"}', "--config", "arc1", "--out", str(run),
             "--upstream", server.base_url, "--upstream-key-env", "NO_SUCH_KEY", "--registry",
             "tests.test_frozen:registry", "--quiet"]
     (run / "launches.jsonl").write_text(json.dumps({"argv": argv}) + "\n")
@@ -704,7 +704,7 @@ def test_a_stateless_runs_test_users_are_wiped_before_their_instance_and_play_it
     run, _, _ = stream_run
     server = FakeUpstream().start()
     argv = ["run", "--learner", "tests.test_frozen:Stateless", "--learner-kwargs", '{"stateless": true}', "--config",
-            "arc1-small", "--out", str(run), "--upstream", server.base_url, "--upstream-key-env", "NO_SUCH_KEY",
+            "arc1", "--out", str(run), "--upstream", server.base_url, "--upstream-key-env", "NO_SUCH_KEY",
             "--registry", "tests.test_frozen:registry", "--quiet"]
     (run / "launches.jsonl").write_text(json.dumps({"argv": argv}) + "\n")
     ids = SOURCE.task_ids()

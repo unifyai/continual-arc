@@ -30,9 +30,9 @@ def test_a_cut_is_a_literal_prefix_of_the_whole_schedule():
 def test_the_schedule_is_arc1_small_served_to_that_many_users():
     from continual_arc.configs import CANONICAL_USERS
 
-    assert play.served().users == 16 and play.served().name == "arc1-small"
+    assert play.served().users == 16 and play.served().name == "arc1"
     eight = play.served(8)
-    assert eight.users == 8 and eight.name == "arc1-small" and 8 in CANONICAL_USERS["arc1"]
+    assert eight.users == 8 and eight.name == "arc1" and 8 in CANONICAL_USERS["arc1"]
 
 
 def test_a_smaller_user_count_gives_exactly_a_larger_ones_first_users_round_by_round():

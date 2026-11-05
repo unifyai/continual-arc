@@ -9,7 +9,7 @@
 # few calls in flight, so a call's own decode speed sets the pace of play), the trainer TRAIN_GPUS. Runs can share a
 # node: the same SERVE_GPUS, so one server and one relay serve them all, and the same TRAIN_GPUS, which their trainers
 # then share as one pool, each phase on an even share of the runs with a phase to train, or TRAIN_GPUS of their own;
-# lists that overlap but differ are refused. USERS serves arc1-small to that many users (the benchmark's canonical
+# lists that overlap but differ are refused. USERS serves arc1 to that many users (the benchmark's canonical
 # numbers are 1, 2, 4, 8 and 16), ROUNDS rounds of it: the stream's 200 by default, after which frozen.sh plays the
 # run's two frozen tests. The schedule goes on with the epilogue's 100 rounds, which a run given ROUNDS=300 plays and
 # trains on as the stream, and which no measure reads.

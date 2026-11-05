@@ -281,8 +281,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("schedule", help="build or inspect schedules")
     ssub = s.add_subparsers(dest="schedule_cmd", required=True)
     sm = ssub.add_parser("make", help="build a schedule from a named config")
-    sm.add_argument("--config", required=True, help="<track>-<size>: arc1-{smoke,small,medium,full}, "
-                                                    "arc2-{smoke,small}, arc3-{smoke,small}")
+    sm.add_argument("--config", required=True, help="a track's configuration, arc1, arc2 or arc3, or its smoke "
+                                                    "configuration for tests, arc1-smoke, arc2-smoke or arc3-smoke")
     sm.add_argument("--order", help="unset for the benchmark's stream; sequential or random serve its visits in another "
                                     "order, only for the check that the order does not change a finding (the paper's "
                                     "Appendix I), and fresh the held-out tasks alone, the learner wiped before each")
@@ -332,7 +332,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pc = sub.add_parser("precompute", help="solve and cache an ARC-AGI-3 configuration's every instance and "
                                            "demonstration ahead of a run, so that the run never waits on a solver")
-    pc.add_argument("--config", help="arc3-smoke or arc3-small: its stream and both frozen tests at --seed")
+    pc.add_argument("--config", help="arc3 or arc3-smoke: its stream and both frozen tests at --seed")
     pc.add_argument("--seed", type=int, default=0)
     pc.add_argument("--users", type=int, default=1, help="the users the configuration is served to (with_users)")
     pc.add_argument("--schedule", action="append", help="a schedule file to precompute instead of --config; repeat")

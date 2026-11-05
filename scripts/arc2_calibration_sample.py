@@ -3,7 +3,7 @@
     uv run continual-arc data fetch --datasets arc2
     uv run python scripts/arc2_calibration_sample.py [--instances 4] [--demos 3] [--seed 0] [--out FILE]
 
-An item is one fresh instance of one of the stream tasks of ``arc2-small`` at ``--seed`` with ``--demos``
+An item is one fresh instance of one of the stream tasks of ``arc2`` at ``--seed`` with ``--demos``
 demonstrations, drawn as the held-out season's calibration drew its items: the instance at seed
 ``derive_seed("calibrate", seed, k)``, which no stream slot draws, and its demonstrations as the source serves the
 instance's first request of that many pairs, so that a model meets the task as the demo-cache floor first does. Each
@@ -23,7 +23,7 @@ from continual_arc.data import ARC2_COMMIT, ARCGEN_COMMIT
 from continual_arc.seeds import derive_seed
 from continual_arc.tasks import ArcGenSource
 
-CONFIG = "arc2-small"
+CONFIG = "arc2"
 
 
 def items(instances: int, demos: int, seed: int) -> list[dict]:

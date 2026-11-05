@@ -414,7 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--learner", required=True, help="import path, e.g. continual_arc_baselines.systems.prime_agent:PrimeAgentLearner")
     r.add_argument("--learner-kwargs", help="JSON object of constructor kwargs")
     r.add_argument("--schedule", help="schedule JSON from `continual-arc schedule make`")
-    r.add_argument("--config", help="named config to build a schedule from: <track>-<size>, e.g. arc1-small, arc1-medium, arc2-small, arc3-small (no default track)")
+    r.add_argument("--config", help="named config to build a schedule from: a track's configuration, arc1, arc2 or arc3, "
+                                    "or its smoke configuration for tests, such as arc1-smoke (no default track)")
     r.add_argument("--order", default="workstreams",
                    help="workstreams, the benchmark's stream; sequential or random serve its visits in another order, "
                         "only for the check that the order does not change a finding (the paper's Appendix I), and "

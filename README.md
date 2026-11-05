@@ -96,7 +96,7 @@ demonstrations it bought. The budget used is `100 * mean_cost / max_cost`, with
 
 After the stream the learner plays two tests, each built by `configs.test_schedule`:
 
-| test | instances on `arc1-small` | what it reads |
+| test | instances on `arc1` | what it reads |
 |---|---|---|
 | `held-out` | one instance of each of the configuration's 100 held-out ARC-AGI-1 evaluation tasks, which the stream never serves | generalization: whether the stream made the learner better at tasks it never met |
 | `seen` | four fresh instances of each of the stream's 25 tasks, at instance seeds no stream draws; after a stream of several users, the same 100 spread over every user's own tasks, and one of each task once they bring more than 100 ([regimes](#regimes)) | memorization: what the learner kept of the rules it met |
@@ -130,9 +130,9 @@ bare model on the same instances, and a reset that plays below it is flagged bes
 remains open, are in [docs/DESIGN.md](docs/DESIGN.md#why-the-two-tests-shares-are-the-headline).
 
 ```bash
-continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --out stream.json
-continual-arc schedule make --config arc1-small --seed 0 --test held-out --out held-out.json
-continual-arc schedule make --config arc1-small --seed 0 --test seen --out seen.json
+continual-arc schedule make --config arc1 --seed 0 --no-epilogue --out stream.json
+continual-arc schedule make --config arc1 --seed 0 --test held-out --out held-out.json
+continual-arc schedule make --config arc1 --seed 0 --test seen --out seen.json
 ```
 
 Playing a test from where the stream left the learner is the driver's job, as restoring any saved state is: keep what
@@ -167,8 +167,8 @@ budget used and share solved of each (`--json` prints them all; `--also-run` and
 either side on the same instances, read as their mean on each instance, as the paper reads its rows):
 
 ```bash
-continual-arc schedule make --config arc1-small --seed 0 --test held-out --width 1 --out held-out-1.json
-continual-arc schedule make --config arc1-small --seed 0 --test seen --width 1 --out seen-1.json
+continual-arc schedule make --config arc1 --seed 0 --test held-out --width 1 --out held-out-1.json
+continual-arc schedule make --config arc1 --seed 0 --test seen --width 1 --out seen-1.json
 continual-arc run --learner my_pkg.learners:MyLearner --schedule held-out-1.json --out runs/my-reset-held-out
 continual-arc run --learner my_pkg.learners:MyLearner --schedule seen-1.json --out runs/my-reset-seen
 continual-arc transfer runs/my-stream-held-out runs/my-reset-held-out
@@ -202,7 +202,7 @@ memorization while it is being built, and the seen test what is left of it at th
 read as a secondary measure beside the plane of the two tests.
 
 ```bash
-continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --reset-each --out stream-reset.json
+continual-arc schedule make --config arc1 --seed 0 --no-epilogue --reset-each --out stream-reset.json
 continual-arc run --learner my_pkg.learners:MyLearner --schedule stream-reset.json --out runs/my-stream-reset
 continual-arc learned runs/my-stream runs/my-stream-reset
 ```
@@ -251,13 +251,13 @@ as its pool gives tasks of their own: 16 on ARC-AGI-1, 4 on ARC-AGI-2 and 1 on A
 | regime       | users          | picture                                                                 |
 |--------------|----------------|-------------------------------------------------------------------------|
 | `individual` | 1              | one system walking one person's stream, one instance at a time          |
-| `collective` | 2, 4, 8 or 16  | one system serving a team at once and learning from all of them (`arc1-small` at 16 users: 200 rounds of 16 instances) |
+| `collective` | 2, 4, 8 or 16  | one system serving a team at once and learning from all of them (`arc1` at 16 users: 200 rounds of 16 instances) |
 
 In the collective regime every user brings tasks of their own (Dan, 28 Oct 2026: "one user has
 25 puzzles, two users has 50, and four users have 100"): user `k` plays block `k` of the
 track's nested task order (`configs.task_order`, `configs.user_tasks`), which on ARC-AGI-1 is
-`arc1-small`'s 25 tasks sorted, then the 75 `arc1-medium` adds sorted, then the 300 `arc1-full`
-adds sorted, so that users 0 to 3 bring `arc1-medium`'s 100 and users 0 to 15 all 400. Each user
+`arc1`'s 25 tasks sorted, then 75 more drawn from the rest at the same seed, sorted, then the
+other 300 sorted, so that users 0 to 3 bring 100 tasks and users 0 to 15 all 400. Each user
 walks the individual regime's process over their own tasks with their own draw of it: user 0
 at seed `s` walks exactly the individual stream at seed `s`, and user `u`'s tasks and stream do
 not depend on how many users there are, so a run at fewer users is a run at more cut to its
@@ -299,7 +299,7 @@ under the uncut schedule.
 
 ```bash
 # the first 20 rounds of the stream served to 16 users
-continual-arc schedule make --config arc1-small --users 16 --seed 0 --no-epilogue --rounds 20 --out stream-r20.json
+continual-arc schedule make --config arc1 --users 16 --seed 0 --no-epilogue --rounds 20 --out stream-r20.json
 ```
 
 The frozen tests need none of the stream, only the configuration and seed, so a learner can
@@ -309,33 +309,33 @@ round 20"); `meta.config` is kept, so the label stays readable.
 
 ## The tracks and the canonical number
 
-Continual-ARC has a track for each ARC-AGI edition, and every configuration name carries its track:
+Continual-ARC has a track for each ARC-AGI edition, and each track has one configuration, named as the track is,
+beside a smoke configuration for tests:
 
 | track | configs | stream and seen test | held-out test |
 |---|---|---|---|
-| `arc1` | `arc1-smoke`, `arc1-small`, `arc1-medium`, `arc1-full` | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
-| `arc2` | `arc2-smoke`, `arc2-small` | ARC-GEN generators over the ARC-AGI-2 training tasks new to the second edition that pass the screen, 117 of them ([docs/arc2.md](docs/arc2.md)) | the 114 ARC-AGI-2 evaluation tasks new to the second edition |
-| `arc3` | `arc3-smoke`, `arc3-small` | fresh levels of the first-level rules of 15 of ARC-AGI-3's 25 public games, each game's from a generator and solver of our own ([docs/arc3.md](docs/arc3.md)) | fresh levels of the other 10 games |
+| `arc1` | `arc1`, `arc1-smoke` | Re-ARC generators over the ARC-AGI-1 training tasks | ARC-AGI-1 evaluation tasks |
+| `arc2` | `arc2`, `arc2-smoke` | ARC-GEN generators over the ARC-AGI-2 training tasks new to the second edition that pass the screen, 117 of them ([docs/arc2.md](docs/arc2.md)) | the 114 ARC-AGI-2 evaluation tasks new to the second edition |
+| `arc3` | `arc3`, `arc3-smoke` | fresh levels of the first-level rules of 15 of ARC-AGI-3's 25 public games, each game's from a generator and solver of our own ([docs/arc3.md](docs/arc3.md)) | fresh levels of the other 10 games |
 
-Each track has one canonical protocol: its `small` configuration's stream and then its two
+Each track has one canonical protocol: its configuration's stream and then its two
 frozen tests, at the default environment settings, at each canonical number
 of users. A result is a point on the plane of the two tests' shares saved, with the budget used
 and share solved beside them and the share learned over the stream as a secondary measure. Seeds 0, 1 and 2 are all canonical; the paper reports seed 0, and
 the leaderboard compares runs at seed 0. Every run's `summary.json` and `meta.json` carry a `protocol` block that
 names the track and says whether the run is canonical; any other configuration, order,
-seed or environment setting is an ablation and the report labels it as such. A bare
-size name such as `small` is refused: a configuration names its track.
+seed or environment setting is an ablation and the report labels it as such.
 
 ## Quickstart
 
 ```bash
-uv run continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --out stream.json
-uv run continual-arc schedule make --config arc1-small --seed 0 --test held-out --out held-out.json
-uv run continual-arc schedule make --config arc1-small --seed 0 --test seen --out seen.json
+uv run continual-arc schedule make --config arc1 --seed 0 --no-epilogue --out stream.json
+uv run continual-arc schedule make --config arc1 --seed 0 --test held-out --out held-out.json
+uv run continual-arc schedule make --config arc1 --seed 0 --test seen --out seen.json
 uv run continual-arc schedule show stream.json --head 40
 uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule stream.json --out runs/my-stream
 uv run continual-arc report runs/my-stream --plots
-uv run continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --reset-each --out stream-reset.json
+uv run continual-arc schedule make --config arc1 --seed 0 --no-epilogue --reset-each --out stream-reset.json
 uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule stream-reset.json --out runs/my-stream-reset
 uv run continual-arc learned runs/my-stream runs/my-stream-reset   # share learned over the stream
 # each test played from the end of the stream, and the learner reset on it (the two frozen tests, above)
@@ -371,7 +371,7 @@ whether its state was wiped, or how long the stream is. The name is an alias of 
 task's id (`task-3f2a9c1e`, or a codename with `--alias-style names`), salted per run
 in the run directory's `alias-salt`, because the real id is a lookup key: a learner
 with no model that runs the Re-ARC verifier named by the id, and finds each held-out
-input among the public evaluation pairs, would use none of the `arc1-small` budget. The
+input among the public evaluation pairs, would use none of the `arc1` budget. The
 records keep the real ids. Every learner gets this view, the baselines' own adapters
 and trained rows included; `runner.run` takes the name style as `alias_style`.
 
@@ -479,7 +479,7 @@ is a learning method on a student model and, if it has one, a teacher model, pla
 shares saved. A result on the public stream is taken as reported. It is marked verified once we have rerun its code on the held-out rules,
 which nobody outside unify has seen ([verified results](#verified-results)).
 
-1. Run your learner on the track's canonical protocol at seed 0 (`arc1-small`): its stream with
+1. Run your learner on the track's canonical protocol at seed 0 (`arc1`): its stream with
    `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset: on the same
    stream, wiped before every instance (`schedule make --reset-each`, [the share learned](#the-share-learned)), and
    before each instance of the tests ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start
@@ -527,7 +527,7 @@ which nobody outside unify has seen ([verified results](#verified-results)).
 ### Verified results
 
 We keep a held-out season of new rules: 50 ARC-style rules nobody outside unify has seen, each a generator of fresh
-instances, checked against every public ARC task: 25 streamed over 200 instances, as `arc1-small` streams its 25
+instances, checked against every public ARC task: 25 streamed over 200 instances, as `arc1` streams its 25
 tasks, and 25 held out. To have a learner verified on it:
 
 1. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner's
@@ -579,8 +579,9 @@ runs of the paper's GPT-6 Luna grid, each in the layout above, and the trajector
 reasoning summaries and tool calls, and what each learner kept, file by file. Both are under CC BY 4.0, and any run
 can be replayed instance by instance at [unify.ai/continual-arc/runs](https://unify.ai/continual-arc/runs). They were
 played before the frozen tests, so each stream ends on a learning-on epilogue of 25 held-out tasks, as many as
-`arc1-small` had until 20 October 2026, which no measure reads now. Each run rebuilds slot for slot from its own
-configuration, and every one of their streams is the one `arc1-small` builds today.
+the configuration had until 20 October 2026, which no measure reads now. Each run rebuilds slot for slot from its own
+configuration, and every one of their streams is the one `arc1` builds today. They name it `arc1-small`, as every run
+played before v0.6.0 does, when the benchmark still named its configurations by size.
 
 ## Citation
 

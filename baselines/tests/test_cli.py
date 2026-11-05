@@ -155,7 +155,7 @@ def test_resume_continues_in_the_same_attempt(tmp_path, monkeypatch, capsys):
 
 
 def test_stream_only_plays_the_full_runs_stream_and_stops_before_its_epilogue():
-    """arc1-small's real schedule in each order, over fake task ids (25 stream, 100 held out),
+    """arc1's real schedule in each order, over fake task ids (25 stream, 100 held out),
     so the test needs none of the pinned ARC data, which CI does not fetch."""
     from continual_arc.configs import build_schedule
 
@@ -163,7 +163,7 @@ def test_stream_only_plays_the_full_runs_stream_and_stops_before_its_epilogue():
 
     pool = FakeSource(n_tasks=125).task_ids()
     for order in ("workstreams", "sequential", "random"):
-        full = build_schedule("arc1-small", 0, order=order, rearc_task_ids=pool[:25], eval_task_ids=pool[25:])
+        full = build_schedule("arc1", 0, order=order, rearc_task_ids=pool[:25], eval_task_ids=pool[25:])
         stream = stream_of(full)
         streamed = [s for s in full.slots if s.phase == "stream"]
         assert stream.slots == full.slots[:len(streamed)] and {s.phase for s in stream.slots} == {"stream"}

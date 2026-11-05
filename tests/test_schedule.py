@@ -311,8 +311,8 @@ def test_first_rounds_on_the_individual_regime():
     assert cut.users == 1
 
 
-def test_small_configs_visit_every_task_equally():
-    for cfg in ("arc1-small", "arc2-small"):
+def test_the_tracks_configurations_visit_every_task_equally():
+    for cfg in ("arc1", "arc2"):
         for order in ("workstreams", "random", "sequential"):
             pool = [f"t{i:03d}" for i in range(500)]
             s = build_schedule(cfg, 0, order=order, rearc_task_ids=pool, eval_task_ids=[f"e{i:03d}" for i in range(500)])

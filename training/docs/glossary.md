@@ -13,7 +13,7 @@ the benchmark's README at the repository root.
 | **Game** | One instance played from start to end. |
 | **User** (`u000`, `u001`, ...) | One player slot in a schedule. A user plays one instance a round and keeps its own harness memory from round to round. |
 | **Schedule** | The fixed list of instances a play goes through, round by round. |
-| **Stream** | `arc1-small`'s 200 rounds over its 25 tasks (workstreams order, seed 0), served to 1, 2 or 4 users. |
+| **Stream** | `arc1`'s 200 rounds (workstreams order, seed 0), served to 1, 2 or 4 users, each over 25 tasks of their own. |
 | **Epilogue** | 100 rounds after the stream in the schedule, in which every user meets the 100 held-out tasks once each. No measure reads it; the held-out test's instances are its user 0's. |
 | **Demo** | An example input/output pair for the current task. The learner asks for one with `request_demos`; each costs 1. |
 | **Submit** | The learner sends its answer grid. |

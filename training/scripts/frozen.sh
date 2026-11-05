@@ -109,8 +109,8 @@ py() { (cd "$PRIME_RL" && uv run --no-sync python -m continual_arc_training.froz
     say "serving $SERVED on GPUs ${shares[0]} (:${ports[0]}, ${NAMES[0]}) and ${shares[1]} (:${ports[1]}, ${NAMES[1]})"
     scheds=() wants=() tries=(0 0)
     for t in "${TESTS[@]}"; do
-        sched=$SCHEDULES/arc1-small-$t-test-seed0.json
-        [ "$t" = seen ] && [ "$USERS" != 1 ] && sched=$SCHEDULES/arc1-small-seen-test-seed0-u$USERS.json
+        sched=$SCHEDULES/arc1-$t-test-seed0.json
+        [ "$t" = seen ] && [ "$USERS" != 1 ] && sched=$SCHEDULES/arc1-seen-test-seed0-u$USERS.json
         scheds+=("$sched")
         wants+=("$(python3 -c "import json, sys; print(len(json.load(open(sys.argv[1]))['slots']))" "$sched")")
     done

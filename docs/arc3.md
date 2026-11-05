@@ -33,8 +33,8 @@ the drift mode, which comes later.
 | demonstration | the solver's play of another fresh level of the game, its seed derived from the instance's and the request's index, any layout equal to the instance's skipped; one unit, at most three an instance, at any time while the instance is open, leaving the level being played as it was | as on track 1, one more example of the rule at a price; asking before acting or after a game over, the moments the design named, are both allowed, and allowing it mid-level as well gives a learner nothing a request before acting would not, so the simplest rule is also fair |
 | reproducibility | every solve is bounded by states expanded, never by time, and replayed in a fresh game before it is kept | a level is solved, or not, the same way on every machine |
 | the cache | only solutions are kept on disk, one file a draw, keyed by game, pinned version, a digest of the generator module's source and the draw's seed, with a digest of the layout drawn; levels are drawn again from their seeds | generating is deterministic and under 2 s, solving can take a minute; the layout's digest catches a generator that is not deterministic before a stale solution is served |
-| precompute | `continual-arc precompute --config arc3-small --seed 0` solves a configuration's every instance and its three demonstrations ahead of a run, in processes of its own | a run never waits on a solver |
-| users | one: users bring tasks of their own, and the 15 stream games are `arc3-small`'s one block, so the track is individual alone; a frozen test is still one round of users, every open instance a game of its own | the frozen tests need rounds of users; a second user would need 15 more games |
+| precompute | `continual-arc precompute --config arc3 --seed 0` solves a configuration's every instance and its three demonstrations ahead of a run, in processes of its own | a run never waits on a solver |
+| users | one: users bring tasks of their own, and the 15 stream games are `arc3`'s one block, so the track is individual alone; a frozen test is still one round of users, every open instance a game of its own | the frozen tests need rounds of users; a second user would need 15 more games |
 
 ## The protocol
 
@@ -68,9 +68,9 @@ again, free, when the game returns.
 | configuration | stream | seen test | held-out test |
 |---|---|---|---|
 | `arc3-smoke` | 2 stream games, 2 instances each | 4 fresh instances of each | 1 held-out game, 2 instances |
-| `arc3-small` | every stream game, 8 fresh instances each, in the workstreams order | 4 fresh instances of each stream game | 4 fresh instances of each held-out game |
+| `arc3` | every stream game, 8 fresh instances each, in the workstreams order | 4 fresh instances of each stream game | 4 fresh instances of each held-out game |
 
-`arc3-small`'s stream is scaled from `arc1-small`'s to its length (three games active at once, bursts of three,
+`arc3`'s stream is scaled from `arc1`'s to its length (three games active at once, bursts of three,
 dormancy of median 16 steps, a new game every two). The held-out test is the epilogue's instances
 (`BenchmarkConfig.held_out_per_task`, four), and the fresh order wipes the learner before every one of them.
 

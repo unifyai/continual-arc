@@ -99,7 +99,7 @@ uv run arc-baselines run --learner continual_arc.testing:GiveUpLearner --config 
 
 # the stateless floor on the ARC-AGI-1 track at low effort, as the paper ran it
 export OPENROUTER_API_KEY=...
-bash scripts/launch-cell.sh floors luna6-low workstreams 0 arc1-small
+bash scripts/launch-cell.sh floors luna6-low workstreams 0 arc1
 ```
 
 A run directory (`--out`) holds `records.jsonl` (one line per instance), `summary.json`, `schedule.json`,
@@ -146,12 +146,12 @@ export OPENROUTER_API_KEY=...
 LEARNER=continual_arc_baselines.systems.openclaw:OpenClawLearner
 SETTINGS='{"model": "openai/gpt-6-luna", "end": "finish"}'
 EFFORT='{"reasoning_effort": "medium"}'
-uv run continual-arc schedule make --config arc1-small --seed 0 --test held-out --width 1 --out arc1-held-out0-1.json
-uv run continual-arc schedule make --config arc1-small --seed 0 --test seen --width 1 --out arc1-seen0-1.json
+uv run continual-arc schedule make --config arc1 --seed 0 --test held-out --width 1 --out arc1-held-out0-1.json
+uv run continual-arc schedule make --config arc1 --seed 0 --test seen --width 1 --out arc1-seen0-1.json
 
 # the stream alone, then each test from the state it left
 uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
-  --config arc1-small --seed 0 --no-epilogue --out runs/arc1/openclaw-ws0
+  --config arc1 --seed 0 --no-epilogue --out runs/arc1/openclaw-ws0
 uv run arc-baselines test runs/arc1/openclaw-ws0 --schedule arc1-held-out0-1.json   # runs/arc1/openclaw-ws0/frozen/held-out/play
 uv run arc-baselines test runs/arc1/openclaw-ws0 --schedule arc1-seen0-1.json       # runs/arc1/openclaw-ws0/frozen/seen/play
 
@@ -161,7 +161,7 @@ uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-d
 uv run continual-arc transfer runs/arc1/openclaw-ws0/frozen/held-out/play runs/arc1/openclaw-reset-held-out
 
 # the share learned over the stream: the same stream, the harness wiped before every instance
-uv run continual-arc schedule make --config arc1-small --seed 0 --no-epilogue --reset-each \
+uv run continual-arc schedule make --config arc1 --seed 0 --no-epilogue --reset-each \
   --out arc1-ws0-reset.json
 uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
   --schedule arc1-ws0-reset.json --out runs/arc1/openclaw-ws0-reset
@@ -195,7 +195,7 @@ folder renamed to the user's (in text files, links and SQLite databases); the us
 the run's. A run with no stream starts every user from nothing, in `RUN/frozen/<the test>-reference/play`.
 
 ```bash
-uv run continual-arc schedule make --config arc1-small --seed 0 --test held-out --out arc1-held-out0.json
+uv run continual-arc schedule make --config arc1 --seed 0 --test held-out --out arc1-held-out0.json
 uv run arc-baselines test runs/arc1/openclaw-ws0-logged --schedule arc1-held-out0.json --collective
 ```
 
@@ -209,7 +209,7 @@ user's state this way, in `users/uNNN/system/`.
 ```bash
 # the stream alone, its state committed at the end of every round
 uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
-  --config arc1-small --seed 0 --stream-only --log-state --out runs/arc1/openclaw-ws0-logged
+  --config arc1 --seed 0 --stream-only --log-state --out runs/arc1/openclaw-ws0-logged
 
 # taken up again from the end of round 99, with the state its learner had then: prints the command that plays on
 uv run arc-baselines fork runs/arc1/openclaw-ws0-logged --round 99 --out runs/arc1/openclaw-ws0-from-99

@@ -59,7 +59,7 @@ prime-agent.
 
 ## The trained rows: a fixed one-round lag
 
-`realtime.sh` runs DAgger, OPSD or PG (`ROW`) on `arc1-small` served to `USERS` users (1, 2 or 4 of the benchmark's
+`realtime.sh` runs DAgger, OPSD or PG (`ROW`) on `arc1` served to `USERS` users (1, 2 or 4 of the benchmark's
 canonical 1, 2, 4, 8 and 16): the stream's 200 rounds (`ROUNDS`), then the two frozen tests. Round r is always played
 by the model trained on rounds 0..r-1-LAG (`LAG=1`; `LAG=0` is the strict, synchronous protocol): play waits for that
 model when training is behind, and training never waits for play, so the hardware decides how long a run takes but
@@ -152,7 +152,7 @@ instance of each of the 100 held-out tasks (ARC-AGI-1 evaluation tasks the strea
 four new instances of each of the stream's 25 tasks at one user. At several users each user brings tasks of their own
 (user k block k of the benchmark's nested task order, `configs.user_tasks`), and the seen test covers all of them: two
 new instances of each of 50 tasks at two users, one of each of 100 at four, one of every task at eight and sixteen.
-The benchmark defines both (`configs.test_schedule`); those for `arc1-small` at seed 0 are in
+The benchmark defines both (`configs.test_schedule`); those for `arc1` at seed 0 are in
 `src/continual_arc_training/schedules/`, the seen test's one for each number of users, and `frozen.sh` plays a run's
 own. Each is one round, every instance a user of its own starting from the end-of-stream state, so nothing one test
 instance does reaches another and nothing is learnt.

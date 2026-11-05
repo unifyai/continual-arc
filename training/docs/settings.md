@@ -7,7 +7,7 @@ variable of the script that starts the run, or a constant of the module named. T
 
 | Setting | Value | Where | Why |
 | --- | --- | --- | --- |
-| Stream | `arc1-small`, workstreams order, seed 0 | `play.STREAM_CONFIG`, `play.SEED` | The benchmark's canonical stream for the trained rows. |
+| Stream | `arc1`, workstreams order, seed 0 | `play.STREAM_CONFIG`, `play.SEED` | The benchmark's canonical stream for the trained rows. |
 | Users | 1, 2 or 4 | `realtime.sh` `USERS` | Users 0..N-1 of any larger number are exactly N users' own streams (`play.served`), so runs at 1, 2 and 4 users and one reference play over users 0-3 share every user's instances. |
 | Rounds | 200 | `ROUNDS` | The stream itself; the schedule's epilogue that follows is played only by a run given more rounds, and no measure reads it. |
 | Lag | 1 | `LAG` | Round r plays on the model trained on rounds 0..r-1-LAG, so the hardware decides how long a run takes but never which model plays a round, while play and training overlap. `LAG=0` is the strict synchronous protocol. |

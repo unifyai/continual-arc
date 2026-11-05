@@ -16,11 +16,11 @@ need to get the static variant working. For each of the 3 tracks.").
 | decision | choice | why |
 |---|---|---|
 | stream tasks | the ARC-AGI-2 public training tasks new to the second edition whose ARC-GEN generator passes the screen below: 117 of the 172 ARC-GEN covers (`continual_arc/arcgen_screen.json`, `arcgen.pool()`) | 767 of the 1,000 training tasks are ARC-AGI-1 tasks (391 of its training tasks, 376 of its evaluation tasks), and a stream drawn from all of them was an ARC-AGI-1 stream, solved at first sight by a model at 18 percent on the ARC-AGI-2 leaderboard (23 Sep 2026); of the 233 new ones ARC-GEN covers 172, and none of the evaluation tasks |
-| held-out test | the ARC-AGI-2 public evaluation tasks new to the second edition, 114 of 120, served with their own pairs (`FixedArcSource` over `arc2` as `arc2_eval`); `arc2-small` holds out 100 of them, drawn as the first track draws its 100 | as the first track serves the ARC-AGI-1 evaluation tasks: tasks no generator covers, whose own pairs are the only instances there are |
+| held-out test | the ARC-AGI-2 public evaluation tasks new to the second edition, 114 of 120, served with their own pairs (`FixedArcSource` over `arc2` as `arc2_eval`); `arc2` holds out 100 of them, drawn as the first track draws its 100 | as the first track serves the ARC-AGI-1 evaluation tasks: tasks no generator covers, whose own pairs are the only instances there are |
 | instances and demonstrations | every test input and every demonstration of the stream and the seen test drawn fresh from the task's ARC-GEN generator, seeded by the slot (`ArcGenSource`); a demonstration never shares its input with the test or another demonstration | the first track's rule, with ARC-GEN in Re-ARC's place |
-| configurations | `arc2-smoke` and `arc2-small`, the first track's smoke and small shapes: `arc2-small` 25 stream tasks of 8 instances each, 200 instances, the same workstreams parameters, 100 held-out tasks; the same charges and caps | one protocol on every grid track, so a learner runs on either unchanged and its numbers read the same way |
-| canonical protocol | `arc2-small`'s stream, then its two frozen tests, seeds 0 to 2, 1, 2 or 4 users (`canonical_protocol("arc2")`) | as the first track's; the tracks are read apart, never pooled |
-| users | each brings 25 tasks of their own: the screened pool's 117 hold four blocks, `arc2-small`'s 25 and then three draws of 25 from what is left (`configs.task_order`) | as on the first track, where users bring tasks of their own; the pool sets how many |
+| configurations | `arc2` and `arc2-smoke`, the first track's shapes: `arc2` 25 stream tasks of 8 instances each, 200 instances, the same workstreams parameters, 100 held-out tasks; the same charges and caps | one protocol on every grid track, so a learner runs on either unchanged and its numbers read the same way |
+| canonical protocol | `arc2`'s stream, then its two frozen tests, seeds 0 to 2, 1, 2 or 4 users (`canonical_protocol("arc2")`) | as the first track's; the tracks are read apart, never pooled |
+| users | each brings 25 tasks of their own: the screened pool's 117 hold four blocks, `arc2`'s 25 and then three draws of 25 from what is left (`configs.task_order`) | as on the first track, where users bring tasks of their own; the pool sets how many |
 | data | `continual-arc data fetch --datasets arc2` clones ARC-AGI-2, ARC-GEN (pinned at `a15cbdb`, 18 Apr 2026) and ARC-AGI, whose ids tell which ARC-AGI-2 tasks are new | nothing vendored, as for the first track |
 
 ARC-GEN is under the Apache License 2.0, which allows the use, modification and redistribution of the code and of
@@ -96,16 +96,15 @@ screened at ARC-GEN `a15cbdb` and ARC-AGI-2 `f3283f7`, and 117 passed, the pool.
 | all of them: the pool | 117 |
 
 Each failing generator's reasons, and every generator's readings, are in the record. The pool is far more than
-`arc2-small`'s 25 stream tasks and `arc2-smoke`'s 8 need, so a larger configuration can be added on the same pool,
-nested as the first track's are.
+`arc2`'s 25 stream tasks and `arc2-smoke`'s 8 need, and its 117 tasks give four users 25 each.
 
 ## Running it
 
 ```bash
 uv run continual-arc data fetch --datasets arc2
-uv run continual-arc schedule make --config arc2-small --seed 0 --no-epilogue --out arc2-stream.json
-uv run continual-arc schedule make --config arc2-small --seed 0 --test held-out --out arc2-held-out.json
-uv run continual-arc schedule make --config arc2-small --seed 0 --test seen --out arc2-seen.json
+uv run continual-arc schedule make --config arc2 --seed 0 --no-epilogue --out arc2-stream.json
+uv run continual-arc schedule make --config arc2 --seed 0 --test held-out --out arc2-held-out.json
+uv run continual-arc schedule make --config arc2 --seed 0 --test seen --out arc2-seen.json
 uv run python scripts/screen_arcgen.py              # the screen again, about twenty minutes on six cores
 uv run python scripts/arc2_calibration_sample.py   # four instances of each stream task, three demonstrations each
 ```

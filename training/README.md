@@ -1,7 +1,7 @@
 # Continual-ARC: training
 
 This package trains Continual-ARC's trained rows and plays the rows they are read against. A small open model,
-**Qwen3.5-9B**, plays the `arc1-small` stream in the prime-agent harness under the benchmark's rules, while a LoRA
+**Qwen3.5-9B**, plays the `arc1` stream in the prime-agent harness under the benchmark's rules, while a LoRA
 adapter is trained between rounds on what it played. Three updates are built:
 
 - **DAgger**: imitate a stronger model's reply (the oracle's) at every state the student met.
