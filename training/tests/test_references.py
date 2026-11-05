@@ -1,8 +1,7 @@
 """The reference rows (continual_arc_training.references) off any network: each player's request settings, and that a
 reference row plays under exactly the harness settings play.play_round gives the trained rows (only the model and its
-serving differ), row hpl under row h's with the baselines' program library added, row hg under row h's with every
-user's turn after the verdict GLM's, rows ha and hpl0 as the ablations, and the bare-model rows as the floors and
-program library."""
+serving differ), row hpl under row h's with the baselines' program library added, rows ha and hpl0 as the ablations,
+and the bare-model rows as the floors and program library."""
 from __future__ import annotations
 
 import json
@@ -15,8 +14,7 @@ from continual_arc_training import references as reference
 
 ONE_USER = SimpleNamespace(users=1)
 # the row of play.play_round whose harness settings each reference row adds to: a trained row's (memory kept) or h0's
-PAPER_ROW = {"h": "dagger", "h0": "h0", "hpl": "dagger", "hg": "dagger", "ha": "dagger", "hpl0": "h0", "hplg": "dagger",
-             "hgpl": "dagger"}
+PAPER_ROW = {"h": "dagger", "h0": "h0", "hpl": "dagger", "ha": "dagger", "hpl0": "h0"}
 
 
 def test_players_play_at_the_trained_rows_settings():
@@ -91,74 +89,6 @@ def test_rows_ha_and_hpl0_are_the_ablations(tmp_path, monkeypatch):
     assert asked.ask_to_store and not asked.stateless and not asked.program_library
     assert wiped.program_library and wiped.stateless and not wiped.ask_to_store
     assert json.loads((tmp_path / "hpl0" / "driver.json").read_text())["stateless"]
-
-
-@pytest.mark.parametrize("row,library,told", [("hg", False, False), ("hplg", True, True), ("hgpl", False, True)])
-def test_rows_hg_hplg_and_hgpl_hand_every_users_turn_after_the_verdict_to_glm(tmp_path, monkeypatch, row, library,
-                                                                               told):
-    handed = []
-    monkeypatch.setattr(reference, "hand_storage",
-                        lambda user, storer, told=False: handed.append((user.index, storer, told)))
-    harness, learner = _played(monkeypatch, reference.play_round, "qwen", row, tmp_path / row, SimpleNamespace(users=2),
-                               api_key="k")
-    glm = reference.overrides_of("glm")
-    assert handed == [(0, glm, told), (1, glm, told)] and learner["body_overrides"] == reference.overrides_of("qwen")
-    assert bool(harness.get("program_library")) == library
-    driver = json.loads((tmp_path / row / "driver.json").read_text())
-    assert driver["player"] == "qwen" and driver["storer"] == {"player": "glm", "overrides": glm, "told": told}
-    handed.clear()
-    _played(monkeypatch, reference.play_round, "qwen", "h", tmp_path / "h", SimpleNamespace(users=2), api_key="k")
-    assert not handed and "storer" not in json.loads((tmp_path / "h" / "driver.json").read_text())
-
-
-def test_the_turn_after_the_verdict_is_the_storers_and_the_next_play_the_players(tmp_path, monkeypatch):
-    """A real row-hg harness: its close of an instance runs the finish protocol's turn with the storer's request fields
-    on its proxy, and the player's are back after it, a failed turn included."""
-    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
-    harness, _ = _played(monkeypatch, reference.play_round, "qwen", "hg", tmp_path / "hg", ONE_USER, api_key="k")
-    system = PrimeAgentLearner(**harness)
-    player, glm = reference.overrides_of("qwen"), reference.overrides_of("glm")
-    proxy = SimpleNamespace(body_overrides=player)
-    during = []
-
-    def finish(obs, pending):
-        during.append(proxy.body_overrides)
-        if len(during) == 2:
-            raise RuntimeError("the harness died in the turn")
-
-    system._finish_instance = finish
-    reference.hand_storage(SimpleNamespace(system=system, proxy=proxy), glm)
-    system._started = True
-    system._close_instance(SimpleNamespace())
-    assert during == [glm] and proxy.body_overrides is player
-    with pytest.raises(RuntimeError):
-        system._close_instance(SimpleNamespace())
-    assert during == [glm, glm] and proxy.body_overrides is player
-
-
-@pytest.mark.parametrize("row", ["hg", "hgpl", "hplg"])
-def test_a_told_storer_reads_the_teachers_page_in_place_of_the_players_ask(tmp_path, monkeypatch, row):
-    """Real harnesses of rows hg, hgpl and hplg: the turn after the verdict carries the teacher's page for the task to
-    the storers of hgpl and hplg, in place of the ask hplg's player, given the guidance, would have there; row hg's
-    carries the verdict alone; the player's settings are back once the turn is over."""
-    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
-    told = row in reference.TOLD_STORERS
-    harness, _ = _played(monkeypatch, reference.play_round, "qwen", row, tmp_path / row, ONE_USER, api_key="k")
-    system = PrimeAgentLearner(**harness)
-    library = system.program_library
-    assert library == (row == "hplg")
-    proxy = SimpleNamespace(body_overrides=reference.overrides_of("qwen"))
-    seen = []
-    system._finish_instance = lambda obs, pending: seen.append((proxy.body_overrides, pending, system.program_library))
-    reference.hand_storage(SimpleNamespace(system=system, proxy=proxy), reference.overrides_of("glm"), told=told)
-    system._started = True
-    system.transcript.add_text("The verdict.")
-    system._close_instance(SimpleNamespace(task_id="task-1"))
-    ((overrides, pending, during),) = seen
-    assert overrides == reference.overrides_of("glm") and pending[0] == "The verdict."
-    assert pending == (["The verdict.", "", system.teacher_lesson("task-1")] if told else ["The verdict."])
-    assert during == (library and not told) and system.program_library == library
-    assert proxy.body_overrides == reference.overrides_of("qwen")
 
 
 def _bare_played(monkeypatch, player, row, run_dir, schedule):

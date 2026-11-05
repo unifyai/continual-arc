@@ -5,8 +5,7 @@
 # its own:
 #   play  both tests, one after the other, each up to three times, with the row's own player, into ROW/frozen/TEST/play;
 #         a wiped row or a floor at one user (h0, hpl0, m0, f) both again from an empty state, into TEST-reference, the
-#         second, independent play whose spread from the first is the noise of playing a test twice; GLM's row h at 1, 2
-#         and 4 users again with Qwen playing from GLM's memory, into TEST-qwen
+#         second, independent play whose spread from the first is the noise of playing a test twice
 #   then  ROW/frozen/summary.json, the test users' copies of the memory deleted (every call, turn and game of the tests
 #         stays), and ROW/frozen/done
 # A row whose tests fail two passes in a row is left for a person, said so in the log. Resumable: a play whose round is
@@ -49,7 +48,6 @@ print(d['player'], d['row'], json.load(open(sys.argv[2]))['users'])" "$P/$row/pl
     for t in held-out seen; do
         plays+=("$t|$t|--player $player")
         case $kind:$users in h0:1 | hpl0:1 | m0:1 | f:1) plays+=("$t|$t-reference|--player $player --reference") ;; esac
-        case $row in glm-h-u[124]) plays+=("$t|$t-qwen|--player qwen") ;; esac
     done
     for spec in "${plays[@]}"; do
         IFS='|' read -r t name options <<< "$spec"

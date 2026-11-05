@@ -741,25 +741,6 @@ PROGRAM_LIBRARY_ASK = (
     '{{"action": "finish"}}.'
 )
 
-# The teacher's page, for the rows whose teacher keeps the student's notes and is given expert guidance (H-T-E, H-E-T-E):
-# the same method written for a teacher, who must leave what it keeps where the student is shown it when each instance
-# starts, since a student never told of the folder never opens it, and who may keep anything else it judges will
-# help, so that the guidance only adds to what the teacher would keep unguided (H-T).
-TEACHER_LIBRARY_LESSON = (
-    "You are keeping the notes of a student who will meet this task again and plays every move itself.{note} Keep for "
-    "the task, in the folder {programs}: {pairs}, every demonstration pair received in the game above, added to those "
-    "kept, as a list of {{\"input\": grid, \"output\": grid}}; and {program}, a program defining transform(grid), which "
-    "takes an input grid as a list of lists of integers and returns the output grid, and reproduces every kept pair: the "
-    "student's if it does, otherwise one you write and check on the pairs. Then keep one memory for the task that lasts "
-    "between instances, named {task}, which the student is shown when each instance starts, saying where the two files "
-    "are, whether the program reproduces every kept pair, and what to do with them: load the pairs, which count as "
-    "demonstration pairs it has and cost nothing; run the program on every one; if it reproduces them all, run it on the "
-    "test input and submit the result before anything else; otherwise request demonstrations as needed, and fix the "
-    "program until it reproduces every pair, kept and new, before submitting its output. Write the two files and the "
-    "memory in one Python call if you can. Add anything else you judge will help the student. Then reply with "
-    '{{"action": "finish"}}.'
-)
-
 BUDGET_NOTICE = (
     "Your previous turn was stopped because it exceeded the time or model-call budget for a "
     "single action. Decide now from what you already know, without further exploration."

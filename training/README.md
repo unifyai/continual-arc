@@ -23,7 +23,8 @@ The same package plays the reference rows on the open models, the two frozen tes
 | `realtime.sh` | A trained row on one 8-GPU node: the player, the labeller and the trainer side by side, round r played by the adapter trained on rounds 0..r-2 | DAgger at 1, 2 and 4 users, the stream's 200 rounds, and the OPSD and PG runs the paper does not report |
 | `frozen.sh` | A trained run's two frozen tests on its own node once its stream has ended | The trained rows' held-out and seen tests |
 | `refs.sh` | The untrained student on the trained rows' stack, from nothing, on both tests | Rows H0 and F on Qwen3.5-9B, the trained rows' references, and H0 told c1, the page alone |
-| `reference.sh` | A reference row with its model served by OpenRouter, no GPU | Rows h, h0, hpl, hg, ha, hpl0, hplg and hgpl (the paper's H, H0, H-E, H-T, H-A, H-E0, H-E-T-E and H-T-E) and the bare-model rows dc, f, m and m0, on GLM-5.3 Flash and Qwen3.5-9B |
+| `reference.sh` | A reference row with its model served by OpenRouter, no GPU | Rows h, h0, hpl, ha and hpl0 (the paper's H, H0, H-E, H-A and H-E0) and the bare-model rows dc, f, m and m0, on GLM-5.3 Flash and Qwen3.5-9B |
+| `teacher-rows.sh` | A teacher's row: Qwen3.5-9B playing the stream and both tests from GLM-5.3 Flash's own harness, each instance from its state before that instance, no GPU | Rows hg, hgpl and hplg (the paper's H-T, H-T-E and H-E-T-E) |
 | `ref-tests.sh` | Each reference row's two frozen tests from its end-of-stream memory | The reference rows' held-out and seen tests |
 | `scratch.sh` | At a DAgger run's end: its last phase's weights alone on both tests, then that phase trained once more from the base model and tested | DAgger's training once at the end |
 | `paper.sh` | A frozen row round by round on the node's own vLLM | Rows H0 and F over the held-out instances alone; smoke tests of a node |

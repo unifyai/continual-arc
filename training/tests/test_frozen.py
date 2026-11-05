@@ -236,9 +236,9 @@ def test_a_trained_run_plays_on_its_server_and_a_reference_row_through_its_own_p
     assert played[0][0] == "checked" and played[1][0][0] == "pg" and played[1][1] == {
         "base_url": "http://127.0.0.1:8120/v1", "served_name": "pg-u2-lag1-p0002"}
     assert played[1][0][2].users == 100 and played[1][0][2].meta["test"] == "held-out"   # the package's schedule
-    (run / "play" / "driver.json").write_text(json.dumps({"row": "hg", "player": "qwen"}))
+    (run / "play" / "driver.json").write_text(json.dumps({"row": "ha", "player": "qwen"}))
     played = _play_with(monkeypatch, "--run", str(run), "--player", "qwen")
-    assert [args[:2] for args, _ in played] == [("qwen", "hg")] and played[0][1] == {"api_key": "a key"}
+    assert [args[:2] for args, _ in played] == [("qwen", "ha")] and played[0][1] == {"api_key": "a key"}
     (run / "play" / "driver.json").write_text(json.dumps({"row": "m", "player": "glm"}))
     played = _play_with(monkeypatch, "--run", str(run), "--player", "glm")
     assert [args[:2] for args, _ in played] == [("glm", "m")] and played[0][1] == {"api_key": "a key"}

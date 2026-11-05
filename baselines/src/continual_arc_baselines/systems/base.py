@@ -550,12 +550,6 @@ class SystemLearner(BaseLearner):
         return protocol.PROGRAM_LIBRARY_ASK.format(note=f" {self.storage_note}" if self.storage_note else "",
                                                    **self.library_files(task_id))
 
-    def teacher_lesson(self, task_id: str) -> str:
-        """The teacher's page for ``task_id`` (protocol.TEACHER_LIBRARY_LESSON), for a teacher keeping this harness's
-        notes."""
-        return protocol.TEACHER_LIBRARY_LESSON.format(note=f" {self.storage_note}" if self.storage_note else "",
-                                                      programs=self.programs_dir(), **self.library_files(task_id))
-
     def programs_dir(self) -> str:
         """Row HPL's program library: a folder of the harness's workspace (every harness adapter has one, kept between
         instances except in a stateless row), named by its absolute path so that no harness has to guess its cwd."""

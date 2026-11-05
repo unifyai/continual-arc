@@ -121,15 +121,15 @@ def test_paper_sh_plays_the_epilogue_alone_wide_into_a_folder_of_its_own_and_ref
 def test_reference_sh_plays_a_row_from_the_baselines_environment_with_its_key(node):
     home, scripts, tools, env = node
     _stub(tools, "uv", 'echo "$(pwd) $*" >> "$HOME/driver"')
-    assert _run(scripts, env, "reference.sh", PLAYER="glm", ROW="hg", USERS="2").returncode == 0
+    assert _run(scripts, env, "reference.sh", PLAYER="glm", ROW="ha", USERS="2").returncode == 0
     assert _run(scripts, env, "reference.sh", PLAYER="qwen", ROW="dc", MAX_TOKENS="128000").returncode == 0
     base = home / "baselines"
     assert (home / "driver").read_text().splitlines() == [
-        f"{base} run --no-sync --env-file .env python -m continual_arc_training.references play --player glm --row hg "
-        f"--run-dir {home}/runs/paper/glm-hg-u2/play --users 2 --rounds 200",
+        f"{base} run --no-sync --env-file .env python -m continual_arc_training.references play --player glm --row ha "
+        f"--run-dir {home}/runs/paper/glm-ha-u2/play --users 2 --rounds 200",
         f"{base} run --no-sync --env-file .env python -m continual_arc_training.references bare --player qwen --row dc "
         f"--run-dir {home}/runs/paper/qwen-dc-u1/play --users 1 --rounds 200 --max-tokens 128000"]
-    assert (home / "runs" / "paper" / "glm-hg-u2" / "play.done").exists()
+    assert (home / "runs" / "paper" / "glm-ha-u2" / "play.done").exists()
 
 
 def _ref_tests(scripts, env, then):
@@ -155,13 +155,13 @@ case $* in *" summary "*) exit 0 ;; esac
 while [ $# -gt 0 ]; do case $1 in --run) run=$2 ;; --name) name=$2 ;; esac; shift; done
 mkdir -p "$run/frozen/$name/play/users/u000/system/state"; echo "{}" > "$run/frozen/$name/play/records.jsonl"''')
     for name, player, row, users in (("glm-h-u1", "glm", "h", 1), ("qwen-h0-u1", "qwen", "h0", 1),
-                                     ("qwen-hg-u2", "qwen", "hg", 2)):
+                                     ("qwen-ha-u2", "qwen", "ha", 2)):
         _reference_row(home, name, player, row, users)
     (home / "runs" / "paper" / "qwen-h-u1.old" / "play").mkdir(parents=True)   # set aside: no row
     paper = home / "runs" / "paper"
     listed = _ref_tests(scripts, env, "finished")
-    assert sorted(listed.stdout.split()) == ["glm-h-u1", "qwen-h0-u1", "qwen-hg-u2"]
-    for row in ("glm-h-u1", "qwen-h0-u1", "qwen-hg-u2"):
+    assert sorted(listed.stdout.split()) == ["glm-h-u1", "qwen-h0-u1", "qwen-ha-u2"]
+    for row in ("glm-h-u1", "qwen-h0-u1", "qwen-ha-u2"):
         assert _ref_tests(scripts, env, f"take {row}").returncode == 0
         assert (paper / row / "frozen" / "done").exists()
         assert not list((paper / row / "frozen").glob("*/play/users/*/system/state"))
@@ -170,11 +170,10 @@ mkdir -p "$run/frozen/$name/play/users/u000/system/state"; echo "{}" > "$run/fro
     def names(row):
         return [line.split("--name ")[1] for line in plays if f"--run {paper}/{row} " in line]
 
-    assert names("glm-h-u1") == ["held-out --player glm", "held-out-qwen --player qwen", "seen --player glm",
-                                 "seen-qwen --player qwen"]
+    assert names("glm-h-u1") == ["held-out --player glm", "seen --player glm"]
     assert names("qwen-h0-u1") == ["held-out --player qwen", "held-out-reference --player qwen --reference",
                                    "seen --player qwen", "seen-reference --player qwen --reference"]
-    assert names("qwen-hg-u2") == ["held-out --player qwen", "seen --player qwen"]
+    assert names("qwen-ha-u2") == ["held-out --player qwen", "seen --player qwen"]
     assert sum(" summary --run " in line for line in (home / "frozen").read_text().splitlines()) == 3
     assert _ref_tests(scripts, env, "finished").stdout.split() == []   # every row's tests done
 

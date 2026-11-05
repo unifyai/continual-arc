@@ -295,9 +295,11 @@ def _committed(system: Path, round_: int) -> str:
     return commits[round_]
 
 
-def forked_from(run_dir: Path) -> str | None:
-    """The commit of a kept state that a play forked from one began from, which is one round numbered 0 (a frozen test),
-    as the play's ``frozen.json`` names it (the baselines' ``continual_arc_baselines.frozen.seed``). None for a game that
+def forked_from(run_dir: Path, user: int) -> str | None:
+    """The commit of a kept state that user ``user``'s game in a play forked from one began from, which is one round
+    numbered 0 (a frozen test, or a part of a teacher's row, whose users fork commits of their own), as the play's
+    ``frozen.json`` names it (the baselines' ``continual_arc_baselines.frozen.seed``,
+    :func:`continual_arc_training.teacher_rows.seed`). None for a game that
     began from nothing: a stream's first round, which has no ``frozen.json``, and a play that names no commit. A test of
     a run that kept no commits (``frozen.copy_states``) is refused, since no history holds the copy its games began
     from."""
@@ -305,7 +307,7 @@ def forked_from(run_dir: Path) -> str | None:
     if not path.is_file():
         return None
     played = json.loads(path.read_text())
-    origin = played.get("from")
+    origin = played["from_users"][user] if "from_users" in played else played.get("from")
     if origin is None:
         if "relocated" in played:
             raise ValueError(f"{path}: its users began from copies of a state no history holds")
@@ -325,7 +327,7 @@ def kept_at_start(run_dir: Path, user: int, round_: int, path: str, stateless: b
     if stateless:
         return None
     system = start_system(run_dir, user)
-    commit = _committed(system, round_ - 1) if round_ else forked_from(run_dir)
+    commit = _committed(system, round_ - 1) if round_ else forked_from(run_dir, user)
     if commit is None:
         return None
     repo = f"--git-dir={history or system / 'state.git'}"

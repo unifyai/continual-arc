@@ -12,7 +12,7 @@
 #   stop: this script's process group (kill -- -<its pid>)
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-PLAYER=${PLAYER:?set PLAYER: glm or qwen}; ROW=${ROW:?set ROW: h, h0, hpl, hg, ha, hpl0, hplg, hgpl, dc, f, m or m0}
+PLAYER=${PLAYER:?set PLAYER: glm or qwen}; ROW=${ROW:?set ROW: h, h0, hpl, ha, hpl0, dc, f, m or m0}
 USERS=${USERS:-1}; ROUNDS=${ROUNDS:-200}
 MAX_RESTARTS=${MAX_RESTARTS:-20}
 L=$RUNS/paper/$PLAYER-$ROW-u$USERS

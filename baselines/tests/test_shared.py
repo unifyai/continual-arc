@@ -348,6 +348,9 @@ def test_a_frozen_tests_users_are_never_merged(tmp_path):
                       slots=[Slot(task, 500 + u, "stream", user=u) for u, task in enumerate(ids)])
     assert CollectiveHarnessLearner(Viewing, tmp_path / "test", schedule=test, upstream="http://unused").shared is None
     assert CollectiveHarnessLearner(Viewing, tmp_path / "run", schedule=stream, upstream="http://unused").shared
+    # a schedule that says its users are forks of their own, as a teacher's row's parts of the stream are
+    forked = Schedule(name="part", seed=0, users=3, sources=stream.sources, slots=stream.slots, meta={"forked": True})
+    assert CollectiveHarnessLearner(Viewing, tmp_path / "part", schedule=forked, upstream="http://unused").shared is None
 
 
 def test_a_round_cut_short_while_it_played_is_undone_and_the_one_state_put_back_as_it_began(tmp_path):

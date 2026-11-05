@@ -457,16 +457,16 @@ def test_forked_from_names_the_commit_a_play_began_from(tmp_path):
     def write(doc: dict) -> None:
         (play / "frozen.json").write_text(json.dumps(doc))
 
-    assert memory.forked_from(play) is None                                           # a stream has no frozen.json
+    assert memory.forked_from(play, 0) is None                                           # a stream has no frozen.json
     write({"from": {"round": 199, "system": "/s", "commit": "c0", "relocated": 1, "databases": 0}})   # a frozen test
-    assert memory.forked_from(play) == "c0"
+    assert memory.forked_from(play, 0) == "c0"
     write({"from": None})                                                             # a test of a run with no stream
-    assert memory.forked_from(play) is None
+    assert memory.forked_from(play, 0) is None
     write({"memory": "none: played from an empty state"})                             # a reference play
-    assert memory.forked_from(play) is None
+    assert memory.forked_from(play, 0) is None
     write({"memory": "every test user a copy of the run's one state, relocated", "relocated": {"files": 1}})
     with pytest.raises(ValueError, match="no history holds"):                         # a test of a run with no commits
-        memory.forked_from(play)
+        memory.forked_from(play, 0)
 
 
 def _forked_play(run_dir: Path) -> None:
@@ -717,3 +717,11 @@ def test_a_body_whose_messages_is_not_a_list_is_read_without_raising():
     assert memory.answered(odd) == ""
     assert memory.read_areas(odd, MARKS) == {"skills"}
     assert memory.read_areas({"request": {"prompt": "x"}, "response": None}, MARKS) == set()
+
+
+def test_a_play_whose_users_forked_commits_of_their_own_names_each_users(tmp_path):
+    play = tmp_path / "play"
+    play.mkdir()
+    (play / "frozen.json").write_text(json.dumps({"from_users": [{"user": 0, "round": None, "commit": None},
+                                                                 {"user": 1, "round": 4, "commit": "c4"}]}))
+    assert memory.forked_from(play, 0) is None and memory.forked_from(play, 1) == "c4"

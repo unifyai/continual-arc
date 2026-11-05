@@ -179,11 +179,6 @@ def test_expert_guidance_states_the_whole_procedure_and_asks_for_the_pairs_the_p
     assert f"keep the task's memory, named {label}," in ask
     assert ask.endswith('reply with {"action": "finish"}.')
     assert s.stats["library_asks"] == 1 and s.stats["store_asks"] == 0 and s.describe()["program_library"] is True
-    teacher = s.teacher_lesson(label)
-    assert teacher.startswith("You are keeping the notes of a student who will meet this task again")
-    assert f"programs/{label}.json, every demonstration pair received in the game above" in teacher
-    assert f"named {label}, which the student is shown when each instance starts" in teacher
-    assert "Add anything else you judge will help the student." in teacher and "{" not in teacher.replace('{"', "")
     told = Scripted([CORRECT, FINISH], end="finish", program_library=True, rules_page="THE PLAYING RULES")
     play(told, tmp_path / "told")
     assert told.sent[0].index("THE PLAYING RULES") < told.sent[0].index("How to work, in every instance")

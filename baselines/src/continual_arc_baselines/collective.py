@@ -11,7 +11,8 @@ the one state as the round began, each harness writes a copy of its own while it
 into the one state, user by user, once the round is over: the benchmark's contract, that the state changes only
 between rounds, holds by construction. A run of one user keeps its user's state in place, as it always has. A frozen
 test's round is played from forks of the stream's end that nothing after it reads, so its users' writes are kept apart,
-each in its fork's own history, and never merged (:mod:`continual_arc_baselines.frozen`).
+each in its fork's own history, and never merged (:mod:`continual_arc_baselines.frozen`), as are the users of any
+schedule whose ``meta["forked"]`` says it plays such forks.
 
 Each user's harness talks to a tracking proxy of its own (:class:`LLMProxy`), so the usage the
 runner charges to an instance is that user's (:meth:`CollectiveHarnessLearner.user_resources`), and
@@ -393,10 +394,11 @@ class CollectiveHarnessLearner(BaseLearner):
         # left running (a compaction, a housekeeping call) can take minutes, and one it abandoned ends when the
         # proxy next writes to it, or when the upstream finishes
         self.calls_wait_s = calls_wait_s
-        # the one state of a team (the module's docstring); a frozen test's users are forks of the stream's end, whose
-        # writes no round reads
+        # the one state of a team (the module's docstring); a frozen test's users are forks of the stream's end, and a
+        # forked schedule's forks of their own, whose writes no round reads
         self.shared = (SharedState(lambda user: self.user_dir(user) / "system", schedule.users)
-                       if schedule.users > 1 and schedule.meta.get("test") not in TESTS else None)
+                       if schedule.users > 1 and schedule.meta.get("test") not in TESTS
+                       and not schedule.meta.get("forked") else None)
         if self.shared is not None and any((self.user_dir(user) / "system" / "state-log.jsonl").is_file()
                                            for user in range(1, schedule.users)):
             raise SystemExit(f"{run_dir}'s users kept stores of their own, as collective runs did before every learner "
