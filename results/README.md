@@ -1,6 +1,6 @@
 # Results
 
-Runs submitted to the [Continual-ARC leaderboard](https://unify.ai/continual-arc/leaderboard), one directory each:
+Runs submitted to the [Continual-ARC leaderboard](https://continualarc.org/leaderboard), one directory each:
 `<track>/<name>/` holds a run directory the benchmark's runner wrote (`records.jsonl`, `summary.json`,
 `schedule.json`, `config.json`, `meta.json`): a learner's stream, with a `submission.json` that names the learning
 method, the model that plays it (`student`) and any model that teaches it (`teacher`), the learner reset on the same
