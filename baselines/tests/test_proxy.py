@@ -1,4 +1,8 @@
 import json
+import re
+import subprocess
+import sys
+import threading
 import time
 from decimal import Decimal
 from pathlib import Path
@@ -8,7 +12,7 @@ import pytest
 
 from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.costs import CostJournal
-from continual_arc_baselines.proxy import PLACEHOLDER_KEY, LLMProxy
+from continual_arc_baselines.proxy import CONFINED_HOSTS, CONFINED_ROUTING, PLACEHOLDER_KEY, LLMProxy, SpendLedger
 from continual_arc_baselines.tracking import JournalSink, Tracker
 
 from .fake_upstream import FakeUpstream
@@ -646,7 +650,7 @@ def test_a_serve_that_gives_up_once_the_stream_is_open_fails_the_call(upstream, 
     assert tracker.usage.as_resources()["llm_failed_requests"] == 1 and upstream.requests == []
 
 
-# -- a confined proxy: an untrusted learner on its submitter's key ------------------------------------------------------
+# -- a confined proxy: an untrusted learner on a key its submitter paid for ------------------------------------------------------
 
 
 @pytest.fixture
@@ -676,13 +680,125 @@ def test_a_confined_proxy_forwards_the_named_models_alone(confined, upstream):
     assert usage.refused_requests == 3 and usage.failed_requests == 3 and usage.as_resources()["llm_refused_requests"] == 3
 
 
-def test_a_call_that_names_no_effort_is_given_its_models(confined, upstream):
-    assert post(confined, plain()).status_code == 200
-    assert post(confined, plain(reasoning={"effort": "high"})).status_code == 200
+def test_every_call_goes_at_the_effort_its_model_is_named_at_whatever_it_asks(confined, upstream):
+    """A router could name a strong model at a low effort, so that it plays bare at that, and call it at the most."""
+    for extra in ({}, {"reasoning": {"effort": "high"}}, {"reasoning_effort": "max"}, {"reasoning": {"max_tokens": 100_000}}):
+        assert post(confined, plain(**extra)).status_code == 200
     assert post(confined, plain("vendor/other")).status_code == 200
     bodies = [r["body"] for r in upstream.requests]
-    assert bodies[0]["reasoning"] == {"effort": "medium"} and bodies[1]["reasoning"] == {"effort": "high"}
-    assert "reasoning" not in bodies[2]
+    assert all(b["reasoning"] == {"effort": "medium"} and "reasoning_effort" not in b for b in bodies[:4])
+    assert "reasoning" not in bodies[4]
+
+
+@pytest.mark.parametrize("asked,sent", [({}, {"max_tokens": 128_000}), ({"max_tokens": 5}, {"max_tokens": 5}),
+                                        ({"max_tokens": 10**9}, {"max_tokens": 128_000}),
+                                        ({"max_completion_tokens": 10**9}, {"max_completion_tokens": 128_000})])
+def test_a_reply_budget_is_capped(confined, upstream, asked, sent):
+    assert post(confined, plain(**asked)).status_code == 200
+    assert {k: upstream.requests[0]["body"][k] for k in sent} == sent
+
+
+def test_a_reply_budget_that_is_not_a_number_is_refused(confined, upstream):
+    assert post(confined, plain(max_tokens="many")).status_code == 400 and not upstream.requests
+
+
+def test_a_calls_opening_is_salted_anew_with_each_reset(confined, upstream):
+    """A provider's prompt cache answers whoever sends the same opening: the tools, a response format's schema or the
+    first message, whichever it renders first. Within an instance the opening is the same, so the cache works as ever."""
+    def call(content):
+        tool = {"type": "function", "function": {"name": "f", "description": "does f", "parameters": {}}}
+        schema = {"type": "json_schema", "json_schema": {"name": "n", "schema": {}}}
+        body = {"model": "vendor/named", "messages": [{"role": "system", "content": content}], "tools": [tool],
+                "response_format": schema}
+        assert post(confined, body).status_code == 200
+        sent = upstream.requests[-1]["body"]
+        return (sent["messages"][0]["content"], sent["tools"][0]["function"]["description"],
+                sent["response_format"]["json_schema"]["description"])
+
+    first, again = call("the same opening"), call("the same opening")
+    confined.tracker.epoch += 1
+    after = call("the same opening")
+    assert first == again
+    for salted, other in zip(first, after, strict=True):
+        assert re.fullmatch(r"\[[0-9a-f]{64}\]\n.*", salted) and salted != other
+    assert first[0].endswith("the same opening") and first[1].endswith("does f")
+    with LLMProxy(upstream.base_url, api_key="sk-run", tracker=Tracker(), confined_to={"vendor/named": None}) as other:
+        assert other.salt() != confined.salt()  # with a secret of each process's own
+
+
+def test_a_first_message_of_parts_is_salted_in_a_part_of_its_own(confined, upstream):
+    parts = [{"type": "text", "text": "hello", "cache_control": {"type": "ephemeral"}}]
+    assert post(confined, {"model": "vendor/named", "messages": [{"role": "user", "content": parts}]}).status_code == 200
+    sent = upstream.requests[0]["body"]["messages"][0]["content"]
+    assert sent[1:] == parts and sent[0]["text"].startswith("[")
+
+
+def test_the_calls_to_each_model_are_counted_as_the_proxy_sends_them(confined, upstream):
+    for model in ("vendor/named", "vendor/named", "vendor/other", "vendor/unnamed"):
+        post(confined, plain(model))
+    resources = confined.tracker.usage.as_resources()
+    assert resources["llm_calls/vendor/named"] == 2 and resources["llm_calls/vendor/other"] == 1
+    assert "llm_calls/vendor/unnamed" not in resources
+
+
+PRICES = {"vendor/named": {"request": 0.0, "input": 1e-6, "output": 1e-5, "window": 1000}}  # at most about 1.28 dollars a call
+
+
+def budgeted(upstream, tmp_path, cap):
+    return LLMProxy(upstream.base_url, api_key="sk-run", tracker=Tracker(), confined_to={"vendor/named": None}, prices=PRICES,
+                    ledger=SpendLedger(tmp_path / "ledger", cap))
+
+
+def test_a_call_that_could_pass_the_budget_does_not_go_and_the_run_is_over(upstream, tmp_path):
+    upstream.cost, upstream.key_usage = 0.5, 1.0
+    with budgeted(upstream, tmp_path, 2.0) as proxy:
+        assert [post(proxy, plain()).status_code for _ in range(4)] == [200, 200, 402, 402]
+        assert proxy.ledger.over and proxy.ledger.spent == 1.0
+    assert len([r for r in upstream.requests if r["body"]]) == 2
+
+
+def test_the_upstreams_own_figure_replaces_what_a_call_with_no_price_was_held_at(upstream, tmp_path):
+    upstream.cost, upstream.key_usage = 0.5, 0.75
+    with budgeted(upstream, tmp_path, 2.5) as proxy:
+        proxy.ledger.settle(0.0, 1.5)  # a client that went away: the most its call could have cost
+        # 1.5 spent leaves less than a call's 1.28 at most; the upstream's 0.75 leaves room for it
+        assert post(proxy, plain()).status_code == 200
+        assert proxy.ledger.spent == 0.75 + 0.5 and not proxy.ledger.over
+
+
+def test_calls_in_flight_hold_back_what_they_could_cost(tmp_path):
+    ledger = SpendLedger(tmp_path / "ledger", 2.0)
+    assert ledger.hold(1.5)
+    waited = threading.Timer(0.3, lambda: ledger.settle(1.5, 0.25))
+    waited.start()
+    started = time.monotonic()
+    assert ledger.hold(1.5)  # waits for the call in flight, which may free enough, and it does
+    assert time.monotonic() - started >= 0.25
+    waited.join()
+    ledger.settle(1.5, 0.0)
+    assert ledger.spent == 0.25 and not ledger.hold(1.9)  # nothing in flight, and the rest does not cover it
+    ledger.close()
+    assert not ledger.hold(0.01)
+
+
+def test_what_a_process_held_goes_when_the_process_has_gone(tmp_path):
+    """A cell killed with a call in flight never settles it, and its hold must not keep the run's other cells waiting."""
+    script = "import sys\nfrom continual_arc_baselines.proxy import SpendLedger\nassert SpendLedger(sys.argv[1], 2.0).hold(1.5)"
+    subprocess.run([sys.executable, "-c", script, str(tmp_path / "ledger")], check=True)
+    ledger, answers = SpendLedger(tmp_path / "ledger", 2.0), []
+    waiting = threading.Thread(target=lambda: answers.append(ledger.hold(1.9)), daemon=True)
+    waiting.start()
+    waiting.join(10)
+    assert answers == [True]
+
+
+def test_a_key_at_its_limit_ends_the_run(upstream, tmp_path):
+    upstream.status = 403
+    upstream.error = {"error": {"code": 403, "message": "Key limit exceeded", "metadata": {"limit_source": "openrouter_key_limit"}}}
+    with budgeted(upstream, tmp_path, 100.0) as proxy:
+        assert post(proxy, plain()).status_code == 403
+        assert proxy.ledger.over
+        assert post(proxy, plain()).status_code == 402
 
 
 def test_a_confined_proxy_sends_a_plain_chat_completion_and_its_own_routing(confined, upstream):
@@ -695,7 +811,7 @@ def test_a_confined_proxy_sends_a_plain_chat_completion_and_its_own_routing(conf
     assert post(confined, plain(**extra), headers=headers).status_code == 200
     seen = upstream.requests[0]
     assert "leak" not in json.dumps(seen["body"])
-    assert seen["body"]["provider"] == {"zdr": True, "data_collection": "deny"}
+    assert seen["body"]["provider"] == CONFINED_ROUTING and seen["body"]["provider"]["only"] == list(CONFINED_HOSTS)
     assert seen["body"]["temperature"] == 0.5 and seen["body"]["max_tokens"] == 4 and seen["body"]["tools"]
     assert seen["authorization"] == "Bearer sk-run"
     assert "leak" not in json.dumps(seen.get("headers", {}))
@@ -717,7 +833,7 @@ def test_a_confined_proxy_refuses_what_a_provider_would_fetch(confined, upstream
 def test_a_confined_proxy_carries_text_and_an_image_in_the_request_itself(confined, upstream):
     content = [{"type": "text", "text": "hello"}, {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}}]
     assert post(confined, {"model": "vendor/named", "messages": [{"role": "user", "content": content}]}).status_code == 200
-    assert upstream.requests[0]["body"]["messages"][0]["content"] == content
+    assert upstream.requests[0]["body"]["messages"][0]["content"][1:] == content
 
 
 @pytest.mark.parametrize("tools", [
@@ -773,15 +889,6 @@ def test_a_body_past_the_bound_is_refused_unread(confined, upstream):
     response = httpx.post(confined.base_url + "/chat/completions", content=b"x" * (MAX_BODY + 1), timeout=60,
                           headers={"Content-Type": "application/json"})
     assert response.status_code == 413 and not upstream.requests
-
-
-def test_a_call_through_the_keys_own_provider_account_stops_those_after_it(confined, upstream):
-    """OpenRouter says so on every reply (is_byok): the submitter's own provider account would show the prompts."""
-    upstream.byok = True
-    assert post(confined, plain()).status_code == 200
-    response = post(confined, plain())
-    assert response.status_code == 403 and "own provider account" in response.json()["error"]["message"]
-    assert len(upstream.requests) == 1 and confined.tracker.usage.byok_requests == 1
 
 
 def test_a_confined_proxy_paces_what_it_answers(confined, monkeypatch):

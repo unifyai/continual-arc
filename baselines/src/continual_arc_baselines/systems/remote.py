@@ -11,6 +11,14 @@ line from the arena is untrusted and bounded (:class:`~continual_arc_baselines.s
 When the run ends, what the learner printed and what it kept come back as bytes capped in size, never unpacked here:
 ``learner.log`` and ``kept.tar``, which stay private with the run's records.
 
+Between two instances of a frozen test the arena reboots. Putting a learner's files back and ending its processes leaves the
+kernel as the instance left it: its counters of processes forked and of pipes and sockets made, which any later process can
+read and an earlier one can set, its page cache, its free memory. So before each instance :meth:`RemoteLearner.reset` ends the
+connection, reboots the machine, takes what the learner printed off it, since a file that grows is a number the next instance
+could read in the disk's free space, and only then connects again, to a host that starts from a copy of the stream's files.
+What outlasts a reboot is the disk, and everything of the learner's on it has been put back. An instance of a frozen test on
+an arena therefore has nothing of the last but the clock: it can end later, and the next can read the time.
+
 Run on the arena::
 
     python -m continual_arc_baselines.systems.remote check
@@ -29,39 +37,48 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
-from continual_arc_baselines.systems.hosted import HostedLearner, HostedLearnerError, ServedLearner
+from continual_arc_baselines.frozen import delete
+from continual_arc_baselines.systems.hosted import TMP_PREFIX, HostedLearner, HostedLearnerError, ServedLearner
 from continual_arc_baselines.systems.sandbox import confinement_problems, proxy_port
 
 ARENA_ROOT = "/home/arena/run"
 ARENA_PYTHON = "/home/arena/baselines/bin/python"
 ARENA_UV_PATH = "/home/arena/.local/bin:/usr/bin:/bin"
 LOG_CAP = 2**30
+TEST_LOG_CAP = 2**23  # of what the learner prints in one instance of a frozen test
 KEPT_CAP = 2 * 2**30  # a harness's state is a few hundred megabytes (frozen.py), and a truncated tar reads up to its cut
 FETCH_TIMEOUT_S = 3600
+REBOOT = "/usr/sbin/reboot"
+REBOOT_TIMEOUT_S = 600
+MAX_INSTALLED = 2000
+INSTALLED_NAME = re.compile(r"([A-Za-z0-9][A-Za-z0-9._-]{0,99})-([A-Za-z0-9][A-Za-z0-9.!+_-]{0,59})\.dist-info")
 # Every option that lets the far side of an ssh connection act on this one is off, and no configuration file is read.
-SSH_OPTIONS = ("-F", "/dev/null", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=60",
+SSH_OPTIONS = ("-F", "/dev/null", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
                "-o", "StrictHostKeyChecking=accept-new", "-o", "ForwardAgent=no", "-o", "ForwardX11=no",
                "-o", "PermitLocalCommand=no", "-o", "UpdateHostKeys=no", "-o", "ServerAliveInterval=30",
                "-o", "ServerAliveCountMax=20", "-o", "ExitOnForwardFailure=yes", "-o", "LogLevel=ERROR")
 
 
 def ssh_command(arena: str, key: str | Path, known_hosts: str | Path, command: str,
-                forward: tuple[int, int] | None = None, max_bytes: int = LOG_CAP) -> list[str]:
+                forward: tuple[int, int] | None = None, max_bytes: int = LOG_CAP, connect_s: int = 60) -> list[str]:
     """ssh to ``arena`` to run ``command``; ``forward`` opens the arena's loopback port ``forward[0]`` onto this machine's
     loopback port ``forward[1]``. A file ssh writes, its output or its errors, stops at ``max_bytes`` however much the far
     side sends, since the far side is not to be trusted (where ``prlimit`` is, as on any Linux)."""
     tunnel = ["-R", f"127.0.0.1:{forward[0]}:127.0.0.1:{forward[1]}"] if forward else []
     limit = ["prlimit", f"--fsize={max_bytes}"] if shutil.which("prlimit") else []
-    return [*limit, "ssh", *SSH_OPTIONS, "-i", str(key), "-o", f"UserKnownHostsFile={known_hosts}", *tunnel, arena, command]
+    return [*limit, "ssh", *SSH_OPTIONS, "-o", f"ConnectTimeout={connect_s}", "-i", str(key),
+            "-o", f"UserKnownHostsFile={known_hosts}", *tunnel, arena, command]
 
 
 def _clean_env() -> dict[str, str]:
@@ -83,40 +100,83 @@ class RemoteLearner(ServedLearner):
         self.python, self.learner, self.code, self.runtime = python, learner, code, runtime
         self.arena_workdir, self.arena_python = arena_workdir, arena_python
         self.inner_timeouts = (timeout_s, startup_timeout_s, close_timeout_s)
+        self.base_url: str | None = None
+        self.frozen = False  # a frozen test has begun: every reset reboots the arena (this module's docstring)
 
     def attach(self, workdir: Path, environ: dict[str, str], tracker: Any = None) -> None:
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.tracker = tracker
-        base_url = environ.get("ARC_LLM_BASE_URL") or environ.get("OPENAI_BASE_URL")
-        port = proxy_port(base_url)
+        self.base_url = environ.get("ARC_LLM_BASE_URL") or environ.get("OPENAI_BASE_URL")
         self._log = (self.workdir / "connection.log").open("a")
-        options = ["--python", self.python, "--learner", self.learner, "--workdir", self.arena_workdir,
-                   "--base-url", base_url, "--timeouts", ",".join(f"{t:g}" for t in self.inner_timeouts),
-                   *(["--code", self.code] if self.code else []), *(x for p in self.runtime or () for x in ("--runtime", p))]
-        command = shlex.join([self.arena_python, "-m", "continual_arc_baselines.systems.remote", "serve", *options])
         try:
-            self._serve_from(ssh_command(self.arena, self.key, self.known_hosts, command, forward=(port, port)), env=_clean_env())
+            self._connect()
         except BaseException:
             self.close()
             raise
+
+    def _connect(self) -> None:
+        port = proxy_port(self.base_url)
+        options = ["--python", self.python, "--learner", self.learner, "--workdir", self.arena_workdir,
+                   "--base-url", self.base_url, "--timeouts", ",".join(f"{t:g}" for t in self.inner_timeouts),
+                   *(["--frozen"] if self.frozen else []),
+                   *(["--code", self.code] if self.code else []), *(x for p in self.runtime or () for x in ("--runtime", p))]
+        command = shlex.join([self.arena_python, "-m", "continual_arc_baselines.systems.remote", "serve", *options])
+        self._serve_from(ssh_command(self.arena, self.key, self.known_hosts, command, forward=(port, port)), env=_clean_env())
         self._note(f"on {self.arena}: {self.hello.get('learner')} (python {self.hello.get('python')}, continual_arc "
                    f"{self.hello.get('continual_arc')})")
 
     def freeze(self) -> None:
         self._call("freeze")
+        self.frozen = True
 
     def reset(self) -> None:
-        self._call("reset")
+        if not self.frozen:
+            self._call("reset")
+            return
+        self._kill()
+        self._reboot()
+        where = shlex.quote(f"{self.arena_workdir}/learner.log")
+        self._fetch(f"cat {where}", self.workdir / "learner.log", TEST_LOG_CAP, then=f"rm -f {where}")
+        self._connect()
+        if self._round is not None:
+            # the runner begins a round before it resets for the round's instance, so the new learner joins it here
+            self._call("begin_round", n=self._round)
+
+    def _boot(self) -> str | None:
+        """Which boot the arena is on, or None while it does not answer."""
+        try:
+            done = subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, "head -c 64 /proc/sys/kernel/random/boot_id",
+                                              connect_s=5), capture_output=True, text=True, stdin=subprocess.DEVNULL,
+                                  timeout=30, check=False, env=_clean_env())
+        except subprocess.TimeoutExpired:
+            return None
+        return done.stdout.strip() if done.returncode == 0 else None
+
+    def _reboot(self) -> None:
+        before = self._boot()
+        if before is None:
+            raise self._fail(f"the arena {self.arena} does not answer before its reboot")
+        subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, f"sudo -n {REBOOT}", connect_s=5), capture_output=True,
+                       stdin=subprocess.DEVNULL, timeout=60, check=False, env=_clean_env())
+        deadline = time.monotonic() + REBOOT_TIMEOUT_S
+        while time.monotonic() < deadline:
+            now = self._boot()
+            if now is not None and now != before:
+                return
+            time.sleep(1)
+        raise self._fail(f"the arena {self.arena} did not come back from a reboot in {REBOOT_TIMEOUT_S} s")
 
     def describe(self) -> dict[str, Any]:
         return {"system": "remote", "arena": self.arena, "learner": self.learner, "timeout_s": self.timeout_s,
                 "host": dict(self.hello), "hosted": self._call("describe") if self._proc is not None else None}
 
-    def _fetch(self, command: str, to: Path, cap: int) -> None:
-        """What ``command`` prints on the arena, at most ``cap`` bytes of it, into ``to``: bytes, whatever they hold."""
-        with to.open("wb") as out:
-            subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, f"{command} | head -c {cap}", max_bytes=cap),
+    def _fetch(self, command: str, to: Path, cap: int, then: str = "true") -> None:
+        """What ``command`` prints on the arena, at most ``cap`` bytes of it, on the end of ``to``, which stops at twice its
+        own cap whatever the arena sends: bytes, whatever they hold. ``then`` runs there after it."""
+        with to.open("ab") as out:
+            subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, f"{command} | head -c {cap}; {then}",
+                                       max_bytes=2 * max(cap, LOG_CAP)),
                            stdout=out, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=FETCH_TIMEOUT_S,
                            check=False, env=_clean_env())
 
@@ -178,9 +238,28 @@ def arena_problems(extra_outside: tuple[tuple[str, int], ...] = ()) -> list[str]
         pass
     if importlib.util.find_spec("continual_arc_private") is not None:
         problems.append("the private package is installed")
+    if subprocess.run(["sudo", "-n", "-l", REBOOT], capture_output=True, check=False).returncode != 0:
+        problems.append("it cannot reboot between the instances of a frozen test")
+    if subprocess.run(["sudo", "-n", "true"], capture_output=True, check=False).returncode == 0:
+        problems.append("its user may run anything as root")
+    ceiling = subprocess.run(["systemctl", "show", "-p", "MemoryMax", "-p", "TasksMax", f"user-{os.getuid()}.slice"],
+                             capture_output=True, text=True, check=False).stdout.split()
+    if sorted(line.partition("=")[0] for line in ceiling) != ["MemoryMax", "TasksMax"] or any(
+            line.endswith("=infinity") for line in ceiling):
+        problems.append("its user has no ceiling on memory and tasks, so a bomb could take the machine")
     with tempfile.TemporaryDirectory() as folder:
         problems += confinement_problems(Path(folder) / "filter")
     return problems
+
+
+def installed(venv: Path) -> list[str]:
+    """``name==version`` of what a virtual environment holds, from the names of its ``.dist-info`` directories alone, kept
+    to plain letters and digits: nothing in them is read, and this is read before any instance has been played, so it holds
+    nothing held out."""
+    found = []
+    for site in sorted(venv.glob("lib/python*/site-packages")):
+        found += [f"{m[1]}=={m[2]}" for m in map(INSTALLED_NAME.fullmatch, sorted(os.listdir(site))[:100_000]) if m]
+    return found[:MAX_INSTALLED]
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -197,8 +276,11 @@ def _serve(args: argparse.Namespace) -> int:
     timeout_s, startup_timeout_s, close_timeout_s = (float(t) for t in args.timeouts.split(","))
     learner = HostedLearner(args.python, args.learner, code=args.code, runtime=args.runtime, timeout_s=timeout_s,
                             startup_timeout_s=startup_timeout_s, close_timeout_s=close_timeout_s)
+    if args.frozen:  # what the last instance's sandbox kept in its temporary directory is space on the disk the next can read
+        for left in Path(tempfile.gettempdir()).glob(TMP_PREFIX + "*"):
+            delete(left)
     try:
-        learner.attach(Path(args.workdir), {"ARC_LLM_BASE_URL": args.base_url})
+        learner.attach(Path(args.workdir), {"ARC_LLM_BASE_URL": args.base_url}, frozen=args.frozen)
     except Exception as error:
         _send(replies, _failure(error))
         return 1
@@ -206,7 +288,7 @@ def _serve(args: argparse.Namespace) -> int:
     try:
         serve(learner, requests, replies)
     finally:
-        learner.close()
+        learner.abandon()  # after a close asked for, a second that does nothing
     return 0
 
 
@@ -223,9 +305,20 @@ def main(argv: list[str] | None = None) -> int:
     served.add_argument("--timeouts", required=True, help="seconds: a call's, the start's and the close's")
     served.add_argument("--code")
     served.add_argument("--runtime", action="append")
+    served.add_argument("--frozen", action="store_true", help="in a frozen test, from a copy of the files its stream left")
+    forget = sub.add_parser("forget", help="delete a cell's folder, whatever its learner did to its permissions")
+    forget.add_argument("--workdir", required=True)
+    listed = sub.add_parser("installed", help="what a virtual environment holds, as JSON")
+    listed.add_argument("--venv", required=True)
     args = parser.parse_args(argv)
     if args.command == "serve":
         return _serve(args)
+    if args.command == "forget":
+        delete(Path(args.workdir))
+        return 0
+    if args.command == "installed":
+        print(json.dumps({"installed": installed(Path(args.venv))}))
+        return 0
     outside = tuple((host, int(port)) for host, _, port in (o.rpartition(":") for o in args.outside))
     print(json.dumps({"problems": arena_problems(outside)}))
     return 0

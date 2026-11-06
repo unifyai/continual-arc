@@ -17,9 +17,7 @@ serves it over JSON lines, one request read and one reply written per call::
 
 Observations are ``LearnerObservation.to_json()``; actions and feedback carry their class name under ``type``
 (``Submit``, ``RequestDemos``, ``GiveUp``; ``SubmitFeedback``, ``DemosFeedback``, ``GiveUpFeedback``) beside their
-fields. Before any request the host writes one line saying the learner was built, and whether it keeps everything it
-learns as files (``state_in_files`` on its class, as a harness adapter on the baselines' ``SystemLearner`` does), which
-lets a frozen test put it back by putting its files back. An exception in the learner comes back as
+fields. Before any request the host writes one line saying the learner was built. An exception in the learner comes back as
 ``{"ok": false, "error": ..., "traceback": ...}``; after one in building it, the host exits.
 
 The channel lives on duplicates of the original stdin and stdout. File descriptor 0 then reads /dev/null and 1 writes
@@ -179,8 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     _send(replies, {"ok": True, "result": {
         "ready": True, "learner": f"{cls.__module__}.{cls.__qualname__}", "python": sys.version.split()[0],
         "continual_arc": continual_arc.__version__,
-        "concurrent_users": bool(getattr(learner, "concurrent_users", False)),
-        "state_in_files": bool(getattr(learner, "state_in_files", False))}})
+        "concurrent_users": bool(getattr(learner, "concurrent_users", False))}})
     serve(learner, requests, replies)
     return 0
 

@@ -199,7 +199,9 @@ def test_a_test_after_the_stream_is_played_by_the_same_learner_from_the_state_it
                  "--quiet", "--out", str(out)])
     assert code == 0
     outcome = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    before = outcome["test"].pop("llm_before")  # the model calls as the stream ended, so that what fell outside both shows
     assert outcome["test"] == {"run_dir": str(out / "frozen" / "seen" / "play"), "test": "seen", "score": 100.0}
+    assert before == outcome["llm"]  # no proxy, so no calls to count before the test or after it
     stream = [json.loads(line) for line in (out / "records.jsonl").read_text().splitlines()]
     assert len(stream) == 12 and {r["phase"] for r in stream} == {"stream"}
     tested = [json.loads(line) for line in (out / "frozen" / "seen" / "play" / "records.jsonl").read_text().splitlines()]

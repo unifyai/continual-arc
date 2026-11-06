@@ -1,19 +1,14 @@
 name: Verify my learner
-description: Have unify rerun your learner on Continual-ARC's held-out rules, on your own OpenRouter key, for a verified result on the leaderboard.
+description: Have unify rerun your learner on Continual-ARC's held-out rules, on a key we make for the run and you pay for ahead, for a verified result on the leaderboard.
 title: "Verify: "
 labels: ["verify"]
 body:
   - type: markdown
     attributes:
       value: |
-        We rerun your learner on the held-out season at a seed of its own: 25 new rules nobody outside unify has seen, streamed over 200 instances, then two frozen tests played from where the stream left your learner: fresh instances of the 25 streamed rules (the seen test) and 25 more rules held out (the held-out test). The share of its reset's spend it saves on each places it on the leaderboard's plane, memorization across and generalization up, read against your learner reset on the same instances, with the budget used and share solved by both beside it and each model you name shown bare too; its share learned is read against your learner reset on the same stream. Your code runs in a sandbox on a machine of its own, which has no public network and holds neither our rules nor your key, and reaches nothing but our tracking proxy, which makes its model calls on your key: chat completions to the models you name here, and nothing else. Your package installs from PyPI and GitHub alone. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
+        We rerun your learner on the held-out season at a seed of its own: 25 new rules nobody outside unify has seen, streamed over 200 instances, then two frozen tests played from where the stream left your learner: fresh instances of the 25 streamed rules (the seen test) and 25 more rules held out (the held-out test). The share of its reset's spend it saves on each places it on the leaderboard's plane, memorization across and generalization up, read against your learner reset on the same instances, with the budget used and share solved by both beside it and each model you name shown bare too; its share learned is read against your learner reset on the same stream. Your code runs in a sandbox on a machine of its own, which has no public network and holds neither our rules nor the run's key, and reaches nothing but our tracking proxy, which makes its model calls on a key we make for the run: chat completions to the models you name here, each at the effort you name, and nothing else. Before each test instance we restart that machine and put your learner's files back as the stream left them, so what it carries from the stream to the tests is what it keeps as files. Your package installs from PyPI and GitHub alone. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
 
-        Your model calls are yours to pay, on your key; we pay for the machine. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner and its floor have cost tens of dollars), on an account with no provider keys of its own (BYOK) for the models you name, and encrypt it with our public key:
-
-        ```
-        curl -sO https://raw.githubusercontent.com/unifyai/continual-arc/main/verify/unify-verify.pem
-        printf %s "$OPENROUTER_KEY" | openssl pkeyutl -encrypt -pubin -inkey unify-verify.pem -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256 | base64
-        ```
+        You pay ahead for your run's model calls, which we make on a key of our own capped at the budget you set here: it pays for your learner, its reset and each model you name played bare. We pay for the machines. Once the issue is checked we post a link to pay by card on Stripe's page: the budget, OpenRouter's 5.5 percent fee on buying that credit, and Stripe's fee on the payment. What the run does not spend goes back to your card, less Stripe's fee. A GPT-6 Luna learner, its reset and its model bare have cost tens of dollars.
   - type: input
     id: name
     attributes:
@@ -70,14 +65,14 @@ body:
     id: teacher_effort
     attributes:
       label: Teacher's reasoning effort
-      description: The teacher's effort, if it has one. Set on any call to it that leaves it unset, and it plays your tests bare at it too.
+      description: The teacher's effort, if it has one. Every call to it goes at this effort, and it plays your tests bare at it too.
       options: [minimal, low, medium, high, xhigh, max]
       default: 2
   - type: dropdown
     id: effort
     attributes:
       label: Reasoning effort
-      description: The effort your learner plays at, which the floor plays at too. Set on any model call that leaves it unset.
+      description: The effort your learner plays at, which the floor plays at too. Every call to the model goes at this effort.
       options: [minimal, low, medium, high, xhigh, max]
       default: 2
     validations:
@@ -86,7 +81,7 @@ body:
     id: other_models
     attributes:
       label: Other models it calls
-      description: Every other OpenRouter model your learner calls, one per line, each with its reasoning effort, such as `z-ai/glm-5.3 low`. Our proxy refuses a call to any model this form does not name, and each one named plays your tests bare.
+      description: Every other OpenRouter model your learner calls, one per line, each with its reasoning effort, such as `z-ai/glm-5.3 low`. Our proxy refuses a call to any model this form does not name, every call goes at the effort named, and each model named plays your tests bare.
   - type: input
     id: public_run
     attributes:
@@ -95,25 +90,28 @@ body:
   - type: input
     id: budget
     attributes:
-      label: Key's credit limit (USD)
+      label: Budget for its model calls (USD)
+      description: Whole US dollars, from 5 to 1,000. It pays for your learner, its reset and each model you name played bare, and the run stops if they spend it.
     validations:
       required: true
-  - type: textarea
-    id: key
+  - type: input
+    id: country
     attributes:
-      label: Encrypted OpenRouter key
-      description: The output of the two commands above. Only the private half of our key can read it.
-      render: text
+      label: Billing country
+      description: The two-letter code of the country you pay from, such as US or GB, which says which of our companies invoices you.
     validations:
       required: true
+  - type: input
+    id: billing_name
+    attributes:
+      label: Name on the invoice
+      description: Optional. Without it, the invoice is made out to your GitHub login. This issue is public.
   - type: checkboxes
     id: confirm
     attributes:
       label: Before you submit
       options:
-        - label: The key was made for this run and is capped at the limit above; I will delete it at OpenRouter once the run ends.
-          required: true
-        - label: "Private Input & Output Logging is off on the key's OpenRouter account, and no Broadcast to an observability tool is on: either would show you our held-out tasks, and a run with one on is void."
+        - label: My learner calls only the models named above, and keeps as files whatever it is to carry from the stream to the tests.
           required: true
         - label: The code is public under an open licence and keeps to the README's "What a learner may use".
           required: true

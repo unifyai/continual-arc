@@ -16,10 +16,10 @@ OpenRouter key. A submitted learner, any adapter or harness it brings included, 
   :func:`start_bridge`; on macOS Seatbelt allows the proxy's loopback port alone), with every base-URL variable
   pointing at the proxy and every key variable a placeholder, so it never holds a key.
 
-A learner that keeps everything it learns as files, as a harness adapter on the baselines' ``SystemLearner`` does,
-plays a frozen test one instance at a time from the end of its stream (:meth:`HostedLearner.freeze`): its files are
-set aside as the stream left them, and before every instance its host is ended and a copy put back, so nothing it
-keeps in its files or its processes reaches the next instance, whatever its code.
+A learner plays a frozen test one instance at a time from the end of its stream (:meth:`HostedLearner.freeze`): its files
+are set aside as the stream left them, and before every instance its host is ended and a copy put back, so nothing it keeps
+in its files or its processes reaches the next instance, whatever its code. So what a learner carries from its stream to a
+test is what it keeps as files in its working directory: it is built again before every test instance.
 
 Installing a submission runs its build code, so :func:`install_submission` (``arc-baselines install-submission``)
 installs it under the sandbox too, with the new virtual environment and a cache of its own writable and the network only
@@ -40,6 +40,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import math
 import os
 import queue
 import shutil
@@ -98,6 +99,7 @@ INHERITED_ENV = ("LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
 BASE_URL_VARIABLES = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENROUTER_BASE_URL", "ARC_LLM_BASE_URL")
 KEY_VARIABLES = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ARC_LLM_API_KEY")
 FEEDBACK_TYPES = (SubmitFeedback, DemosFeedback, GiveUpFeedback)
+TMP_PREFIX = "arc-hl-"
 WRITABLE = ("state", "home")
 """What the learner can write that outlasts its host, under the attempt's system folder: everything a frozen test puts
 back (its temporary directory is new each time the host starts). A frozen learner's own wait in ``HELD`` beside them
@@ -144,13 +146,6 @@ class ServedLearner(BaseLearner):
     def log_path(self) -> Path:
         """The host's stderr: the learner's prints and logs, and any traceback."""
         return self.workdir / "learner.log"
-
-    @property
-    def state_in_files(self) -> bool:
-        """Whether everything the learner keeps between instances is files under its state directory and HOME, so that
-        putting them back puts the learner back: its own word, in the host's hello (``state_in_files`` on its class,
-        as the baselines' ``SystemLearner`` says)."""
-        return bool(self.hello.get("state_in_files"))
 
     def _serve_from(self, argv: list[str], **popen: Any) -> None:
         """Start the far side and wait for its hello."""
@@ -252,11 +247,13 @@ class ServedLearner(BaseLearner):
                    feedback=encode_feedback(feedback))
 
     def resources(self) -> dict[str, float]:
-        """The learner's own counters, then the proxy's, which win: the model calls are measured, not reported."""
+        """The learner's own counters, none under the proxy's names, then the proxy's: the model calls are measured, not
+        reported."""
         reported = self._call("resources")
         if not isinstance(reported, dict):
             raise self._fail(f"resources() returned {reported!r}, not a dict")
-        numbers = [(str(k), float(v)) for k, v in reported.items() if isinstance(v, int | float)]
+        numbers = [(str(k), float(v)) for k, v in reported.items()
+                   if isinstance(v, int | float) and math.isfinite(v) and not str(k).startswith("llm_")]
         out = dict(numbers[:MAX_RESOURCES])
         usage = getattr(self.tracker, "usage", None)
         if usage is not None:
@@ -337,11 +334,12 @@ class HostedLearner(ServedLearner):
 
     # -- the host process ----------------------------------------------------
 
-    def attach(self, workdir: Path, environ: dict[str, str], tracker: Any = None) -> None:
+    def attach(self, workdir: Path, environ: dict[str, str], tracker: Any = None, frozen: bool = False) -> None:
         """Start the host: the learner is imported and built before the run begins, so a submission that cannot
         start fails at once. Of ``environ`` (the proxy's variables) only the proxy's address is used. Files a frozen
         test stopped hard left aside (a run taken up again with ``--resume``) get their place back first, so the
-        learner goes on from the state its stream left."""
+        learner goes on from the state its stream left, unless it is ``frozen``, a host started anew in the middle of a
+        frozen test (:mod:`~continual_arc_baselines.systems.remote`): then it starts from a copy of them."""
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
         self.base_url = environ.get("ARC_LLM_BASE_URL") or environ.get("OPENAI_BASE_URL")
@@ -350,6 +348,9 @@ class HostedLearner(ServedLearner):
         try:
             if (self.workdir / HELD).is_dir():
                 self.frozen = self.workdir / HELD
+                if frozen:
+                    self._start_frozen()
+                    return
                 self._give_back()
                 self._note("its stream's files, which a frozen test stopped hard left aside, have their place back")
             self._start()
@@ -362,7 +363,7 @@ class HostedLearner(ServedLearner):
             raise HostedLearnerError(f"no interpreter at {self.python}: install the submission first "
                                      "(arc-baselines install-submission)")
         self._backend = resolve_backend(self.sandbox)
-        self._tmp_dir = Path(tempfile.mkdtemp(prefix="arc-hl-", dir="/tmp" if os.path.isdir("/tmp") else None))
+        self._tmp_dir = Path(tempfile.mkdtemp(prefix=TMP_PREFIX, dir="/tmp" if os.path.isdir("/tmp") else None))
         for path in (self.state_dir, self.home_dir):
             path.mkdir(parents=True, exist_ok=True)
         host = self.workdir / HOST.name
@@ -409,12 +410,8 @@ class HostedLearner(ServedLearner):
         does the same in place of the learner's own. Under bubblewrap nothing the learner keeps in its files or its
         processes reaches the next instance, whatever its code: everything it could write is put back, and every
         process it started ends with the sandbox's pid namespace. Seatbelt (macOS) also lets it write the user's
-        temporary folders, which are not put back, and a process that leaves the host's session outlives it. A learner
-        that keeps what it learns in its own process cannot be frozen, since a new host would start it from
-        nothing."""
-        if not self.state_in_files:
-            raise HostedLearnerError(f"{self.learner} does not say it keeps what it learns as files "
-                                     "(state_in_files), so no files would put it back as its stream left it")
+        temporary folders, which are not put back, and a process that leaves the host's session outlives it. What a
+        learner keeps only in its own process it loses here, and a new host builds it with what its files hold."""
         self._end_host()
         held = self.workdir / HELD
         held.mkdir()
@@ -460,9 +457,23 @@ class HostedLearner(ServedLearner):
             if self.frozen is not None:
                 self._give_back()
         finally:
-            if self._log is not None:
-                self._log.close()
-                self._log = None
+            self._close_log()
+
+    def abandon(self) -> None:
+        """The connection that served this host has gone. Mid frozen test the arena is about to reboot and the stream's
+        files stay aside for the next instance, so the host is only ended; otherwise this is :meth:`close`."""
+        if self.frozen is None:
+            self.close()
+            return
+        try:
+            self._kill()
+        finally:
+            self._close_log()
+
+    def _close_log(self) -> None:
+        if self._log is not None:
+            self._log.close()
+            self._log = None
 
     def describe(self) -> dict[str, Any]:
         record = record_of(self.venv)

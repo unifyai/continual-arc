@@ -150,11 +150,10 @@ def stream_of(schedule):
 
 def can_freeze(learner) -> bool:
     """Whether ``learner`` can play every instance of a test from the state its stream left: a submission served from
-    another process that keeps everything it learns as files (``HostedLearner.freeze``), such as a harness, which holds
-    one conversation and so could not serve a round of users."""
+    another process (``HostedLearner.freeze``), which is started again from its files before each."""
     from continual_arc_baselines.systems.hosted import ServedLearner
 
-    return isinstance(learner, ServedLearner) and learner.state_in_files
+    return isinstance(learner, ServedLearner)
 
 
 def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, registry, name, alias_style,
@@ -164,9 +163,8 @@ def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, 
     that the learner meets its tasks under the names the stream gave them.
 
     One test a launch: once the test's round has ended the learner may change what it carries from what the test
-    taught it, and a learner whose state lives in its own process (a hosted submission) has no snapshot to put back,
-    so a second test played after the first would start from that state, not from the stream's end. A hosted learner
-    frozen at the stream's end (``HostedLearner.freeze``) plays its test one instance at a time, its files put back
+    taught it, so a second test played after the first would start from that state, not from the stream's end. A hosted
+    learner frozen at the stream's end (``HostedLearner.freeze``) plays its test one instance at a time, its files put back
     before each. A harness adapter plays its tests with ``arc-baselines test`` instead."""
     from continual_arc.aliases import SALT_FILE
     from continual_arc.runner import build_env, run
@@ -221,7 +219,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
 
     from continual_arc_baselines.attempt import Attempt
     from continual_arc_baselines.frozen import give_back, hold_aside, one_at_a_time, settle
-    from continual_arc_baselines.proxy import LLMProxy, own_model
+    from continual_arc_baselines.proxy import LLMProxy, SpendLedger, own_model
     from continual_arc_baselines.systems.base import SystemLearner
     from continual_arc_baselines.tracking import JournalSink, PilotStop, TrackedLearner, Tracker
 
@@ -265,10 +263,12 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         if args.confine_models:
             confined_to = {model: effort or None for model, _, effort in
                            (entry.partition("=") for entry in args.confine_models.split(","))}
+        ledger = SpendLedger(args.spend_ledger, args.spend_cap) if args.spend_ledger else None
         proxy = LLMProxy(args.upstream, api_key=os.environ.get(args.upstream_key_env) or None,
                          declared_context_length=args.declared_context_length or None,
                          tracker=tracker, body_defaults=defaults, body_overrides=overrides,
-                         capture_content=args.capture_content, confined_to=confined_to).start()
+                         capture_content=args.capture_content, confined_to=confined_to, ledger=ledger,
+                         prices=json.loads(args.prices) if args.prices else None).start()
         os.environ.update(proxy.environ())
         proxy_settings = {"enabled": True, "upstream": args.upstream, "provider": args.provider,
                           "body_defaults": defaults, "body_overrides": overrides, "base_url": proxy.base_url,
@@ -329,7 +329,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         attempt.progress(record, n_steps)
         show(record, n_steps)
 
-    test_dir = None
+    test_dir, before_test = None, None
     if test is not None:
         test_dir = Path(args.test_out) if args.test_out else out_dir / "frozen" / test.meta["test"] / "play"
     tested = None
@@ -346,6 +346,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
             env=build_env(schedule, config, registry), resume=args.resume, alias_style=args.alias_style,
         )
         if test is not None:
+            before_test = tracker.usage.as_resources()
             if frozen:
                 learner.freeze()
             # the attempt's metrics are the stream's, step by step; the test's records are its own directory's
@@ -378,7 +379,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         "n_metrics_emitted": len(emitted),
         "llm": tracker.usage.as_resources(),
         **({} if tested is None else {"test": {"run_dir": str(test_dir), "test": test.meta["test"],
-                                               "score": tested.summary["benchmark"]["score"]}}),
+                                               "score": tested.summary["benchmark"]["score"], "llm_before": before_test}}),
     }))
     return 0
 
@@ -451,9 +452,9 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--test", metavar="TEST.json",
                    help="after the schedule's stream (no epilogue), play this frozen test (`continual-arc schedule make "
                         "--test`, one round) with the same learner, from the state the stream left it; a hosted "
-                        "learner that keeps its state as files plays its instances one at a time, its files put back "
-                        "before each (HostedLearner.freeze); one test a launch (play_test). A harness adapter's tests "
-                        "are arc-baselines test's")
+                        "learner plays its instances one at a time, its files put back before each "
+                        "(HostedLearner.freeze); one test a launch (play_test). A harness adapter's tests are "
+                        "arc-baselines test's")
     r.add_argument("--test-out", help="the test's run directory (default: OUT/frozen/<the schedule's test>/play)")
     r.add_argument("--stop-after", type=int, metavar="N",
                    help="stop cleanly once N instances are done, leaving pilot-hold.json in the run directory; a "
@@ -468,8 +469,13 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--llm-defaults", help='JSON of chat-completion fields to set when absent, e.g. {"reasoning_effort": "xhigh"}')
     g.add_argument("--confine-models", help="the learner is untrusted, so the proxy forwards chat completions to these "
                                             "models alone, in the fields and to the routes of proxy.LLMProxy's confined "
-                                            "mode: comma-separated, each MODEL or MODEL=EFFORT, the reasoning effort a "
-                                            "call to it that names none is given")
+                                            "mode: comma-separated, each MODEL or MODEL=EFFORT, the reasoning effort every "
+                                            "call to it is given")
+    g.add_argument("--spend-ledger", help="the file in which a confined run's proxies keep what they have spent and hold "
+                                          "back (proxy.SpendLedger)")
+    g.add_argument("--spend-cap", type=float, help="the US dollars that ledger may reach")
+    g.add_argument("--prices", help="JSON: for each confined model what a call costs at most, its request, input and output "
+                                    "prices in dollars and its window in tokens (LLMProxy.worst_cost)")
     g.add_argument("--declared-context-length", type=int, default=262_144,
                    help="context length the proxy reports on GET /models, the figure every adapter also declares "
                         "in its harness's provider entry (0 passes the provider's figure through)")

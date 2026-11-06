@@ -12,7 +12,7 @@ class FakeUpstream:
                  error: dict | None = None, reasoning: str | None = None, replies: list[str] | None = None,
                  broken: bool = False, window: int | None = None):
         self.reply, self.cost, self.error = reply, cost, error  # error: the JSON body of a non-streamed 4xx or 5xx
-        self.byok = False  # the replies say the call went through the key's own provider account, as OpenRouter's do
+        self.key_usage = 0.0  # what GET /key says the key has spent
         # a vLLM server's max_model_len: a prompt (a token per character of its messages' text) and the reply budget a
         # call asks that together pass it are refused as vLLM refuses them, a 400 before any stream; a call that asks
         # no budget is refused only for a prompt that passes it alone
@@ -46,7 +46,8 @@ class FakeUpstream:
                 # a model list as OpenRouter serves it, with the provider's advertised window
                 upstream.requests.append({"path": self.path, "body": None,
                                           "authorization": self.headers.get("Authorization")})
-                data = json.dumps({"data": [{"id": "vendor/model", "context_length": 1_050_000,
+                data = json.dumps({"data": {"usage": upstream.key_usage}} if self.path.endswith("/key") else
+                                  {"data": [{"id": "vendor/model", "context_length": 1_050_000,
                                              "top_provider": {"context_length": 1_050_000}}]}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -66,7 +67,7 @@ class FakeUpstream:
                 gen = f"gen-{len(upstream.requests)}"
                 if upstream.replies:
                     upstream.reply = upstream.replies.pop(0) if len(upstream.replies) > 1 else upstream.replies[0]
-                usage = {"prompt_tokens": 12, "completion_tokens": 3, "is_byok": upstream.byok,
+                usage = {"prompt_tokens": 12, "completion_tokens": 3,
                          "completion_tokens_details": {"reasoning_tokens": 2}, "cost": upstream.cost}
                 # a vLLM server asked for return_token_ids: the prompt's ids (here: one per message,
                 # then 1, 2) and the reply's (7, 8)

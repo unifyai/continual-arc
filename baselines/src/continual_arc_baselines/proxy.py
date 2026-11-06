@@ -11,14 +11,24 @@ can, reaches no other endpoint on the run's key: a completion, an embedding or a
 :attr:`~LLMProxy.body_overrides` names a model, as every row's overrides do (:func:`own_model` gives a learner's), each
 chat completion goes to that model, whatever model the call names.
 
-A verified run's learner is untrusted and its key is its submitter's, so its proxy is **confined**
+A verified run's learner is untrusted and plays on a key its submitter has paid for, so its proxy is **confined**
 (:attr:`~LLMProxy.confined_to`, ``arc-baselines run --confine-models``): only the models its submission names go
-upstream, and only what cannot leave the model call. A request carries a plain chat completion and nothing an upstream
-would act on or show its account's owner apart from the conversation: no other model's name, no fallback list, no
-routing, no plugin or server-side tool, no URL for a provider to fetch, no header or field of its own (``X-Title``,
-``user``, ``metadata`` and the like, which OpenRouter's activity shows). Each call asks for endpoints that keep no data, a
-call served through the key's own provider account (OpenRouter's ``is_byok``) stops all the calls after it, and the pace
-and size of what it sends and how much of it is journaled are bounded, since this process runs on the verifier's machine.
+upstream, each at the reasoning effort it names, and only what cannot leave the model call. A request carries a plain chat
+completion and nothing an upstream would act on apart from the conversation: no other model's name, no fallback list, no
+routing, no plugin or server-side tool, no URL for a provider to fetch, no header or field of its own. Each call goes only
+to the hosts of :data:`CONFINED_HOSTS` that keep no data, and the pace and size of what it sends and how much of it is
+journaled are bounded, since this process runs on the verifier's machine.
+
+A provider's prompt cache outlives a call, and answers whoever sends the same opening, on the provider's account and so
+perhaps on anyone's: a prompt written by one instance and probed by another, or from outside the run through the same
+provider, would carry what it says past every other wall, one reply's ``cached_tokens`` or its latency at a time. So a
+confined call opens with a salt (:meth:`LLMProxy.salt`), secret to this process and new with each of the learner's resets,
+at the head of everything a provider counts as a prompt's opening (:func:`_salted`). Within an instance, and over a stream
+with no resets in it, the cache works as ever. A salt the model repeats to the learner is 256 bits, more than a run's
+results can carry out (HELD-OUT.md), and it lasts one instance.
+
+What a run may spend is enforced here, before each call and not only at the key (:class:`SpendLedger`): OpenRouter refuses
+a key at its limit only as a call starts, so calls begun together would pass it by as much as they cost.
 
 The proxy is transparent: no caching and no fallback models. Streaming responses are passed through byte for byte while
 the server-sent events are parsed on the side for the usage block. A request is changed only as follows, in
@@ -49,15 +59,19 @@ request is what the upstream received, the budget left out where it was sent aga
 from __future__ import annotations
 
 import dataclasses
+import fcntl
+import hashlib
 import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
 from decimal import Decimal
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -72,6 +86,7 @@ WAIT_STATUSES = {402}  # the account is out of credit: wait for a top-up rather 
 # A 403 that OpenRouter relays from the provider behind it, retried like a 5xx: a provider may refuse calls at random,
 # one request at a time. OpenRouter's own 403s (moderation, key limits) carry no such marker and pass straight through.
 PROVIDER_REFUSAL = b"Provider returned error"
+KEY_LIMIT = b"openrouter_key_limit"  # what OpenRouter says of a key that has spent its limit, with a 403
 # The fields a chat completion asks its reply budget in, and the mark of a refusal for the room it asks: vLLM's "This
 # model's maximum context length is 131072 tokens. However, you requested 32000 output tokens and your prompt contains
 # 99073 input tokens ..." (vllm/renderers/params.py), OpenRouter's "This endpoint's maximum context length is ..."
@@ -109,8 +124,16 @@ CONFINED_FIELDS = frozenset({
     "logprobs", "top_logprobs", "response_format", "structured_outputs", "tools", "tool_choice", "parallel_tool_calls",
     "reasoning", "reasoning_effort", "include_reasoning", "verbosity", "usage", "cache_control",
 })
-# Where a confined proxy's calls may go: endpoints that keep nothing and train on nothing (OpenRouter's provider routing).
-CONFINED_ROUTING = {"zdr": True, "data_collection": "deny"}
+# The hosts a confined proxy's calls may go to, by OpenRouter's slugs: companies whose names a submitter could not stand
+# behind. OpenRouter lists anyone who serves a model, a submitter's own company among them, and a host reads every prompt.
+CONFINED_HOSTS = ("alibaba", "amazon-bedrock", "anthropic", "azure", "baseten", "cerebras", "cloudflare", "cohere", "coreweave",
+                  "crusoe", "deepinfra", "deepseek", "digitalocean", "fireworks", "google-ai-studio", "google-vertex", "groq",
+                  "minimax", "mistral", "modal", "moonshotai", "nebius", "novita", "nvidia", "openai", "parasail", "sambanova",
+                  "siliconflow", "together", "xai", "z-ai")
+# Where a confined proxy's calls may go: those hosts' endpoints that keep nothing and train on nothing (OpenRouter's routing).
+CONFINED_ROUTING = {"zdr": True, "data_collection": "deny", "only": list(CONFINED_HOSTS)}
+# The most a confined call may ask for in reply, which is what the spend ledger holds back for it (128,000 is a bare model's).
+MAX_REPLY_TOKENS = 128_000
 CONFINED_RATE = 5.0        # the calls per second a confined proxy forwards or refuses; more wait their turn
 # How many calls that cost nothing, refused ones and reads of the model list, a confined proxy journals: past them it only
 # counts them, since a learner could otherwise fill the verifier's disk with its journal at no cost to itself.
@@ -150,6 +173,94 @@ class Refused(Exception):
         self.status = status
 
 
+def _alive(pid: int) -> bool:
+    """Whether the process ``pid`` is still running on this machine."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+class SpendLedger:
+    """What one run's proxies, a process for each of its cells, have spent and hold back for their calls in flight, in a
+    file they share, against the run's budget. A call holds back the most it could cost before it goes (:meth:`hold`, which
+    waits while calls in flight may yet free enough), and what it did cost replaces that when it ends (:meth:`settle`). Once
+    nothing in flight can free enough for the next call, the run is over budget.
+
+    What is held is kept under the holding process's id and goes when that process has gone, so that a cell that dies with
+    calls in flight, killed at the run's deadline or by its own learner's bomb, leaves nothing for the others to wait on."""
+
+    EMPTY = {"spent": 0.0, "held": {}, "over": False}
+    WAIT_S = 1.0
+
+    def __init__(self, path: str | Path, cap: float):
+        self.path, self.cap = Path(path), float(cap)
+
+    def _with(self, change: Any) -> Any:
+        with self.path.open("a+") as file:
+            fcntl.flock(file, fcntl.LOCK_EX)
+            file.seek(0)
+            state = json.loads(file.read() or json.dumps(self.EMPTY))
+            state["held"] = {pid: amount for pid, amount in state["held"].items() if _alive(int(pid))}
+            answer = change(state)
+            file.seek(0)
+            file.truncate()
+            file.write(json.dumps(state))
+            return answer
+
+    def hold(self, amount: float) -> bool:
+        """Hold ``amount`` back for a call; False if the run is over, or nothing in flight can free enough for it."""
+        me = str(os.getpid())
+
+        def take(state: dict) -> bool | None:
+            if state["over"]:
+                return False
+            held = sum(state["held"].values())
+            if state["spent"] + held + amount <= self.cap:
+                state["held"][me] = state["held"].get(me, 0.0) + amount
+                return True
+            return None if held > 1e-9 else False
+
+        while (answer := self._with(take)) is None:
+            time.sleep(self.WAIT_S)
+        return answer
+
+    def settle(self, held: float, spent: float) -> None:
+        me = str(os.getpid())
+
+        def change(state: dict) -> None:
+            left = state["held"].pop(me, 0.0) - held
+            if left > 1e-9:
+                state["held"][me] = left
+            state["spent"] += spent
+
+        self._with(change)
+
+    def correct(self, spent: float) -> bool:
+        """Put what has been spent right from the upstream's own figure, when that is less: a call whose client went away
+        ends with no price and counts as the most it could have cost. Whether it was less."""
+        def change(state: dict) -> bool:
+            lower = spent < state["spent"]
+            if lower:
+                state["spent"] = spent
+            return lower
+
+        return self._with(change)
+
+    def close(self) -> None:
+        """The run is over budget: every call from here on is refused."""
+        self._with(lambda state: state.update(over=True))
+
+    @property
+    def over(self) -> bool:
+        return self._with(lambda state: state["over"])
+
+    @property
+    def spent(self) -> float:
+        return self._with(lambda state: state["spent"])
+
+
 def _confined_content(content: Any) -> None:
     """A message's content in a confined request: text, or a list of parts each text or an image carried in the request
     itself, since a provider fetches any URL it is given, query string and all."""
@@ -169,7 +280,8 @@ def _confined_content(content: Any) -> None:
 
 def _confined(parsed: Any, models: dict[str, str | None]) -> dict:
     """A confined chat completion's body: :data:`CONFINED_FIELDS` of it, once its model and what it carries are allowed,
-    with the reasoning effort the submission names for its model when the call names none."""
+    at the reasoning effort the submission names for its model whatever the call asks, since a model played at more than it
+    played bare would not be the model read beside it, and asking for at most :data:`MAX_REPLY_TOKENS` in reply."""
     if not isinstance(parsed, dict):
         raise Refused(400, "a chat completion is a JSON object")
     if not isinstance(parsed.get("model"), str) or parsed["model"] not in models:
@@ -189,9 +301,36 @@ def _confined(parsed: Any, models: dict[str, str | None]) -> dict:
         raise Refused(400, "a tool is a function the learner itself runs")
     body = {key: value for key, value in parsed.items() if key in CONFINED_FIELDS}
     effort = models[parsed["model"]]
-    if effort and "reasoning" not in body and "reasoning_effort" not in body:
+    if effort:
+        body.pop("reasoning_effort", None)
         body["reasoning"] = {"effort": effort}
+    asked = [body[key] for key in REPLY_BUDGETS if key in body]
+    if not all(isinstance(budget, int) and not isinstance(budget, bool) for budget in asked):
+        raise Refused(400, "a reply budget is a whole number")
+    if not asked:
+        body["max_tokens"] = MAX_REPLY_TOKENS
+    for key in REPLY_BUDGETS:
+        if key in body:
+            body[key] = min(body[key], MAX_REPLY_TOKENS)
     return body
+
+
+def _salted(body: dict, salt: str) -> None:
+    """``salt`` at the head of ``body``'s first message, of its first tool's description and of its response format's
+    schema, the three things a provider may render first and read its cache by, so that no prefix of the prompt is shared
+    with a call under another salt."""
+    mark = f"[{salt}]\n"
+    if body["messages"]:
+        first = body["messages"][0]
+        content = first.get("content")
+        first["content"] = [{"type": "text", "text": mark}, *content] if isinstance(content, list) else mark + (content or "")
+    tools = body.get("tools") or []
+    if tools and isinstance(tools[0].get("function"), dict):
+        tools[0]["function"]["description"] = mark + str(tools[0]["function"].get("description") or "")
+    schema = body.get("response_format")
+    schema = schema.get("json_schema") if isinstance(schema, dict) else None
+    if isinstance(schema, dict):
+        schema["description"] = mark + str(schema.get("description") or "")
 
 
 def own_model(learner_kwargs: dict[str, Any]) -> dict[str, Any]:
@@ -223,7 +362,6 @@ def _absorb(call: LLMCall, payload: dict) -> None:
         call.model = payload["model"]
     usage = payload.get("usage")
     if isinstance(usage, dict):
-        call.byok = call.byok or usage.get("is_byok") is True
         tokens = _usage_tokens(usage)
         for key in TOKEN_FIELDS:
             if tokens[key] is not None:
@@ -389,6 +527,8 @@ class LLMProxy:
         thinking_field: str | None = None,
         serve: Any = None,
         confined_to: dict[str, str | None] | None = None,
+        ledger: SpendLedger | None = None,
+        prices: dict[str, dict[str, float]] | None = None,
     ):
         self.upstream = upstream.rstrip("/")
         self.api_key = api_key
@@ -423,10 +563,13 @@ class LLMProxy:
         # the models an untrusted learner may call and each one's reasoning effort, for a proxy in the confined mode this
         # module's docstring describes
         self.confined_to = confined_to
-        self.byok_seen = False   # a call came back served through the key's own provider account
+        # the run's budget and, for each model it names, what a call costs at most (worst_cost)
+        self.ledger, self.prices = ledger, prices or {}
         self.free_calls = 0      # a confined proxy's calls that cost nothing, of which it journals the first few
         self._pace_lock = threading.Lock()
         self._next_turn = 0.0
+        self._pace_epoch = 0
+        self._salt_key = secrets.token_bytes(32)
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
         self._client: httpx.Client | None = None
@@ -519,11 +662,45 @@ class LLMProxy:
         if self.confined_to is None:
             return
         with self._pace_lock:
+            if self._pace_epoch != self.tracker.epoch:  # a queue left by the last instance is no message to the next
+                self._pace_epoch, self._next_turn = self.tracker.epoch, 0.0
             now = time.monotonic()
             turn = max(now, self._next_turn)
             self._next_turn = turn + 1.0 / CONFINED_RATE
         if turn > now:
             time.sleep(turn - now)
+
+    def salt(self) -> str:
+        """What opens every call of this epoch: 256 bits, secret to this process, new with each of the learner's resets."""
+        return hashlib.sha256(self._salt_key + str(self.tracker.epoch).encode()).hexdigest()
+
+    def worst_cost(self, parsed: dict, size: int) -> float:
+        """The most a call of ``size`` bytes can cost: a token takes at least a byte, the model's window bounds the prompt,
+        and the reply budget, which :func:`_confined` always sets, the reply."""
+        price = self.prices[parsed["model"]]
+        reply = max(parsed[key] for key in REPLY_BUDGETS if key in parsed)
+        return price["request"] + min(size, price["window"]) * price["input"] + reply * price["output"]
+
+    def spent_at_upstream(self) -> float | None:
+        """What the key has spent by the upstream's own count, or None if it does not answer."""
+        try:
+            response = self._client.get(f"{self.upstream}/key", headers={"Authorization": f"Bearer {self.api_key}"})
+            return float(response.raise_for_status().json()["data"]["usage"])
+        except httpx.HTTPError:
+            return None
+
+    def afford(self, amount: float) -> bool:
+        """``amount`` held back for a call in the run's ledger. Before the run is called over budget, the upstream's own
+        figure replaces the ledger's, which counts a call with no price as the most it could have cost."""
+        if self.ledger.hold(amount):
+            return True
+        if self.ledger.over:
+            return False
+        spent = self.spent_at_upstream()
+        if spent is not None and self.ledger.correct(spent) and self.ledger.hold(amount):
+            return True
+        self.ledger.close()
+        return False
 
     def prepare(self, headers: dict[str, str], body: bytes, path: str) -> tuple[dict[str, str], bytes, dict | None]:
         if self.confined_to is not None:
@@ -531,12 +708,11 @@ class LLMProxy:
             kept = {k: v for k, v in headers.items() if k.lower() == "accept"}
             headers = {**kept, "Content-Type": "application/json"}
             if _endpoint(path) == CHAT:
-                if self.byok_seen:
-                    raise Refused(403, "a call went through this key's own provider account, so none go after it")
                 try:
                     parsed = _confined(json.loads(body), self.confined_to)
                 except (ValueError, RecursionError):
                     raise Refused(400, "a chat completion is a JSON object") from None
+                _salted(parsed, self.salt())
                 parsed["provider"] = dict(CONFINED_ROUTING)
                 body = json.dumps(parsed).encode()
             else:
@@ -826,6 +1002,11 @@ class _Handler(BaseHTTPRequestHandler):
                     refusal = 404, f"the proxy forwards chat completions and the model list alone, not {method} {self.path[:200]}"
             except Refused as why:
                 refusal = why.status, str(why)
+        held = 0.0
+        if refusal is None and owner.ledger is not None and parsed is not None and _endpoint(self.path) == CHAT:
+            held = owner.worst_cost(parsed, len(body))
+            if not owner.afford(held):
+                refusal, held, parsed = (402, "this run's budget is spent"), 0.0, None
         stream = bool(parsed and parsed.get("stream"))
         call = LLMCall(
             call_id=uuid.uuid4().hex, status="started", path=self.path[:400], stream=stream,
@@ -859,6 +1040,8 @@ class _Handler(BaseHTTPRequestHandler):
                     owner.tracker.touch()
                     time.sleep(owner.credit_wait_s)
                     continue
+                if owner.ledger is not None and response.status_code == 403 and KEY_LIMIT in response.read():
+                    owner.ledger.close()
                 retry = response.status_code in RETRY_STATUSES or (
                     response.status_code == 403 and PROVIDER_REFUSAL in response.read())
                 if retry and attempts < owner.upstream_retries:
@@ -969,5 +1152,6 @@ class _Handler(BaseHTTPRequestHandler):
                 call.status, call.error = "failed", f"proxy {type(error).__name__}"
             raise
         finally:
-            owner.byok_seen = owner.byok_seen or call.byok
+            if held:
+                owner.ledger.settle(held, float(call.cost) if call.cost is not None else held)
             owner.emit(call, quiet)

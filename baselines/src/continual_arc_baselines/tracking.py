@@ -29,6 +29,9 @@ from continual_arc_baselines.costs import TOKEN_FIELDS, CostJournal
 
 log = logging.getLogger(__name__)
 
+CALLS_OF = "llm_calls/"
+"""The start of a counter's name that says how many calls went to the model named after it."""
+
 
 def instance_ended(feedback: Any) -> bool:
     """Whether ``feedback`` ends its instance: a give-up; a correct submission, or the one that
@@ -68,7 +71,6 @@ class LLMCall:
     request_body: dict[str, Any] | None = None
     response_body: dict[str, Any] | None = None
     refused: bool = False  # the proxy answered it itself and sent nothing upstream
-    byok: bool = False     # the upstream says it went through the key's own provider account (OpenRouter's is_byok)
 
     @property
     def priced(self) -> bool:
@@ -87,16 +89,17 @@ class Usage:
     cost_usd: Decimal = Decimal("0")
     unpriced_requests: int = 0  # completed requests with no provider-reported charge
     refused_requests: int = 0   # requests the proxy refused
-    byok_requests: int = 0      # requests served through the key's own provider account
+    calls: dict[str, int] = field(default_factory=dict)  # requests forwarded, by the model each named
 
     def update(self, call: LLMCall) -> None:
         if call.status == "started":
             self.requests += 1
+            if call.requested_model:
+                self.calls[call.requested_model] = self.calls.get(call.requested_model, 0) + 1
             return
         if call.status in ("failed", "cancelled"):
             self.failed_requests += 1
         self.refused_requests += call.refused
-        self.byok_requests += call.byok
         self.input_tokens += call.tokens.get("input") or 0
         self.output_tokens += call.tokens.get("output") or 0
         self.reasoning_tokens += call.tokens.get("reasoning") or 0
@@ -115,7 +118,7 @@ class Usage:
             "llm_cost_usd": float(self.cost_usd),
             "llm_unpriced_requests": float(self.unpriced_requests),
             "llm_refused_requests": float(self.refused_requests),
-            "llm_byok_requests": float(self.byok_requests),
+            **{f"{CALLS_OF}{model}": float(count) for model, count in self.calls.items()},
         }
 
 
@@ -135,6 +138,9 @@ class Tracker:
     adapter leaves out of a turn's time budget, less the model time its calls stand
     for without having spent it: a reply replayed from a recording, served at once,
     takes its recorded generation's seconds off the turn's budget (:meth:`credit`).
+
+    :attr:`epoch` counts the learner's resets: an instance that starts from a reset is a new epoch, which a confined proxy
+    keeps apart from the last at the model's provider (``LLMProxy.salt``).
     """
 
     def __init__(self) -> None:
@@ -145,6 +151,7 @@ class Tracker:
         self._open: dict[str, float] = {}  # the calls not yet ended: when each started (time.monotonic())
         self.last_activity = time.monotonic()
         self.credit_s = 0.0
+        self.epoch = 0
 
     def touch(self) -> None:
         self.last_activity = time.monotonic()
@@ -288,6 +295,7 @@ class TrackedLearner:
         self._since: float | None = None  # when the open instance's first action began
 
     def reset(self) -> None:
+        self.tracker.epoch += 1
         self.learner.reset()
 
     def begin_round(self, n_instances: int) -> None:

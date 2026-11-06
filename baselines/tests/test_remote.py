@@ -17,7 +17,7 @@ from continual_arc.testing import FakeSource
 from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.cli import main
 from continual_arc_baselines.systems.hosted import HostedLearnerError
-from continual_arc_baselines.systems.remote import RemoteLearner, ssh_command
+from continual_arc_baselines.systems.remote import RemoteLearner, installed, ssh_command
 from continual_arc_baselines.systems.sandbox import python_runtime_root
 
 from .test_hosted import SECRET, file_toy_package, submission_python
@@ -58,6 +58,23 @@ def kwargs_for(tmp_path, code) -> dict:
             "arena_python": sys.executable, "timeout_s": 120.0, "startup_timeout_s": 120.0, "margin_s": 30.0}
 
 
+def test_what_a_virtual_environment_holds_is_read_from_the_names_of_its_folders_alone(tmp_path):
+    site = tmp_path / "lib" / "python3.12" / "site-packages"
+    for name in ("numpy-2.1.0.dist-info", "my_pkg-1.0+local.dist-info", "@evil[x](y)-1.dist-info", "numpy", "x-1.dist-info.txt"):
+        (site / name).mkdir(parents=True)
+    assert installed(tmp_path) == ["my_pkg==1.0+local", "numpy==2.1.0"]
+
+
+def test_a_cells_folder_goes_whatever_its_learner_did_to_its_permissions(tmp_path):
+    from continual_arc_baselines.systems.remote import main as remote_main
+
+    cell = tmp_path / "cell"
+    (cell / "locked" / "deep").mkdir(parents=True)
+    (cell / "locked" / "deep" / "file").write_text("x")
+    (cell / "locked").chmod(0)
+    assert remote_main(["forget", "--workdir", str(cell)]) == 0 and not cell.exists()
+
+
 def test_the_ssh_command_turns_off_what_a_far_side_could_use():
     command = ssh_command("arena@host", "/k", "/known", "serve", forward=(7, 9), max_bytes=1024)
     assert "ssh" in command and command[-2:] == ["arena@host", "serve"]
@@ -80,6 +97,8 @@ def test_a_learner_plays_its_stream_and_frozen_test_from_the_arena(tmp_path, mon
     test.save(tmp_path / "test.json")
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OPENROUTER_API_KEY", SECRET)
+    reboots = []  # never a real one: ssh here is this machine
+    monkeypatch.setattr(RemoteLearner, "_reboot", lambda self: reboots.append(self.arena))
     context = Attempt.create("remote", root=tmp_path / "wb")
     monkeypatch.setenv("WORKBENCH_RUN_DIR", str(context.directory))
     out = tmp_path / "run"
@@ -92,7 +111,10 @@ def test_a_learner_plays_its_stream_and_frozen_test_from_the_arena(tmp_path, mon
     records = [json.loads(line) for line in (out / "records.jsonl").read_text().splitlines()]
     tested = [json.loads(line) for line in (tmp_path / "tested" / "records.jsonl").read_text().splitlines()]
     assert len(records) == 6 and len(tested) == 3 and all(r["user"] == 0 and r["reset_before"] for r in tested)
+    assert reboots == ["arena@test"] * 3  # before every instance of the test, and none in the stream
     system = context.directory / "system"
+    # what each instance printed left the arena before the next began, since the disk's free space would show it
+    assert (system / "learner.log").read_text().count("[hosted] started") == 1 + 1 + 3
     # what the learner printed and kept came back as bytes, and the arena's own folder holds the rest
     assert "[hosted] frozen" in (system / "learner.log").read_text()
     assert (system / "kept.tar").stat().st_size > 0
@@ -148,13 +170,12 @@ def test_what_a_far_side_sends_is_cut_at_its_cap_whatever_it_says_it_will_send(t
 def test_a_far_side_that_misbehaves_in_play_fails_the_cell(tmp_path, fake_ssh):
     far = FarSide(tmp_path, """
 import json, sys
-print(json.dumps({"ok": True, "result": {"ready": True, "state_in_files": True}}), flush=True)
+print(json.dumps({"ok": True, "result": {"ready": True}}), flush=True)
 for line in sys.stdin:
     print("{not json", flush=True)
 """)
     learner = far.learner()
     attach(learner, tmp_path)
-    assert learner.state_in_files
     with pytest.raises(HostedLearnerError, match="broke the protocol"):
         learner.begin_round(1)
     learner.close()

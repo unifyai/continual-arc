@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+from decimal import Decimal
 from pathlib import Path
 
 import continual_arc
@@ -29,6 +30,7 @@ from continual_arc_baselines.systems.hosted import (
     record_of,
 )
 from continual_arc_baselines.systems.sandbox import python_runtime_root
+from continual_arc_baselines.tracking import Tracker
 
 REPO = Path(__file__).resolve().parents[1]
 SECRET = "sk-upstream-secret"
@@ -214,10 +216,12 @@ def test_a_learner_that_cannot_start_fails_before_the_run(tmp_path, monkeypatch,
             "python": sys.executable, "learner": "toy_submission:Missing", "code": str(code), "sandbox": "none"})
 
 
-def test_a_hosted_learner_plays_its_test_from_the_memory_its_stream_left(tmp_path, monkeypatch, upstream):
-    """The memory a hosted learner keeps in its own process has no snapshot, so its frozen test follows the stream in
-    the same launch (``--test``): every test instance, one round of a user each, is solved from what the stream
-    taught it, under the stream's names, with no demonstration bought."""
+def test_a_hosted_learner_carries_from_its_stream_only_what_it_kept_as_files(tmp_path, monkeypatch, upstream):
+    """A hosted learner is started again from its files before every instance of its frozen test
+    (``HostedLearner.freeze``), so that nothing of one test instance reaches another whatever its code: what it kept only
+    in its own process is gone by then. A learner whose memory lives in its process plays every test instance from
+    nothing, buying a demonstration for each; one that keeps its memory as files plays them from its stream
+    (``FILE_TOY`` below)."""
     from continual_arc.schedule import Schedule, Slot
 
     code = toy_package(tmp_path / "code", {})
@@ -238,8 +242,8 @@ def test_a_hosted_learner_plays_its_test_from_the_memory_its_stream_left(tmp_pat
     stream = [json.loads(line) for line in (out / "records.jsonl").read_text().splitlines()]
     assert_learned(stream)
     tested = [json.loads(line) for line in (out / "frozen" / "seen" / "play" / "records.jsonl").read_text().splitlines()]
-    assert [(r["user"], r["phase"], r["solved"], r["cost"]) for r in tested] == [(u, "seen-test", True, 0.0)
-                                                                                for u in range(3)]
+    # one at a time, each instance a round of its own with one user
+    assert [(r["user"], r["phase"], r["solved"], r["cost"]) for r in tested] == [(0, "seen-test", True, 1.0)] * 3
 
 
 # A learner that keeps what it learns as a harness does, in files: FakeSource's shift in its working directory, read
@@ -263,8 +267,6 @@ def digest(root):
 
 
 class FileLearner(BaseLearner):
-    state_in_files = True
-
     def __init__(self):
         self.workdir, self.pending, self.seen, self.round = None, None, 0, None
 
@@ -324,10 +326,9 @@ def printed(log: Path, kind: str) -> list[dict]:
 
 
 @pytest.mark.parametrize("backend", BACKENDS)
-def test_a_learner_that_keeps_its_state_in_files_plays_its_test_one_instance_at_a_time_from_its_streams_end(
-        tmp_path, monkeypatch, upstream, backend):
-    """A hosted learner that says it keeps everything it learns as files, as a harness does, is frozen at the end of
-    its stream (``--test``): it plays the test's instances one at a time, and before every instance its host is ended
+def test_a_learner_plays_its_test_one_instance_at_a_time_from_its_streams_end(tmp_path, monkeypatch, upstream, backend):
+    """A hosted learner is frozen at the end of its stream (``--test``): it plays the test's instances one at a time,
+    and before every instance its host is ended
     and its working directory and HOME are put back as the stream left them. Every test instance finds the stream's
     files, though each writes to them, and solves from the stream's memory under the stream's names; at the end the
     stream's own files are back in their place."""
@@ -379,16 +380,51 @@ def test_a_learner_that_keeps_its_state_in_files_plays_its_test_one_instance_at_
     assert attached["base_url"].startswith("http://127.0.0.1:")
 
 
-def test_a_learner_that_keeps_its_state_in_its_process_cannot_be_frozen(tmp_path):
+def test_what_a_learner_keeps_in_its_process_is_gone_once_it_is_frozen(tmp_path):
+    """A test instance could otherwise reach the next in a process's memory: only files outlast the freeze."""
     learner = HostedLearner(sys.executable, "toy_submission:Learner", code=str(toy_package(tmp_path / "code", {})),
                             sandbox="none")
     learner.attach(tmp_path / "system", {})
     try:
-        assert not learner.state_in_files
-        with pytest.raises(HostedLearnerError, match="state_in_files"):
-            learner.freeze()
+        host = learner._proc.pid
+        learner.freeze()
+        assert learner.frozen is not None and learner._proc.pid != host
     finally:
         learner.close()
+
+
+def test_a_connection_lost_mid_test_leaves_the_streams_files_aside(tmp_path):
+    """The arena is about to reboot, and the next instance starts from a copy of them."""
+    learner = HostedLearner(sys.executable, "toy_submission:Learner", code=str(toy_package(tmp_path / "code", {})),
+                            sandbox="none")
+    workdir = tmp_path / "system"
+    learner.attach(workdir, {})
+    (workdir / "state" / "kept").write_text("from the stream")
+    learner.freeze()
+    (workdir / "state" / "kept").write_text("from an instance")
+    learner.abandon()
+    assert (workdir / "stream-end" / "state" / "kept").read_text() == "from the stream"
+    next_host = HostedLearner(sys.executable, "toy_submission:Learner", code=str(toy_package(tmp_path / "code2", {})),
+                              sandbox="none")
+    next_host.attach(workdir, {}, frozen=True)
+    try:
+        assert (workdir / "state" / "kept").read_text() == "from the stream"
+    finally:
+        next_host.close()
+    assert not (workdir / "stream-end").exists() and (workdir / "state" / "kept").read_text() == "from the stream"
+
+
+def test_a_learner_cannot_report_the_counters_the_proxy_keeps():
+    class Reporting(ServedLearner):
+        def _call(self, op, timeout_s=None, **fields):
+            return {"llm_cost_usd": 0.0, "llm_calls/vendor/weak": 9.0, "mine": 1.0, "bad": float("nan"), "word": "x"}
+
+    learner = Reporting()
+    learner.tracker = Tracker()
+    learner.tracker.usage.cost_usd = Decimal("3")
+    out = learner.resources()
+    assert out["llm_cost_usd"] == 3.0 and out["mine"] == 1.0
+    assert "llm_calls/vendor/weak" not in out and "bad" not in out and "word" not in out
 
 
 @pytest.mark.parametrize("home_aside", [True, False])
