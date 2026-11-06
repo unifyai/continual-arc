@@ -44,7 +44,7 @@ ARENA_ROOT = "/home/arena/run"
 ARENA_PYTHON = "/home/arena/baselines/bin/python"
 ARENA_UV_PATH = "/home/arena/.local/bin:/usr/bin:/bin"
 LOG_CAP = 2**30
-KEPT_CAP = 8 * 2**30
+KEPT_CAP = 2 * 2**30  # a harness's state is a few hundred megabytes (frozen.py), and a truncated tar reads up to its cut
 FETCH_TIMEOUT_S = 3600
 # Every option that lets the far side of an ssh connection act on this one is off, and no configuration file is read.
 SSH_OPTIONS = ("-F", "/dev/null", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes", "-o", "ConnectTimeout=60",

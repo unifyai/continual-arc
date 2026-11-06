@@ -18,7 +18,7 @@ would act on or show its account's owner apart from the conversation: no other m
 routing, no plugin or server-side tool, no URL for a provider to fetch, no header or field of its own (``X-Title``,
 ``user``, ``metadata`` and the like, which OpenRouter's activity shows). Each call asks for endpoints that keep no data, a
 call served through the key's own provider account (OpenRouter's ``is_byok``) stops all the calls after it, and the pace
-and size of what it sends are bounded, since this process journals every call on the verifier's own disk.
+and size of what it sends and how much of it is journaled are bounded, since this process runs on the verifier's machine.
 
 The proxy is transparent: no caching and no fallback models. Streaming responses are passed through byte for byte while
 the server-sent events are parsed on the side for the usage block. A request is changed only as follows, in
@@ -111,7 +111,10 @@ CONFINED_FIELDS = frozenset({
 })
 # Where a confined proxy's calls may go: endpoints that keep nothing and train on nothing (OpenRouter's provider routing).
 CONFINED_ROUTING = {"zdr": True, "data_collection": "deny"}
-CONFINED_RATE = 20.0       # the calls a second a confined proxy forwards or refuses; more wait their turn
+CONFINED_RATE = 5.0        # the calls per second a confined proxy forwards or refuses; more wait their turn
+# How many calls that cost nothing, refused ones and reads of the model list, a confined proxy journals: past them it only
+# counts them, since a learner could otherwise fill the verifier's disk with its journal at no cost to itself.
+CONFINED_FREE_JOURNAL = 20_000
 
 
 def _int(value: Any) -> int | None:
@@ -339,7 +342,7 @@ class _SSEParser:
 
 
 class _Server(ThreadingHTTPServer):
-    """One thread a connection, at most :data:`MAX_CLIENTS` at once, whose clients may be hostile."""
+    """One thread per connection, at most :data:`MAX_CLIENTS` at once, whose clients may be hostile."""
 
     daemon_threads = True
 
@@ -421,6 +424,7 @@ class LLMProxy:
         # module's docstring describes
         self.confined_to = confined_to
         self.byok_seen = False   # a call came back served through the key's own provider account
+        self.free_calls = 0      # a confined proxy's calls that cost nothing, of which it journals the first few
         self._pace_lock = threading.Lock()
         self._next_turn = 0.0
         self._server: ThreadingHTTPServer | None = None
@@ -503,8 +507,15 @@ class LLMProxy:
                 break
         return self.upstream + path
 
+    def emit(self, call: LLMCall, quiet: bool) -> None:
+        """A call's start or end to the tracker, or to its counters alone when it is ``quiet``."""
+        if quiet:
+            self.tracker.count(call)
+        else:
+            self.tracker.emit(_snapshot(call))
+
     def pace(self) -> None:
-        """A confined proxy's turn for the next call, at :data:`CONFINED_RATE` a second."""
+        """A confined proxy's turn for the next call, at :data:`CONFINED_RATE` per second."""
         if self.confined_to is None:
             return
         with self._pace_lock:
@@ -785,7 +796,7 @@ class _Handler(BaseHTTPRequestHandler):
             owner.tracker.emit(_snapshot(call))
         return True
 
-    def _refuse(self, status: int, message: str, call: LLMCall, started: float) -> None:
+    def _refuse(self, status: int, message: str, call: LLMCall, started: float, quiet: bool) -> None:
         """Answer a request the proxy does not forward, as an upstream answers one it does not serve, and count it as a
         failed call; it ends once, whether or not its system is still there to read the answer."""
         call.status, call.status_code, call.error = "failed", status, f"HTTP {status}: {message[:200]}"
@@ -796,7 +807,7 @@ class _Handler(BaseHTTPRequestHandler):
             call.status, call.error = "cancelled", "client disconnected"
         finally:
             call.latency_ms = (time.monotonic() - started) * 1000
-            self.owner.tracker.emit(_snapshot(call))
+            self.owner.emit(call, quiet)
 
     def _forward(self, method: str) -> None:
         owner = self.owner
@@ -821,10 +832,13 @@ class _Handler(BaseHTTPRequestHandler):
             requested_model=(parsed or {}).get("model") if parsed else None,
             request_body=parsed if owner.capture_content else None,
         )
-        owner.tracker.emit(_snapshot(call))
+        owner.free_calls += bool(refusal) or method == "GET"
+        quiet = (bool(refusal) or method == "GET") and owner.confined_to is not None and (
+            owner.free_calls > CONFINED_FREE_JOURNAL)
+        owner.emit(call, quiet)
         started = time.monotonic()
         if refusal:
-            self._refuse(*refusal, call, started)
+            self._refuse(*refusal, call, started, quiet)
             return
         if (owner.serve is not None and parsed is not None and _endpoint(self.path) == CHAT
                 and self._serve(parsed, call, stream, started)):
@@ -956,4 +970,4 @@ class _Handler(BaseHTTPRequestHandler):
             raise
         finally:
             owner.byok_seen = owner.byok_seen or call.byok
-            owner.tracker.emit(_snapshot(call))
+            owner.emit(call, quiet)

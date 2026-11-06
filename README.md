@@ -538,8 +538,10 @@ instances, checked against every public ARC task: 25 streamed over 200 instances
 tasks, and 25 held out. To have a learner verified on it:
 
 1. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner's
-   run and its reset have cost tens of dollars), and keep OpenRouter's Private Input & Output Logging off on its
-   account, since it would show you the held-out tasks; a run with it on is void.
+   run and its reset have cost tens of dollars), and keep OpenRouter's Private Input & Output Logging and Broadcast off
+   on its account, since either would show you the held-out tasks; a run with one on is void. The account must not serve
+   the models you name through provider keys of its own (BYOK), whose accounts would show them too: we check that when
+   we accept the key, and a call through one stops the run and voids it.
 2. Encrypt the key with our public key, so that only the private half, which never leaves Secret Manager, can read it:
 
    ```bash
@@ -550,14 +552,22 @@ tasks, and 25 held out. To have a learner verified on it:
 3. Open an issue with the [Verify my learner](https://github.com/unifyai/continual-arc/issues/new?template=verify.yml)
    form: your public GitHub repository and the commit to run, the import path of your learner class (installable from
    the repository with pip, implementing `continual_arc.learner`, and built with no arguments, so its settings are its
-   class's defaults), the OpenRouter model it plays with and its reasoning effort, the model that teaches it if one
-   does, any other models it calls, and the encrypted key. A harness adapter on the baselines' `SystemLearner` depends on
+   class's defaults), every OpenRouter model it calls with its reasoning effort (the one it plays with, the one that
+   teaches it if one does, and any others) and the encrypted key. Each is a model as OpenRouter lists it, with no variant
+   such as `:online`, and with an endpoint that keeps no data; a router or a model that searches the web as part of a call
+   is not taken. A harness adapter on the baselines' `SystemLearner` depends on
    `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.6.0#subdirectory=baselines` alone,
    which brings the benchmark with it.
 
 Within about a quarter of an hour the issue says the run has started. We install your repository and run your learner,
-whole, inside the sandbox the paper's runs used, which reaches nothing but the tracking proxy: the proxy makes every
-model call on your key, as a chat completion, the one kind it forwards, and your code never holds it. At a seed of
+whole, inside a sandbox on a machine of its own, deleted when the run ends, which has no public network and holds neither
+our rules nor your key. Its install reaches PyPI and GitHub alone, through a filter, and nothing else once the install
+ends. Your learner reaches nothing but the tracking proxy, on our side, which makes every model call on your key, as a
+plain chat completion to a model your form names, on a route that keeps no data, and your code never holds the key. The
+proxy drops any other field or header, and refuses any other model, endpoint or URL for a provider to fetch and any tool
+that runs at the provider, and the issue says how many calls it refused. In the sandbox new namespaces, io_uring, BPF and
+the like are refused, so a harness adapter on the baselines starts no sandbox of its own there, and any other nested
+sandbox would fail. It may hold 8,192 processes and 64 GiB in one file, and a run stops at 160 hours. At a seed of
 its own, your learner plays the season's stream and then its two frozen tests from where the stream left it: the seen
 test, four fresh instances of each of the 25 streamed rules, and the held-out test, one instance of each held-out
 rule. A harness on the baselines'
@@ -566,8 +576,8 @@ rule. A harness on the baselines'
 stream left it. Any other learner plays them in one round, every instance a user of its own, so it keeps each user's
 work apart and changes what it keeps only once the round ends, as the learner protocol asks. Your learner reset plays
 the season's stream wiped before every instance, for the share learned, and the same test instances one at a time,
-wiped before each, which both tests are read against; the bare model it plays with plays the test instances too, and
-a reset that plays below it is flagged beside the test. The issue then gets your place on the plane: the share saved
+wiped before each, which both tests are read against; each model you name plays the test instances bare too, and a
+reset that plays below one that costs no more is flagged beside the test. The issue then gets your place on the plane: the share saved
 on the seen and the held-out test, each with its 95 percent interval, T and the budget used and share solved by your
 learner and its reset on each, then the share learned on the held-out stream with its interval, the learnable budget,
 the budget used and share solved on the stream and what each run's model calls cost, and the result joins the
@@ -576,7 +586,9 @@ the key on our side; delete it at OpenRouter too. Only the numbers come back: th
 kept, stay with us, since they show the held-out tasks.
 
 You pay for your model calls, on your key; we pay for the machine. A run takes hours, like one on the public stream.
-Learners that train their weights are not verified for now.
+Learners that train their weights are not verified for now. Paying on your own key leaves one window we cannot close: the
+account's owner can read what its key was sent, and so the terms make a run with logging on void, and we can retire
+the rules for new ones (the paper's Appendix J).
 
 ## Run records and trajectories
 

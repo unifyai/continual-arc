@@ -33,7 +33,8 @@ in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) an
 | `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) with the sandboxed runner of its programs |
 | `src/continual_arc_baselines/systems/prime_agent.py`, `hermes_agent.py`, `openclaw.py` | the harness adapters of row H: prime-agent over its RPC mode, hermes-agent and openclaw over the Agent Client Protocol (`acp.py`). Row H0 is `stateless=True`, row HA `ask_to_store=True` and row HPL `program_library=True` |
 | `src/continual_arc_baselines/systems/base.py`, `protocol.py` | `SystemLearner`, the adapter base class, with its budgets, restarts, wipes and frozen resets; the messages a learner is shown and the lenient parser that reads an action from a reply |
-| `src/continual_arc_baselines/systems/sandbox.py` | the sandbox each harness runs in: bubblewrap on Linux, Seatbelt on macOS |
+| `src/continual_arc_baselines/systems/sandbox.py`, `seccomp.py` | the sandbox each harness runs in: bubblewrap on Linux, from an empty root with private namespaces, a filter on what it may ask of the kernel and limits on what it consumes, and Seatbelt on macOS |
+| `src/continual_arc_baselines/systems/remote.py`, `connect_filter.py` | a submitted learner served from a machine of its own, and an install's one way out |
 | `src/continual_arc_baselines/systems/hosted.py`, `learner_host.py` | a submitted Python learner run whole inside the sandbox, for verified runs, and the host that serves it there |
 | `src/continual_arc_baselines/collective.py` | `CollectiveHarnessLearner`: a harness process per user and one state for all of them, every user's instance of a round served at once, each user behind a proxy of their own, with the hooks a trained row learns from (every instance's turns and model calls, captured whole) and `snapshot_state` / `restore_state` for a user's state |
 | `src/continual_arc_baselines/shared.py` | the collective regime's one state: the copy of it every user's instance of a round starts from, and the deterministic merge of what the users wrote back into it as the round ends ([below](#one-state-for-a-team)) |
@@ -265,9 +266,12 @@ depends on this package alone, which brings the benchmark with it.
 
 For a verified run we rerun the submission's code on held-out rules with `HostedLearner` (`systems/hosted.py`), which
 runs a submitted learner whole inside the sandbox, with the submission's own interpreter, behind the tracking proxy, so
-the learner never holds a key and reads nothing of the held-out rules. `arc-baselines install-submission --repo URL
---commit SHA --venv DIR [--checkout DIR]` installs it into a new virtual environment, under the sandbox too, since
-installing runs the package's build code. A hosted learner that keeps everything as files (`state_in_files`, as a
+the learner never holds a key. That runs on a disposable machine that holds neither the rules nor the key, reached from
+the verifier's by `RemoteLearner` (`systems/remote.py`), and the proxy is confined to the models the submission names
+(`--confine-models`). `arc-baselines install-submission --repo URL --commit SHA --venv DIR [--checkout DIR]` installs it
+into a new virtual environment, under the sandbox too, since installing runs the package's build code, its only network a
+filter to the package index and the code host (`systems/connect_filter.py`). Nothing the build or the learner wrote decides
+anything outside the sandbox: its links are not followed, and `pyvenv.cfg` names nothing that is bound. A hosted learner that keeps everything as files (`state_in_files`, as a
 harness on `SystemLearner` does) plays `arc-baselines run --test` one instance at a time, its files put back before
 each; any other plays the test in one round.
 

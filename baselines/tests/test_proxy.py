@@ -792,3 +792,19 @@ def test_a_confined_proxy_paces_what_it_answers(confined, monkeypatch):
     for _ in range(11):
         assert post(confined, plain("vendor/unnamed")).status_code == 403
     assert time.monotonic() - started >= 0.45
+
+
+def test_a_flood_of_free_calls_is_counted_and_journaled_only_so_far(upstream, tmp_path, monkeypatch):
+    from continual_arc_baselines import proxy as module
+
+    monkeypatch.setattr(module, "CONFINED_RATE", 1000.0)
+    monkeypatch.setattr(module, "CONFINED_FREE_JOURNAL", 3)
+    journaled = []
+    tracker = Tracker()
+    tracker.subscribe(lambda call: journaled.append(call.status))
+    with LLMProxy(upstream.base_url, api_key="sk-run", tracker=tracker, confined_to={"vendor/named": None}) as proxy:
+        for _ in range(10):
+            assert post(proxy, plain("vendor/unnamed")).status_code == 403
+        assert post(proxy, plain()).status_code == 200  # a call that goes up is always journaled
+    assert tracker.usage.refused_requests == 10 and tracker.usage.requests == 11
+    assert journaled.count("started") == 3 + 1 and journaled.count("completed") == 1

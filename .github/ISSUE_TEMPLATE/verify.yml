@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        We rerun your learner on the held-out season at a seed of its own: 25 new rules nobody outside unify has seen, streamed over 200 instances, then two frozen tests played from where the stream left your learner: fresh instances of the 25 streamed rules (the seen test) and 25 more rules held out (the held-out test). The share of its reset's spend it saves on each places it on the leaderboard's plane, memorization across and generalization up, read against your learner reset on the same instances, with the budget used and share solved by both beside it and the bare model it plays with shown too; its share learned is read against your learner reset on the same stream. Your code runs in the same sandbox as the paper's runs and reaches nothing but our tracking proxy, which makes its model calls on your key. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
+        We rerun your learner on the held-out season at a seed of its own: 25 new rules nobody outside unify has seen, streamed over 200 instances, then two frozen tests played from where the stream left your learner: fresh instances of the 25 streamed rules (the seen test) and 25 more rules held out (the held-out test). The share of its reset's spend it saves on each places it on the leaderboard's plane, memorization across and generalization up, read against your learner reset on the same instances, with the budget used and share solved by both beside it and each model you name shown bare too; its share learned is read against your learner reset on the same stream. Your code runs in a sandbox on a machine of its own, which has no public network and holds neither our rules nor your key, and reaches nothing but our tracking proxy, which makes its model calls on your key: chat completions to the models you name here, and nothing else. Your package installs from PyPI and GitHub alone. The result is posted on this issue and joins the leaderboard as verified. How it works: the README's "Verified results".
 
-        Your model calls are yours to pay, on your key; we pay for the machine. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner and its floor have cost tens of dollars), and encrypt it with our public key:
+        Your model calls are yours to pay, on your key; we pay for the machine. Make an OpenRouter key for this run alone, with a credit limit (at most 1,000 US dollars; a GPT-6 Luna learner and its floor have cost tens of dollars), on an account with no provider keys of its own (BYOK) for the models you name, and encrypt it with our public key:
 
         ```
         curl -sO https://raw.githubusercontent.com/unifyai/continual-arc/main/verify/unify-verify.pem
@@ -56,7 +56,7 @@ body:
     id: model
     attributes:
       label: Model it plays with
-      description: The OpenRouter model id. The bare model shown beside your tests is this one.
+      description: The OpenRouter model id, as OpenRouter lists it, with no variant such as :online. It plays your tests bare too, beside them. A router or a model that searches the web as part of a call is not taken.
       placeholder: openai/gpt-6-luna
     validations:
       required: true
@@ -67,6 +67,13 @@ body:
       description: The OpenRouter model id of the model that teaches the one it plays with, such as one that writes its notes, if it has one. The leaderboard shows it beside the model it plays with.
       placeholder: z-ai/glm-5.3-flash
   - type: dropdown
+    id: teacher_effort
+    attributes:
+      label: Teacher's reasoning effort
+      description: The teacher's effort, if it has one. Set on any call to it that leaves it unset, and it plays your tests bare at it too.
+      options: [minimal, low, medium, high, xhigh, max]
+      default: 2
+  - type: dropdown
     id: effort
     attributes:
       label: Reasoning effort
@@ -75,11 +82,11 @@ body:
       default: 2
     validations:
       required: true
-  - type: input
+  - type: textarea
     id: other_models
     attributes:
       label: Other models it calls
-      description: Every other OpenRouter model your learner calls, if any.
+      description: Every other OpenRouter model your learner calls, one per line, each with its reasoning effort, such as `z-ai/glm-5.3 low`. Our proxy refuses a call to any model this form does not name, and each one named plays your tests bare.
   - type: input
     id: public_run
     attributes:
@@ -106,7 +113,7 @@ body:
       options:
         - label: The key was made for this run and is capped at the limit above; I will delete it at OpenRouter once the run ends.
           required: true
-        - label: "Private Input & Output Logging is off on the key's OpenRouter account: it would show you our held-out tasks, and a run with it on is void."
+        - label: "Private Input & Output Logging is off on the key's OpenRouter account, and no Broadcast to an observability tool is on: either would show you our held-out tasks, and a run with one on is void."
           required: true
         - label: The code is public under an open licence and keeps to the README's "What a learner may use".
           required: true

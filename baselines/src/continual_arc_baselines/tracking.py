@@ -166,6 +166,11 @@ class Tracker:
 
         return unsubscribe
 
+    def count(self, call: LLMCall) -> None:
+        """Only the counters, for a call too cheap to be worth what its journal lines would cost."""
+        with self._lock:
+            self.usage.update(call)
+
     def emit(self, call: LLMCall) -> None:
         self.touch()
         with self._lock:
