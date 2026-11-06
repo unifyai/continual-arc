@@ -7,10 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://continualarc.org">Explore every run</a> ·
+  <a href="https://continual-arc.unify.ai">Explore every run</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Paper</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
-  <a href="https://continualarc.org/leaderboard">Leaderboard</a> ·
+  <a href="https://continual-arc.unify.ai/leaderboard">Leaderboard</a> ·
   <a href="https://github.com/unifyai/continual-arc">Benchmark</a>
 </p>
 

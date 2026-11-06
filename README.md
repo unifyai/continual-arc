@@ -7,10 +7,10 @@
 </p>
 
 <p align="center">
-  <a href="https://continualarc.org">Explore every run</a> ·
+  <a href="https://continual-arc.unify.ai">Explore every run</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Paper</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
-  <a href="https://continualarc.org/leaderboard">Leaderboard</a> ·
+  <a href="https://continual-arc.unify.ai/leaderboard">Leaderboard</a> ·
   <a href="baselines">Baselines</a> ·
   <a href="training">Training</a>
 </p>
@@ -42,7 +42,7 @@ The learners the paper evaluates, adapters for three agent harnesses among them,
 GPT-6 Luna runs, with the trajectories behind them, are plain JSON in git at
 [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the
 [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and every task, figure, run and
-trajectory of the paper can be explored and replayed at [continualarc.org](https://continualarc.org).
+trajectory of the paper can be explored and replayed at [continual-arc.unify.ai](https://continual-arc.unify.ai).
 
 On GPT-6 Luna, its check on a frontier model, the paper ran Prime Agent, Hermes Agent and OpenClaw through the stream
 with every learning mechanism they ship switched on, and again with everything they wrote deleted before every
@@ -481,7 +481,7 @@ training/        the training of the paper's trained rows on Qwen3.5-9B (trainin
 
 ## Submitting a result
 
-The [leaderboard](https://continualarc.org/leaderboard) opens with the paper's runs and takes anyone's. A result
+The [leaderboard](https://continual-arc.unify.ai/leaderboard) opens with the paper's runs and takes anyone's. A result
 is a learning method on a student model and, if it has one, a teacher model, placed on the plane of the two tests'
 shares saved. A result on the public stream is taken as reported. It is marked verified once we have rerun its code on the held-out rules,
 which nobody outside unify has seen ([verified results](#verified-results)).
@@ -590,7 +590,7 @@ The [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.
 runs of the paper's GPT-6 Luna grid, each in the layout above, and the trajectories behind them,
 `continual-arc-trajectories-v0.1.0.tar.gz`: every message the benchmark sent and every reply, the harnesses'
 reasoning summaries and tool calls, and what each learner kept, file by file. Both are under CC BY 4.0, and any run
-can be replayed instance by instance at [continualarc.org/runs](https://continualarc.org/runs). They were
+can be replayed instance by instance at [continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs). They were
 played before the frozen tests, so each stream ends on a learning-on epilogue of 25 held-out tasks, as many as
 the configuration had until 20 October 2026, which no measure reads now. Each run rebuilds slot for slot from its own
 configuration, and every one of their streams is the one `arc1` builds today. They name it `arc1-small`, as every run
