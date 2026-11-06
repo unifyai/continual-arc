@@ -246,3 +246,19 @@ def test_log_state_is_for_a_system_learner_and_a_harness_plays_no_test_after_its
                        "--learner-kwargs", '{"model": "m"}', "--test", str(test), "--out", str(tmp_path / "tested")])
     assert not any((tmp_path / out / "records.jsonl").exists() for out in ("logged", "tested"))
 
+
+
+def test_an_interrupt_stops_the_run_before_its_next_instance_with_its_records_written(tmp_path, monkeypatch, capsys):
+    """The verifier stops a run that has spent its budget or passed its deadline with an interrupt. The runner plays its
+    instances in threads of its own, so an exception in the main thread would leave them playing on to the stream's end."""
+    import signal
+
+    sched = tmp_path / "sched.json"
+    stream_schedule(FakeSource(n_tasks=6).task_ids()[:3], 12, seed=2, source=FakeSource(n_tasks=6).name).save(sched)
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "run"
+    code = main(["run", "--learner", "tests.fixtures:InterruptedLearner", "--learner-kwargs", '{"n": 4}', "--schedule",
+                 str(sched), "--no-proxy", "--registry", "tests.fixtures:fake_registry", "--quiet", "--out", str(out)])
+    assert code == 130 and "stopped after 4 instances, as asked" in capsys.readouterr().err
+    assert len((out / "records.jsonl").read_text().splitlines()) == 4
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler   # the run's handler goes with it

@@ -254,6 +254,14 @@ class JournalSink:
                                               "body": call.response_body})
 
 
+class Stopped(Exception):
+    """The run was asked to stop, by an interrupt, and the next instance has not begun (:class:`TrackedLearner`)."""
+
+    def __init__(self, done: int):
+        super().__init__(f"stopped after {done} instances, as asked")
+        self.done = done
+
+
 class PilotStop(Exception):
     """``stop_after`` instances are done and the next one has not begun (:class:`TrackedLearner`)."""
 
@@ -281,9 +289,13 @@ class TrackedLearner:
     """
 
     def __init__(self, learner: Any, tracker: Tracker, *, calls_wait_s: float = 600.0,
-                 stop_after: int | None = None, done: int = 0):
+                 stop_after: int | None = None, done: int = 0, stop: threading.Event | None = None):
         self.learner = learner
         self.tracker = tracker
+        # set when the run is asked to stop (``arc-baselines run`` on an interrupt): the next instance's first action
+        # raises Stopped, as ``stop_after`` raises PilotStop, so that a run stopped while the runner plays its instances
+        # in threads of their own ends with its records written and its learner closed
+        self.stop = stop
         # ``arc-baselines run --stop-after``: once ``stop_after`` instances are done (``done`` of them before a
         # resume), the next instance's first action raises PilotStop, after the runner has written the last record and
         # before the new instance has taken any action, so a resume replays nothing.
@@ -308,6 +320,8 @@ class TrackedLearner:
         if self._since is None:
             if self.stop_after is not None and self._done >= self.stop_after:
                 raise PilotStop(self._done)
+            if self.stop is not None and self.stop.is_set():
+                raise Stopped(self._done)
             self._since = time.monotonic()
         return self.learner.act(obs)
 

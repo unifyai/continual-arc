@@ -26,7 +26,9 @@ import json
 import os
 import shlex
 import shutil
+import signal
 import sys
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -157,7 +159,7 @@ def can_freeze(learner) -> bool:
 
 
 def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, registry, name, alias_style,
-              resume, progress):
+              resume, progress, stop=None):
     """Play ``test`` with ``learner``, the object that has just played the run's stream, so that it starts from the
     state the stream left it in, into ``test_dir``, a run directory of its own holding the run's ``alias-salt``, so
     that the learner meets its tasks under the names the stream gave them.
@@ -165,7 +167,8 @@ def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, 
     One test a launch: once the test's round has ended the learner may change what it carries from what the test
     taught it, so a second test played after the first would start from that state, not from the stream's end. A hosted
     learner frozen at the stream's end (``HostedLearner.freeze``) plays its test one instance at a time, its files put back
-    before each. A harness adapter plays its tests with ``arc-baselines test`` instead."""
+    before each. A harness adapter plays its tests with ``arc-baselines test`` instead. ``stop``, once set, stops the test
+    before its next instance (``TrackedLearner``)."""
     from continual_arc.aliases import SALT_FILE
     from continual_arc.runner import build_env, run
 
@@ -173,7 +176,7 @@ def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, 
 
     test_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy2(run_dir / SALT_FILE, test_dir / SALT_FILE)
-    return run(TrackedLearner(learner, tracker), test, config=config, out_dir=test_dir, registry=registry,
+    return run(TrackedLearner(learner, tracker, stop=stop), test, config=config, out_dir=test_dir, registry=registry,
                progress=progress, learner_name=name, env=build_env(test, config, registry), resume=resume,
                alias_style=alias_style)
 
@@ -221,7 +224,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     from continual_arc_baselines.frozen import give_back, hold_aside, one_at_a_time, settle
     from continual_arc_baselines.proxy import LLMProxy, SpendLedger, own_model
     from continual_arc_baselines.systems.base import SystemLearner
-    from continual_arc_baselines.tracking import JournalSink, PilotStop, TrackedLearner, Tracker
+    from continual_arc_baselines.tracking import JournalSink, PilotStop, Stopped, TrackedLearner, Tracker
 
     config, kwargs, registry, name = launch_settings(args, schedule)
     if args.resume and not args.out:
@@ -334,6 +337,18 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         test_dir = Path(args.test_out) if args.test_out else out_dir / "frozen" / test.meta["test"] / "play"
     tested = None
     system = learner.state_dir.parent if isinstance(learner, SystemLearner) else None
+    # An interrupt stops the run before its next instance, its records written and its learner closed, since the runner
+    # plays instances in threads of its own, which an exception in this one would leave playing on; a second stops it at
+    # once.
+    stopping = threading.Event()
+
+    def stop_soon(signum, frame):
+        if stopping.is_set():
+            raise KeyboardInterrupt
+        stopping.set()
+        print("stopping after the instance in hand; interrupt again to stop at once", file=sys.stderr)
+
+    interrupted = signal.signal(signal.SIGINT, stop_soon)
     try:
         if frozen_from is not None:
             settle(system, frozen_from[1])
@@ -341,7 +356,8 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         elif prior and system is not None:
             settle(system, len(prior))
         result = run(
-            TrackedLearner(learner, tracker, stop_after=args.stop_after, done=len(prior)), schedule, config=config,
+            TrackedLearner(learner, tracker, stop_after=args.stop_after, done=len(prior), stop=stopping), schedule,
+            config=config,
             out_dir=out_dir, registry=registry, log_events=args.events, progress=progress, learner_name=name,
             env=build_env(schedule, config, registry), resume=args.resume, alias_style=args.alias_style,
         )
@@ -351,7 +367,11 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
                 learner.freeze()
             # the attempt's metrics are the stream's, step by step; the test's records are its own directory's
             tested = play_test(learner, tracker, test, out_dir, test_dir, config=config, registry=registry,
-                               name=name, alias_style=args.alias_style, resume=args.resume, progress=show)
+                               name=name, alias_style=args.alias_style, resume=args.resume, progress=show,
+                               stop=stopping)
+    except Stopped as stop:
+        print(f"run: {stop}", file=sys.stderr)
+        return 130
     except PilotStop as stop:
         # stopped by --stop-after: held, and continued by a launch with --resume and without --stop-after
         hold.write_text(json.dumps({"stopped_after": stop.done, "at": datetime.now(UTC).isoformat(
@@ -359,6 +379,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         print(f"pilot: {stop}; held ({hold})", file=sys.stderr)
         return 0
     finally:
+        signal.signal(signal.SIGINT, interrupted)
         if hasattr(learner, "close"):
             learner.close()
         if frozen_from is not None and learner.frozen is not None:
