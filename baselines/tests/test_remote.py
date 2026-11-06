@@ -59,8 +59,10 @@ def kwargs_for(tmp_path, code) -> dict:
 
 
 def test_the_ssh_command_turns_off_what_a_far_side_could_use():
-    command = ssh_command("arena@host", "/k", "/known", "serve", forward=(7, 9))
-    assert command[0] == "ssh" and command[-2:] == ["arena@host", "serve"]
+    command = ssh_command("arena@host", "/k", "/known", "serve", forward=(7, 9), max_bytes=1024)
+    assert "ssh" in command and command[-2:] == ["arena@host", "serve"]
+    if shutil.which("prlimit"):
+        assert command[:2] == ["prlimit", "--fsize=1024"]
     assert command[command.index("-R") + 1] == "127.0.0.1:7:127.0.0.1:9"
     for option in ("ForwardAgent=no", "ForwardX11=no", "PermitLocalCommand=no", "UpdateHostKeys=no", "BatchMode=yes",
                    "UserKnownHostsFile=/known", "ExitOnForwardFailure=yes"):
@@ -124,11 +126,23 @@ def attach(learner: RemoteLearner, tmp_path) -> None:
     ("print('x' * 20_000_000, flush=True)", "characters or more"),
     ("import time; time.sleep(30)", "did not answer"),
     ("pass", "exited"),
+    ("for i in range(100000):\n    print('noise', flush=True)", "broke the protocol"),
 ])
 def test_a_far_side_that_misbehaves_at_the_start_fails_the_cell(tmp_path, fake_ssh, script, message):
     far = FarSide(tmp_path, "import sys\n" + script)
     with pytest.raises(HostedLearnerError, match=message):
         attach(far.learner(), tmp_path)
+
+
+@LINUX
+def test_what_a_far_side_sends_is_cut_at_its_cap_whatever_it_says_it_will_send(tmp_path):
+    """The arena's own ``head -c`` is the arena's word. ssh's file stops at the limit this side sets."""
+    import subprocess
+
+    target = tmp_path / "out"
+    with target.open("wb") as out:
+        done = subprocess.run(["prlimit", "--fsize=1000", "sh", "-c", "head -c 5000 /dev/zero"], stdout=out, check=False)
+    assert target.stat().st_size == 1000 and done.returncode != 0
 
 
 def test_a_far_side_that_misbehaves_in_play_fails_the_cell(tmp_path, fake_ssh):

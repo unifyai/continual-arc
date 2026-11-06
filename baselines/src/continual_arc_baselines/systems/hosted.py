@@ -90,6 +90,8 @@ bring ``continual-arc`` itself."""
 MAX_REPLY = 16 * 2**20
 """The longest line a learner may send, in characters: its replies are grids and counters, and an unbounded line would
 exhaust this process's memory."""
+MAX_STARTUP_LINES = 64
+"""How many lines a learner's start may print on the channel before its hello: what an interpreter's start-up says."""
 MAX_RESOURCES = 64
 """How many counters a learner's ``resources`` may report, each of which goes in every record."""
 INHERITED_ENV = ("LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
@@ -180,6 +182,7 @@ class ServedLearner(BaseLearner):
 
     def _receive(self, what: str, timeout_s: float, startup: bool = False) -> Any:
         deadline = time.monotonic() + timeout_s
+        noise = 0
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -201,7 +204,8 @@ class ServedLearner(BaseLearner):
             except (ValueError, RecursionError):
                 reply = None
             if not isinstance(reply, dict) or "ok" not in reply:
-                if startup:  # what the interpreter's start-up (a .pth file) printed before the host took stdout
+                noise += 1
+                if startup and noise <= MAX_STARTUP_LINES:  # what the interpreter's start-up (a .pth file) printed
                     self._note(f"before the host started: {line.rstrip()[:500]}")
                     continue
                 raise self._fail(f"the learner's host broke the protocol during {what}: {line[:300]!r}")

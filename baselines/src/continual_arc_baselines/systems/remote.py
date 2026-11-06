@@ -30,6 +30,7 @@ import importlib.util
 import json
 import os
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -54,11 +55,13 @@ SSH_OPTIONS = ("-F", "/dev/null", "-o", "IdentitiesOnly=yes", "-o", "BatchMode=y
 
 
 def ssh_command(arena: str, key: str | Path, known_hosts: str | Path, command: str,
-                forward: tuple[int, int] | None = None) -> list[str]:
+                forward: tuple[int, int] | None = None, max_bytes: int = LOG_CAP) -> list[str]:
     """ssh to ``arena`` to run ``command``; ``forward`` opens the arena's loopback port ``forward[0]`` onto this machine's
-    loopback port ``forward[1]``."""
+    loopback port ``forward[1]``. A file ssh writes, its output or its errors, stops at ``max_bytes`` however much the far
+    side sends, since the far side is not to be trusted (where ``prlimit`` is, as on any Linux)."""
     tunnel = ["-R", f"127.0.0.1:{forward[0]}:127.0.0.1:{forward[1]}"] if forward else []
-    return ["ssh", *SSH_OPTIONS, "-i", str(key), "-o", f"UserKnownHostsFile={known_hosts}", *tunnel, arena, command]
+    limit = ["prlimit", f"--fsize={max_bytes}"] if shutil.which("prlimit") else []
+    return [*limit, "ssh", *SSH_OPTIONS, "-i", str(key), "-o", f"UserKnownHostsFile={known_hosts}", *tunnel, arena, command]
 
 
 def _clean_env() -> dict[str, str]:
@@ -112,10 +115,10 @@ class RemoteLearner(ServedLearner):
 
     def _fetch(self, command: str, to: Path, cap: int) -> None:
         """What ``command`` prints on the arena, at most ``cap`` bytes of it, into ``to``: bytes, whatever they hold."""
-        pipeline = f"{command} | head -c {cap}"
         with to.open("wb") as out:
-            subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, pipeline), stdout=out, stderr=self._log,
-                           stdin=subprocess.DEVNULL, timeout=FETCH_TIMEOUT_S, check=False, env=_clean_env())
+            subprocess.run(ssh_command(self.arena, self.key, self.known_hosts, f"{command} | head -c {cap}", max_bytes=cap),
+                           stdout=out, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, timeout=FETCH_TIMEOUT_S,
+                           check=False, env=_clean_env())
 
     def close(self) -> None:
         """Ask the arena to end the learner, whose errors are noted rather than raised, since this runs while the run
