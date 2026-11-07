@@ -42,6 +42,8 @@ from continual_arc_baselines.systems.protocol import (
     _normalise_name,
     objects_from_end,
 )
+from continual_arc_baselines.systems.world_model import render_board as render_frame
+from continual_arc_baselines.systems.world_model import render_changes
 
 MAX_BATCH = 20
 
@@ -101,25 +103,6 @@ def rules(obs: Arc3LearnerObservation, finish: bool) -> str:
 # ---------------------------------------------------------------------------
 
 
-def render_frame(frame: Frame) -> str:
-    return "\n".join("".join(format(c, "x") for c in row) for row in frame)
-
-
-def render_changes(cells: tuple[tuple[int, int, int], ...]) -> str:
-    """Changed cells ``(x, y, color)``, one line a row, each a run of columns of one color: ``y12: 20-24=0 30=c``."""
-    rows: dict[int, list[tuple[int, int]]] = {}
-    for x, y, c in cells:
-        rows.setdefault(y, []).append((x, c))
-    lines = []
-    for y in sorted(rows):
-        runs: list[list[int]] = []   # [first x, last x, color]
-        for x, c in sorted(rows[y]):
-            if runs and runs[-1][1] == x - 1 and runs[-1][2] == c:
-                runs[-1][1] = x
-            else:
-                runs.append([x, x, c])
-        lines.append(f"y{y}: " + " ".join(f"{a}={c:x}" if a == b else f"{a}-{b}={c:x}" for a, b, c in runs))
-    return "\n".join(lines)
 
 
 def render_board(frame: Frame, shown: Frame | None, what: str = "Board") -> str:

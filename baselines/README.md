@@ -33,7 +33,8 @@ in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) an
 | `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) with the sandboxed runner of its programs |
 | `src/continual_arc_baselines/systems/prime_agent.py`, `hermes_agent.py`, `openclaw.py` | the harness adapters of row H: prime-agent over its RPC mode, hermes-agent and openclaw over the Agent Client Protocol (`acp.py`). Row H0 is `stateless=True`, row HA `ask_to_store=True` and row HPL `program_library=True` |
 | `src/continual_arc_baselines/systems/base.py`, `protocol.py` | `SystemLearner`, the adapter base class, with its budgets, restarts, wipes and frozen resets; the messages a learner is shown and the lenient parser that reads an action from a reply |
-| `src/continual_arc_baselines/systems/guidance.py` | `EXPERT_GUIDANCE`, the single policy used by expert-guided harnesses and the DAgger teacher |
+| `src/continual_arc_baselines/systems/guidance.py` | `EXPERT_GUIDANCE`, the single policy used by expert-guided harnesses and the DAgger teacher, and `GAME_GUIDANCE`, its counterpart on an ARC-AGI-3 game |
+| `src/continual_arc_baselines/systems/world_model.py` | a game's rules as a program, checked at no cost on every transition the game has shown and searched for a winning plan: the program library's program on an ARC-AGI-3 game, and the tools a guided harness imports there (`carc_games.py`) |
 | `src/continual_arc_baselines/systems/sandbox.py`, `seccomp.py` | the sandbox each harness runs in: bubblewrap on Linux, from an empty root with private namespaces, a filter on what it may ask of the kernel and limits on what it consumes, and Seatbelt on macOS |
 | `src/continual_arc_baselines/systems/remote.py`, `connect_filter.py` | a submitted learner served from a machine of its own, and an install's one way out |
 | `src/continual_arc_baselines/systems/hosted.py`, `learner_host.py` | a submitted Python learner run whole inside the sandbox, for verified runs, and the host that serves it there |
@@ -64,7 +65,9 @@ Set `program_library=True` with `end="finish"` for a guided harness. It receives
 conversation; `rules_page` cannot be added beside it. Harness paths are supplied separately as runtime context.
 Run metadata records the guidance's SHA256 digest.
 The [program-library learner](src/continual_arc_baselines/systems/bare.py) implements the policy in code and
-does not receive this guidance.
+does not receive this guidance. On an ARC-AGI-3 game a guided harness reads `GAME_GUIDANCE` instead, and finds the
+world-model tools (`carc_games.py`) and the instance's boards as shown (`instance.json`) in its library directory,
+written by the adapter before every message; its run metadata records that text's digest too.
 
 The paper's experiments predate this consolidation. In the open-model runs, the final QDE teacher read `c1` alone
 and guided Qwen/GLM harnesses read `c1` followed by the program-library procedure, preserved at

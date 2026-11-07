@@ -713,6 +713,17 @@ PROGRAM_LIBRARY_ASK = (
     '{{"action": "finish"}}.'
 )
 
+# The same after a game's verdict, for guidance.GAME_GUIDANCE: {library} is the library directory, {trajectories},
+# {notes} and {program} the game's three files, {task} the game's id as the agent sees it.
+GAME_LIBRARY_ASK = (
+    "Now save this game's library, in one Python call if you can.{note} With carc_games from {library}, save() this "
+    "instance's trajectories to {trajectories}; update {notes} with the controls, the win condition and what you "
+    "learned; save to {program} the program that passes check_game(), replacing any older version (if none does, leave "
+    "that file as it was); and keep the game's memory, named {task}, saying where its three files are and whether its "
+    "program passes. Then reply with "
+    '{{"action": "finish"}}.'
+)
+
 BUDGET_NOTICE = (
     "Your previous turn was stopped because it exceeded the time or model-call budget for a "
     "single action. Decide now from what you already know, without further exploration."

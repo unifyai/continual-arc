@@ -83,8 +83,21 @@ plays the track with no model, keeping what it learns as files, for checking suc
 dormancy of median 16 steps, a new game every two). The held-out test is the epilogue's instances
 (`BenchmarkConfig.held_out_per_task`, four), and the fresh order wipes the learner before every one of them.
 
+## The program library and the expert guidance
+
+On a game the program library's program is the game's rules, a world model
+(`baselines/src/continual_arc_baselines/systems/world_model.py`): `step(state, action)` and `won(state)`, a state by
+default the board, with `init` and `render` for what a board hides. It is checked at no cost by running it from the
+first board of every level the game has shown, the demonstrations' and the learner's own play, through every action
+played on it, and kept once it reproduces every board and says won exactly where a level completed; a kept program
+is searched breadth-first for the shortest winning sequence when the game returns, and its plan is played with no
+model call until the game shows a board it did not predict. The expert guidance gives a harness the same procedure
+with the module as tools, beside a playing procedure: a demonstration first on a new game, each action it did not
+show tried once, the controls and the win condition written into notes and read on a return
+(`guidance.GAME_GUIDANCE`).
+
 ## Open
 
 * The drift mode: rules that change over the stream, with a game's later levels as its first source.
 * A human baseline on fresh levels: the published counts are for level 0, scaled here by the solver's lengths.
-* The program library and the trained rows do not play this track.
+* The trained rows do not play this track.

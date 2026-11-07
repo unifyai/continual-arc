@@ -44,15 +44,25 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from continual_arc.arc3.env import Arc3LearnerObservation
+from continual_arc.arc3.env import (
+    ActFeedback,
+    Arc3LearnerObservation,
+    DemonstrationFeedback,
+    ResetFeedback,
+)
 from continual_arc.env import Action, Feedback, GiveUp, LearnerObservation
 from continual_arc.learner import BaseLearner
 
 from continual_arc_baselines.attempt import ROOT
 from continual_arc_baselines.frozen import put_back
 from continual_arc_baselines.statelog import StateLog
-from continual_arc_baselines.systems import arc3_protocol, protocol
-from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE, EXPERT_GUIDANCE_SHA256
+from continual_arc_baselines.systems import arc3_protocol, protocol, world_model
+from continual_arc_baselines.systems.guidance import (
+    EXPERT_GUIDANCE,
+    EXPERT_GUIDANCE_SHA256,
+    GAME_GUIDANCE,
+    GAME_GUIDANCE_SHA256,
+)
 from continual_arc_baselines.systems.protocol import Transcript
 from continual_arc_baselines.tracking import instance_ended
 
@@ -211,6 +221,13 @@ class SystemLearner(BaseLearner):
         self._turns = None      # turns.jsonl, opened on first use
         self._queue: list = []  # the game actions of a sequence still to play, with no message between them
         self._view = arc3_protocol.GameView()   # the board a game's conversation last showed
+        # A guided game's instance as its conversation has shown it, for the guidance's tools (_write_game_files): the
+        # instance, its play as trajectories of the boards shown, its demonstrations, and the last board and actions.
+        self._game_key: tuple | None = None
+        self._game_record = world_model.Recorder()
+        self._game_demos: list[dict] = []
+        self._game_board: list | None = None
+        self._game_available: list[int] = []
 
     # -- to implement --------------------------------------------------------
 
@@ -270,7 +287,8 @@ class SystemLearner(BaseLearner):
                 "end": self.end, "empty_reply": self.empty_reply, "archive_wipes": self.archive_wipes,
                 "ask_to_store": self.ask_to_store, "program_library": self.program_library,
                 "rules_page": bool(self.rules_page),
-                **({"expert_guidance_sha256": EXPERT_GUIDANCE_SHA256} if self.program_library else {})}
+                **({"expert_guidance_sha256": EXPERT_GUIDANCE_SHA256, "game_guidance_sha256": GAME_GUIDANCE_SHA256}
+                   if self.program_library else {})}
 
     def system_usage(self) -> dict[str, float]:
         """What the system itself reports about its usage (secondary to the proxy)."""
@@ -465,12 +483,13 @@ class SystemLearner(BaseLearner):
             return self._queue.pop(0)
         self._begin_instance(obs)
         proto = self.protocol_for(obs)
-        if self.program_library and proto is not protocol:
-            raise ValueError("expert guidance (program_library) is the grid tracks' procedure")
+        game = proto is not protocol
+        if self.program_library and game:
+            self._record_game_board(obs)
         pending = self.transcript.take()
         finish = self.end == "finish"
-        guidance = (f"Expert-guidance library directory: {self.programs_dir()}\n\n{EXPERT_GUIDANCE}"
-                    if self.program_library else self.rules_page)
+        guidance = (f"Expert-guidance library directory: {self.programs_dir()}\n\n"
+                    f"{GAME_GUIDANCE if game else EXPERT_GUIDANCE}" if self.program_library else self.rules_page)
         note = "\n\n".join(x for x in (self.storage_note, guidance) if x)
         extra = {"finish": True, "rules_note": note} if finish else {}
 
@@ -516,6 +535,8 @@ class SystemLearner(BaseLearner):
     def observe(self, obs: LearnerObservation | Arc3LearnerObservation, action: Action, feedback: Feedback) -> None:
         ended = instance_ended(feedback)  # the rule by which TrackedLearner waits for the instance's calls
         game = isinstance(obs, Arc3LearnerObservation)
+        if game and self.program_library:
+            self._record_game_feedback(action, feedback, ended)
         if self._queue and (ended or not feedback.valid or feedback.state == "GAME_OVER"):
             # a sequence stops where the system must look again: the level over, or an action refused or ignored
             self._queue = []
@@ -537,23 +558,72 @@ class SystemLearner(BaseLearner):
             if self.session_per_instance:
                 self._session_pending = True
 
-    def library_files(self, task_id: str) -> dict[str, str]:
-        """The expert guidance's two files for ``task_id`` (guidance.EXPERT_GUIDANCE), its program and its kept
-        pairs, with the task's id as the agent sees it, which names the task's memory."""
-        return {"program": f"{self.programs_dir()}/{task_id}.py", "pairs": f"{self.programs_dir()}/{task_id}.json",
-                "task": task_id}
+    # -- a guided game's tools ------------------------------------------------------
 
-    def library_ask(self, task_id: str) -> str:
-        """The ask after each verdict for a row given expert guidance (protocol.PROGRAM_LIBRARY_ASK): save this task's
-        pairs, its program and its memory."""
-        return protocol.PROGRAM_LIBRARY_ASK.format(note=f" {self.storage_note}" if self.storage_note else "",
-                                                   **self.library_files(task_id))
+    def _record_game_board(self, obs: Arc3LearnerObservation) -> None:
+        """A board the conversation is about to show: it closes the step of the actions played since the last one,
+        and the guidance's files are written with it, so that the message and the files agree."""
+        key = (obs.task_id, obs.step)
+        if key != self._game_key:
+            self._game_key, self._game_record, self._game_demos = key, world_model.Recorder(), []
+        self._game_record.board(obs.frames[-1])
+        self._game_board, self._game_available = obs.frames[-1], list(obs.available_actions)
+        self._write_game_files(obs.task_id)
+
+    def _record_game_feedback(self, action: Any, feedback: Any, ended: bool) -> None:
+        """An action's feedback in a guided game: an action the game applied joins the play, a reset ends a
+        trajectory, a demonstration joins the instance's; at the instance's end the files are written once more, for
+        the agent's storage after the verdict."""
+        if self._game_key is None:
+            return
+        if isinstance(feedback, ActFeedback) and feedback.valid and not feedback.ignored:
+            self._game_record.act(action.to_json(), won=feedback.level_completed,
+                                  over=feedback.state == "GAME_OVER" and not feedback.level_completed)
+        elif isinstance(feedback, ResetFeedback):
+            self._game_record.reset()
+        elif isinstance(feedback, DemonstrationFeedback) and not feedback.refused:
+            self._game_demos.append(world_model.trajectory_of_demonstration(
+                feedback.demonstration.to_json(), f"demonstration {feedback.demo_requests_used}"))
+        if ended:
+            self._write_game_files(self._game_key[0])
+
+    def _write_game_files(self, task_id: str) -> None:
+        """The guidance's tools in the library directory: the world-model module as ``carc_games.py``, and
+        ``instance.json``, the game, its actions, the board now, and this instance's demonstrations and play as the
+        conversation has shown them (``current`` the level as it stands)."""
+        folder = Path(self.programs_dir())
+        folder.mkdir(parents=True, exist_ok=True)
+        tools, source = folder / "carc_games.py", Path(world_model.__file__).read_text()
+        if not tools.exists() or tools.read_text() != source:
+            tools.write_text(source)
+        (folder / world_model.INSTANCE).write_text(json.dumps({
+            "game": task_id, "available": self._game_available, "board": self._game_board,
+            "demonstrations": self._game_demos, "play": self._game_record.trajectories,
+            "current": self._game_record.current}))
+
+    def library_files(self, task_id: str, game: bool = False) -> dict[str, str]:
+        """The expert guidance's files for ``task_id``, with the task's id as the agent sees it, which names the task's
+        memory: on a grid (guidance.EXPERT_GUIDANCE) its program and its kept pairs; on a game
+        (guidance.GAME_GUIDANCE) its program, its notes and its trajectories, and the library directory."""
+        folder = self.programs_dir()
+        if game:
+            return {"program": f"{folder}/{task_id}.py", "notes": f"{folder}/{task_id}.md",
+                    "trajectories": f"{folder}/{task_id}.json", "library": folder, "task": task_id}
+        return {"program": f"{folder}/{task_id}.py", "pairs": f"{folder}/{task_id}.json", "task": task_id}
+
+    def library_ask(self, task_id: str, game: bool = False) -> str:
+        """The ask after each verdict for a row given expert guidance (protocol.PROGRAM_LIBRARY_ASK, or
+        protocol.GAME_LIBRARY_ASK for a game): save this task's files and its memory."""
+        ask = protocol.GAME_LIBRARY_ASK if game else protocol.PROGRAM_LIBRARY_ASK
+        return ask.format(note=f" {self.storage_note}" if self.storage_note else "",
+                          **self.library_files(task_id, game))
 
     def programs_dir(self) -> str:
         """Row HPL's program library: a folder of the harness's workspace (every harness adapter has one, kept between
-        instances except in a stateless row), named by its absolute path so that no harness has to guess its cwd."""
+        instances except in a stateless row), else of the learner's state directory, named by its absolute path so
+        that no harness has to guess its cwd."""
         workspace = getattr(self, "workspace", None)
-        return str(Path(workspace) / "programs") if workspace else "programs"
+        return str(Path(workspace) / "programs") if workspace else str(self.state_dir / "programs")
 
     def _refine_due(self) -> bool:
         """Whether the instance that has just ended is followed by the system's refinement (every ``refine_every``
@@ -605,7 +675,7 @@ class SystemLearner(BaseLearner):
             message += "\n\n" + protocol.ASK_TO_STORE.format(note=f" {self.storage_note}" if self.storage_note else "")
             self.stats["store_asks"] += 1
         if self.program_library:
-            message += "\n\n" + self.library_ask(obs.task_id)
+            message += "\n\n" + self.library_ask(obs.task_id, isinstance(obs, Arc3LearnerObservation))
             self.stats["library_asks"] += 1
         try:
             for attempt in range(self.max_reprompts + 1):

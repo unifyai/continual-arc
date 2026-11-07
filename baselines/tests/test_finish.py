@@ -168,13 +168,13 @@ def test_expert_guidance_states_the_whole_procedure_and_asks_for_the_pairs_the_p
     play(s, tmp_path / "hpl")
     rules = s.sent[0]
     assert rules.count(EXPERT_GUIDANCE) == 1
-    assert "Expert-guidance library directory: programs" in rules
+    assert f"Expert-guidance library directory: {s.state_dir / 'programs'}" in rules
     assert EXPERT_GUIDANCE not in s.sent[1]
     label = re.search(r"Task id: (task-[0-9a-f]+)", rules).group(1)
     ask = s.sent[1]
     assert ask.startswith("Your submission was CORRECT. Instance solved with 0 wrong attempt(s).\n\nNow save this "
                           "task's library, in one Python call if you can.")
-    assert f"to programs/{label}.json; save to programs/{label}.py the transform(grid)" in ask
+    assert f"to {s.state_dir / 'programs'}/{label}.json; save to {s.state_dir / 'programs'}/{label}.py the transform(grid)" in ask
     assert f"keep the task's memory, named {label}," in ask
     assert ask.endswith('reply with {"action": "finish"}.')
     assert s.stats["library_asks"] == 1 and s.stats["store_asks"] == 0 and s.describe()["program_library"] is True
