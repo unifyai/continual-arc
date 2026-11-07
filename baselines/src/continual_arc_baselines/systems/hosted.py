@@ -280,12 +280,14 @@ class HostedLearner(ServedLearner):
 
     def __init__(self, python: str, learner: str, code: str | None = None, runtime: list[str] | None = None,
                  sandbox: str = "auto", timeout_s: float = 3600.0, startup_timeout_s: float = 600.0,
-                 close_timeout_s: float = 60.0):
+                 close_timeout_s: float = 60.0, read_paths: list[str] | None = None):
         super().__init__(timeout_s, startup_timeout_s, close_timeout_s)
         self.python = Path(python).expanduser().absolute()  # the venv's own path, not the interpreter it links to
         self.learner = learner
         self.code = Path(code).expanduser().absolute() if code else None
         self.runtime = [Path(path).expanduser().absolute() for path in runtime or ()]
+        # more the learner may read, such as a student's open weights on a GPU arena, named to it in ARC_READ_PATHS
+        self.read_paths = [Path(path).expanduser().absolute() for path in read_paths or ()]
         self.sandbox = sandbox
         self.base_url: str | None = None
         self.frozen: Path | None = None  # the learner's files as its stream left them, put back before every instance
@@ -326,10 +328,12 @@ class HostedLearner(ServedLearner):
         if self.base_url:
             env.update(dict.fromkeys(BASE_URL_VARIABLES, self.base_url))
             env.update(dict.fromkeys(KEY_VARIABLES, PLACEHOLDER_KEY))
+        if self.read_paths:
+            env["ARC_READ_PATHS"] = os.pathsep.join(str(path) for path in self.read_paths)
         return env
 
     def sandbox_spec(self) -> SandboxSpec:
-        reads = [self.workdir / HOST.name, self.workdir / "netbridge.py", *self.runtime]
+        reads = [self.workdir / HOST.name, self.workdir / "netbridge.py", *self.runtime, *self.read_paths]
         for path in self.runtime:
             reads += package_manager_roots(path)
         port = proxy_port(self.base_url) if self.base_url else None

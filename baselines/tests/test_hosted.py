@@ -414,6 +414,17 @@ def test_a_connection_lost_mid_test_leaves_the_streams_files_aside(tmp_path):
     assert not (workdir / "stream-end").exists() and (workdir / "state" / "kept").read_text() == "from the stream"
 
 
+def test_what_more_a_learner_may_read_is_named_to_it_and_bound_into_its_sandbox(tmp_path):
+    weights = tmp_path / "weights" / "student"
+    hosted, plain = (HostedLearner(str(tmp_path / "venv" / "bin" / "python"), "pkg.mod:Learner", sandbox="none",
+                                   read_paths=paths) for paths in ([str(weights)], None))
+    for learner in (hosted, plain):
+        learner.workdir, learner._tmp_dir = tmp_path / "attempt", tmp_path / "tmp"
+    assert hosted.child_env()["ARC_READ_PATHS"] == str(weights)
+    assert weights in hosted.sandbox_spec().read_paths
+    assert "ARC_READ_PATHS" not in plain.child_env() and weights not in plain.sandbox_spec().read_paths
+
+
 def test_a_learner_cannot_report_the_counters_the_proxy_keeps():
     class Reporting(ServedLearner):
         def _call(self, op, timeout_s=None, **fields):

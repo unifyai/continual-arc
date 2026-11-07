@@ -279,8 +279,9 @@ def _serve(args: argparse.Namespace) -> int:
     os.dup2(2, 1)
     sys.stdout = sys.stderr
     timeout_s, startup_timeout_s, close_timeout_s = (float(t) for t in args.timeouts.split(","))
-    learner = HostedLearner(args.python, args.learner, code=args.code, runtime=args.runtime, timeout_s=timeout_s,
-                            startup_timeout_s=startup_timeout_s, close_timeout_s=close_timeout_s)
+    learner = HostedLearner(args.python, args.learner, code=args.code, runtime=args.runtime, sandbox=args.sandbox,
+                            timeout_s=timeout_s, startup_timeout_s=startup_timeout_s, close_timeout_s=close_timeout_s,
+                            read_paths=args.read_path)
     if args.frozen:  # what the last instance's sandbox kept in its temporary directory is space on the disk the next can read
         for left in Path(tempfile.gettempdir()).glob(TMP_PREFIX + "*"):
             delete(left)
@@ -311,6 +312,9 @@ def main(argv: list[str] | None = None) -> int:
     served.add_argument("--code")
     served.add_argument("--runtime", action="append")
     served.add_argument("--frozen", action="store_true", help="in a frozen test, from a copy of the files its stream left")
+    served.add_argument("--read-path", action="append", default=[], help="more the learner may read, such as its weights")
+    served.add_argument("--sandbox", default="auto",
+                        help="auto | bwrap | none: none where the machine is the learner's own sandbox, as on Modal")
     forget = sub.add_parser("forget", help="delete a cell's folder, whatever its learner did to its permissions")
     forget.add_argument("--workdir", required=True)
     listed = sub.add_parser("installed", help="what a virtual environment holds, as JSON")
