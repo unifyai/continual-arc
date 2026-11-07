@@ -606,7 +606,7 @@ played before v0.6.0 does, when the benchmark still named its configurations by 
 ```bibtex
 @article{lenton2026continualarc,
   title   = {Continual-ARC: Measuring Skill Acquisition over a Working Lifetime},
-  author  = {Lenton, Daniel and Arif, Yusha and Mahmood, Haris},
+  author  = {Lenton, Daniel},
   note    = {Preprint},
   year    = {2026}
 }
