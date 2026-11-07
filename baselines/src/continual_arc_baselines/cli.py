@@ -224,7 +224,13 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     from continual_arc_baselines.frozen import give_back, hold_aside, one_at_a_time, settle
     from continual_arc_baselines.proxy import LLMProxy, SpendLedger, own_model
     from continual_arc_baselines.systems.base import SystemLearner
-    from continual_arc_baselines.tracking import JournalSink, PilotStop, Stopped, TrackedLearner, Tracker
+    from continual_arc_baselines.tracking import (
+        JournalSink,
+        PilotStop,
+        Stopped,
+        TrackedLearner,
+        Tracker,
+    )
 
     config, kwargs, registry, name = launch_settings(args, schedule)
     if args.resume and not args.out:

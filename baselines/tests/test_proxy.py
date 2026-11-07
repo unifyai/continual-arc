@@ -12,7 +12,13 @@ import pytest
 
 from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.costs import CostJournal
-from continual_arc_baselines.proxy import CONFINED_HOSTS, CONFINED_ROUTING, PLACEHOLDER_KEY, LLMProxy, SpendLedger
+from continual_arc_baselines.proxy import (
+    CONFINED_HOSTS,
+    CONFINED_ROUTING,
+    PLACEHOLDER_KEY,
+    LLMProxy,
+    SpendLedger,
+)
 from continual_arc_baselines.tracking import JournalSink, Tracker
 
 from .fake_upstream import FakeUpstream

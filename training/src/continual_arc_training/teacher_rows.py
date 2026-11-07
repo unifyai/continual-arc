@@ -152,7 +152,7 @@ def cmd_view(a: argparse.Namespace) -> None:
     infos = stream.annotate()
     records: list[dict[str, Any]] = []
     parts = [run / frozen.FROZEN / f"stream-{first:03d}" / "play" for first in range(0, ROUNDS, PART)]
-    for first, part in zip(range(0, ROUNDS, PART), parts):
+    for first, part in zip(range(0, ROUNDS, PART), parts, strict=True):
         played = [json.loads(line) for line in (part / "records.jsonl").read_text().splitlines() if line.strip()]
         if len(played) != PART:
             raise SystemExit(f"{part} holds {len(played)} of its {PART} records")

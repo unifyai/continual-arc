@@ -49,7 +49,12 @@ from pathlib import Path
 from typing import Any
 
 from continual_arc_baselines.frozen import delete
-from continual_arc_baselines.systems.hosted import TMP_PREFIX, HostedLearner, HostedLearnerError, ServedLearner
+from continual_arc_baselines.systems.hosted import (
+    TMP_PREFIX,
+    HostedLearner,
+    HostedLearnerError,
+    ServedLearner,
+)
 from continual_arc_baselines.systems.sandbox import confinement_problems, proxy_port
 
 ARENA_ROOT = "/home/arena/run"
