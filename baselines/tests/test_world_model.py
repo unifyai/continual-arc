@@ -138,6 +138,18 @@ def test_won_is_read_exactly_where_the_level_completed():
     assert check(always, demos())["kind"] == "won early"
 
 
+def test_a_program_may_leave_an_outcome_unknown_but_never_a_win():
+    blind = RIGHT.replace("    cells = [(x, y) for y in range(63)", "    if action[0] == 3:\n        return None\n"
+                          "    cells = [(x, y) for y in range(63)", 1)
+    assert check(blind, demos()) is None   # demonstration 2 moves left at once: nothing after it is checked
+    found = plan(blind, {"start": level_b().board(), "steps": []}, [1, 2, 3, 4])
+    assert not found["found"] and found["reason"] == "exhausted"   # never through an unknown state
+    one_left = play(Toy(player=(12, 10), goal=(10, 10)), [[3]], "one move left")
+    assert one_left["steps"][-1]["won"] and len(one_left["steps"]) == 1
+    failure = check(blind, [one_left])   # the level completed where the program could not tell the board
+    assert failure["kind"] == "not won" and failure["step"] == 0
+
+
 def test_a_program_that_cannot_run_or_raises_is_told_so():
     assert check("def step(:", demos())["kind"] == "program"
     assert describe(check("def step(b, a):\n    return b\n", demos())) == (
@@ -214,7 +226,7 @@ def test_a_program_carries_what_the_board_hides_from_the_level_s_first_board():
     assert check(HIDDEN, [trajectory]) is None
     assert check(HIDDEN, demos()) is None                     # a level with no switch is open from the start
     shut = check(RIGHT, [trajectory])                         # the board alone cannot tell the goal is shut
-    assert shut["kind"] == "board" and shut["step"] == 1
+    assert shut["kind"] == "won early" and shut["step"] == 1
     found = plan(HIDDEN, {"start": switch_level().board(), "steps": []}, [1, 2, 3, 4])
     assert found["found"] and len(found["plan"]) == 12
     toy = switch_level()

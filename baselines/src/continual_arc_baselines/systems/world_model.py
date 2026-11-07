@@ -6,8 +6,10 @@ program the program library keeps, checked on what the game has shown as a grid 
 defines ``step(state, action)``, the state after an action, and ``won(state)``; by default a state is the board
 itself, 64 rows of 64 colors 0-15, top row first, and an action is ``[id]``, or ``[6, x, y]`` for a click. To carry
 what a board does not show (a count, a history) a program defines ``init(board)``, its state at a level's first
-board, and ``render(state)``, the board a state shows. It may define ``lost(state)``, a game over, ``clicks(state)``,
-the clicks worth trying, and ``key(state)``, a value equal for states the search may treat as one.
+board, and ``render(state)``, the board a state shows. A state whose board the program cannot tell, such as one after
+an action whose outcome it does not model, renders as None (a program whose states are boards returns None from
+``step``). It may define ``lost(state)``, a game over, ``clicks(state)``, the clicks worth trying, and ``key(state)``,
+a value equal for states the search may treat as one.
 
 A **trajectory** is what a learner saw of one level from its first board: the board, then steps, each the actions the
 game applied with the cells they changed, and whether the level completed (``won``) or the game ended (``over``)
@@ -16,15 +18,19 @@ there, which ends it. A demonstration is one; so is each stretch of a learner's 
 it: it must give each board the game showed, cell for cell, and say ``won``, and ``lost`` where it defines it, exactly
 where the level completed or the game ended. The board after a win or a game over is never compared, so a program
 need not draw an end screen; and running from each level's first board, never from a board midway, lets a program
-track what the board hides. :func:`plan` replays a level's trajectory so far in the program and searches it
-breadth-first for the shortest winning sequence from there, over the actions the game accepts and the clicks
-``clicks(state)`` names (by default one cell of each one-colored patch of the board), states merged by ``key``,
-bounded by states expanded and guarded by a deadline.
+track what the board hides. A state a program renders as None is never a win: no board is compared there and the
+rest of that trajectory is not checked, but a level that completed there is a failure, so a program may leave an
+outcome it cannot simulate unknown and still be held to where the level is won. :func:`plan` replays a level's trajectory so far
+in the program and searches it breadth-first for the shortest winning sequence from there, over the actions the game
+accepts and the clicks ``clicks(state)`` names (by default one cell of each one-colored patch of the board), states
+merged by ``key``, never through a state that is lost or unknown, bounded by states expanded and guarded by a
+deadline.
 
 Standard library only, since it runs where the learner's code runs: the program library runs this file as the
 script of a sandboxed process (``python world_model.py``, a JSON request on stdin and the answer on stdout), and the
 expert guidance's adapter writes it into a harness's library directory as ``carc_games.py``, beside the instance's
-boards (``instance.json``), where the agent imports :func:`load`, :func:`check`, :func:`plan` and :func:`save`.
+boards (``instance.json``), where the agent imports :func:`load`, :func:`check_game`, :func:`plan_game` and
+:func:`save`.
 """
 
 from __future__ import annotations
@@ -276,8 +282,14 @@ class Program:
     def step(self, state: Any, action: list) -> Any:
         return self._step(self._copy(state), list(action))
 
-    def render(self, state: Any) -> Board:
-        return as_board(self._render(state) if self._render is not None else state)
+    def render(self, state: Any) -> Board | None:
+        """The board ``state`` shows, None where the program cannot tell it."""
+        board = self._render(state) if self._render is not None else state
+        return None if board is None else as_board(board)
+
+    def unknown(self, state: Any) -> bool:
+        """Whether the program cannot tell ``state``'s board, without checking the board it gives."""
+        return (self._render(state) if self._render is not None else state) is None
 
     def won(self, state: Any) -> bool:
         return bool(self._won(state))
@@ -339,6 +351,8 @@ def check(program: Program | str, trajectories: list[dict], seconds: float = SEC
         try:
             state = program.init(trajectory["start"])
             got = program.render(state)
+            if got is None:
+                return _failure(trajectory, index, "unknown start", None)
             if got != trajectory["start"]:
                 return _failure(trajectory, index, "start", None, expected=trajectory["start"], got=got)
             if program.won(state):
@@ -349,6 +363,11 @@ def check(program: Program | str, trajectories: list[dict], seconds: float = SEC
             try:
                 for action in step["actions"]:
                     state = program.step(state, action)
+                if program.unknown(state):
+                    # an outcome the program leaves unknown, which is never a win: nothing after it is checked
+                    if step["won"]:
+                        return _failure(trajectory, index, "not won", k)
+                    break
                 if step["won"]:
                     if not program.won(state):
                         return _failure(trajectory, index, "not won", k)
@@ -357,13 +376,13 @@ def check(program: Program | str, trajectories: list[dict], seconds: float = SEC
                     if program.has_lost and not program.lost(state):
                         return _failure(trajectory, index, "not lost", k)
                     break
-                got = program.render(state)
-                if got != shown[k + 1]:
-                    return _failure(trajectory, index, "board", k, before=shown[k], expected=shown[k + 1], got=got)
                 if program.won(state):
                     return _failure(trajectory, index, "won early", k)
                 if program.lost(state):
                     return _failure(trajectory, index, "lost early", k)
+                got = program.render(state)
+                if got != shown[k + 1]:
+                    return _failure(trajectory, index, "board", k, before=shown[k], expected=shown[k + 1], got=got)
             except Exception as error:   # the model's code
                 return _failure(trajectory, index, "error", k, error=f"{type(error).__name__}: {error}")
             if time.monotonic() > deadline:
@@ -403,6 +422,7 @@ def describe(failure: dict) -> str:
                 f"differ, the game shows\n{_listed([[x, y, expected[y][x]] for x, y in wrong])}\nand your program "
                 f"gives\n{_listed([[x, y, got[y][x]] for x, y in wrong])}")
     return {
+        "unknown start": f"Your program renders no board {where}: init and render must give every level's first board.",
         "won early": f"Your program says won {where}, where the level had not completed.",
         "not won": f"The level completed {where}, but your program does not say won there.",
         "lost early": f"Your program says lost {where}, where the game went on.",
@@ -434,7 +454,7 @@ def plan(program: Program | str, history: dict, available: list[int], max_states
         for step in history["steps"]:
             for action in step["actions"]:
                 state = program.step(state, action)
-        if program.render(state) != now:
+        if program.render(state) != now:   # None too: a replay that lost track of the level
             raise ProgramError("the replay does not reach the board now")
     except Exception:   # the model's code: a program that cannot follow the level starts from the board now
         state, start = program.init(now), "board"
@@ -461,6 +481,8 @@ def plan(program: Program | str, history: dict, available: list[int], max_states
             expanded += 1
             try:
                 after = program.step(current, action)
+                if program.unknown(after):
+                    continue
                 if program.won(after):
                     path = [action]
                     while index > 0:
