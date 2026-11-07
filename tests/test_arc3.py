@@ -52,6 +52,7 @@ from continual_arc.report import text_report
 from continual_arc.runner import build_env, load_run, run
 from continual_arc.schedule import Schedule, Slot
 from continual_arc.seeds import derive_seed
+from continual_arc.tasks import TaskRegistry
 
 GENERATORS = {"sp80": "arc3_generators.sp80"}
 SP80_BASELINE = 39   # ARC Prize's human action count for sp80's level 0
@@ -182,6 +183,35 @@ def test_the_pinned_games_are_where_the_fetch_puts_them():
     assert len(st) == 25 and all(s["ok"] for s in st.values())
     assert levels.game_file("ls20").parent.name == GAMES["ls20"] == st["arc-agi-3/ls20"]["pinned"]
     assert levels.baseline("sp80") == SP80_BASELINE
+
+
+@needs_arc3
+def test_a_game_outside_the_pinned_set_plays_from_a_folder_added_beside_them(tmp_path, monkeypatch):
+    """A game laid out as the pinned ones are, in a folder levels.add_games names, loads and draws its levels by its id,
+    and a LevelSource given as the registry serves them to the environment."""
+    from continual_arc.arc3 import levels
+
+    folder = tmp_path / "games" / "zz80" / "v1"
+    folder.mkdir(parents=True)
+    (folder / "zz80.py").write_text(levels.game_file("sp80").read_text())
+    (folder / "metadata.json").write_text(json.dumps({"baseline_actions": [20]}))
+    (tmp_path / "zz80gen.py").write_text("from continual_arc.arc3 import levels\n"
+                                         f"levels.add_games({str(tmp_path / 'games')!r})\n"
+                                         "from arc3_generators.sp80 import generate\nGAME = 'zz80'\n")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setattr(levels, "_ADDED", [])
+    with pytest.raises(ValueError):
+        levels.game_file("zz80")
+    zz80 = LevelSource({"zz80": "zz80gen"}, cache=tmp_path / "solutions")
+    assert zz80.level0_length("zz80") == SP80_LEVEL0   # importing the generator added its folder
+    assert levels.game_file("zz80") == folder / "zz80.py" and levels.baseline("zz80") == 20
+    sched = Schedule(name="zz80", seed=0, slots=[Slot("zz80", 7, "stream")], sources={"zz80": SOURCE_ARC3},
+                     meta={"dataset": "arc3", "track": "arc3"})
+    env = build_env(sched, registry=zz80)
+    assert env.source is zz80 and env.reset().task_id == "zz80"
+    assert env.observation().baseline_actions == 20 * len(env._open[0].drawn.solution) / SP80_LEVEL0
+    with pytest.raises(TypeError, match="LevelSource"):
+        build_env(sched, registry=TaskRegistry())
 
 
 # -- the instance draw and its cache ---------------------------------------------------------------------------------

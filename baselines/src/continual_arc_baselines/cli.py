@@ -51,7 +51,7 @@ def import_object(spec: str, what: str) -> Any:
 def launch_settings(args, schedule) -> tuple[Any, dict[str, Any], Any, str]:
     """What a launch's arguments set for ``schedule``: the environment's configuration (its track's kind, the defaults
     unless ``--env-config`` names a file), the learner's keyword arguments, the task registry (None for the benchmark's
-    own) and the learner's display name."""
+    own; on ARC-AGI-3 a ``LevelSource``, which draws the games' levels) and the learner's display name."""
     from continual_arc.runner import default_config, load_config
 
     config = (load_config(schedule, json.loads(Path(args.env_config).read_text())) if args.env_config
@@ -452,7 +452,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="with --config, the stream alone, as `continual-arc schedule make --no-epilogue` builds it: "
                         "the run a harness's frozen tests follow (arc-baselines test)")
     r.add_argument("--env-config", help="the environment's settings as JSON, an EnvConfig's or, on ARC-AGI-3, an Arc3Config's (default: the track's)")
-    r.add_argument("--registry", help="import path of a zero-arg TaskRegistry factory (testing)")
+    r.add_argument("--registry", help="import path of a zero-arg factory of the tasks' source: a TaskRegistry, or on "
+                                      "ARC-AGI-3 a LevelSource (default: the benchmark's own)")
     r.add_argument("--out", help="run directory (default: <attempt dir>/continual-arc)")
     r.add_argument("--name", help="learner display name")
     r.add_argument("--events", action="store_true", help="also log every action and feedback")

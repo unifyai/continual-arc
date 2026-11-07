@@ -56,19 +56,37 @@ def games_dir() -> Path:
     return data_root() / "arc-agi-3" / "environment_files"
 
 
-def game_file(game_id: str) -> Path:
-    """The game's pinned source: its one version folder under :func:`games_dir`."""
-    (path,) = (games_dir() / game_id).glob("*/*.py")
+_ADDED: list[Path] = []
+
+
+def add_games(folder: str | Path) -> None:
+    """Serve the games in ``folder`` beside the pinned public ones, by their ids: ``folder`` is laid out as
+    :func:`games_dir` is, ``<folder>/<game>/<version>/<game>.py`` beside its ``metadata.json``, whose
+    ``baseline_actions`` gives level 0's action count. A game outside the pinned set then loads, plays and draws its
+    levels as a pinned one does; a generator of such a game calls this when it is imported, before it loads its game."""
+    folder = Path(folder)
+    if folder not in _ADDED:
+        _ADDED.append(folder)
+
+
+def _one(game_id: str, pattern: str) -> Path:
+    """The one file matching ``pattern`` in ``game_id``'s version folder, among the pinned games and every folder
+    :func:`add_games` added: a game found twice, or in two versions, is refused."""
+    (path,) = [p for root in (games_dir(), *_ADDED) for p in (root / game_id).glob(pattern)]
     return path
 
 
+def game_file(game_id: str) -> Path:
+    """The game's source: its one version folder under :func:`games_dir` or a folder :func:`add_games` added."""
+    return _one(game_id, "*/*.py")
+
+
 def metadata(game_id: str) -> dict:
-    (path,) = (games_dir() / game_id).glob("*/metadata.json")
-    return json.loads(path.read_text())
+    return json.loads(_one(game_id, "*/metadata.json").read_text())
 
 
 def baseline(game_id: str) -> int:
-    """The human action count ARC Prize publishes for the game's level 0."""
+    """The human action count for the game's level 0: ARC Prize's, for a pinned game."""
     return int(metadata(game_id)["baseline_actions"][0])
 
 

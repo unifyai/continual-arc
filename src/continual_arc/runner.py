@@ -55,6 +55,7 @@ from continual_arc._version import __version__
 from continual_arc.addons import Addon, Plugin, PluginManager, PluginRuntime
 from continual_arc.aliases import TaskAliases
 from continual_arc.arc3.env import Arc3Config, Arc3Env, Arc3LearnerObservation, Arc3Observation
+from continual_arc.arc3.instances import LevelSource
 from continual_arc.configs import protocol_of
 from continual_arc.data import DATASET_ARC3
 from continual_arc.env import (
@@ -144,15 +145,18 @@ def load_config(schedule: Schedule, d: dict) -> EnvConfig | Arc3Config:
 def build_env(
     schedule: Schedule,
     config: EnvConfig | Arc3Config | None = None,
-    registry: TaskRegistry | None = None,
+    registry: TaskRegistry | LevelSource | None = None,
 ) -> ContinualArcEnv | Arc3Env:
-    """The environment for ``schedule``, at ``config`` or its track's default settings: the games of ARC-AGI-3, or
-    the grids of a task registry."""
+    """The environment for ``schedule``, at ``config`` or its track's default settings: the games of ARC-AGI-3, their
+    levels drawn by ``registry``, a :class:`~continual_arc.arc3.instances.LevelSource` (the pinned games' generators
+    when None), or the grids of a task registry."""
     config = config or default_config(schedule)
     if is_arc3(schedule):
         if not isinstance(config, Arc3Config):
             raise TypeError("an ARC-AGI-3 schedule is played under an Arc3Config")
-        return Arc3Env(schedule, config=config)
+        if registry is not None and not isinstance(registry, LevelSource):
+            raise TypeError("an ARC-AGI-3 schedule's levels come from a LevelSource, not a task registry")
+        return Arc3Env(schedule, config=config, source=registry)
     if not isinstance(config, EnvConfig):
         raise TypeError("a grid schedule is played under an EnvConfig")
     return ContinualArcEnv(schedule, registry=registry, config=config)
@@ -177,7 +181,7 @@ def run(
     schedule: Schedule,
     config: EnvConfig | Arc3Config | None = None,
     out_dir: str | Path | None = None,
-    registry: TaskRegistry | None = None,
+    registry: TaskRegistry | LevelSource | None = None,
     max_actions_per_instance: int | None = None,
     log_events: bool = False,
     progress: ProgressFn | None = None,

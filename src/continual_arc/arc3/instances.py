@@ -198,6 +198,7 @@ class LevelSource:
     def level0_length(self, game_id: str) -> int:
         """The length of level 0's own solution by the game's solver, which an instance's length is held to."""
         if game_id not in self._level0:
+            self.generator(game_id)   # imported first: it may add the folder its game lives in (levels.add_games)
             solution = self.solve(game_id, "level0", levels.level0(game_id))
             if solution is None:
                 raise RuntimeError(f"{game_id}: its solver does not solve level 0")
