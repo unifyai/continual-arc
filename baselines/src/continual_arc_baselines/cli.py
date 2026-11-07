@@ -272,16 +272,17 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         if args.confine_models:
             confined_to = {model: effort or None for model, _, effort in
                            (entry.partition("=") for entry in args.confine_models.split(","))}
+        pinned = dict(entry.split("=", 1) for entry in args.pin_providers.split(",")) if args.pin_providers else {}
         ledger = SpendLedger(args.spend_ledger, args.spend_cap) if args.spend_ledger else None
         proxy = LLMProxy(args.upstream, api_key=os.environ.get(args.upstream_key_env) or None,
                          declared_context_length=args.declared_context_length or None,
                          tracker=tracker, body_defaults=defaults, body_overrides=overrides,
-                         capture_content=args.capture_content, confined_to=confined_to, ledger=ledger,
+                         capture_content=args.capture_content, confined_to=confined_to, pinned=pinned, ledger=ledger,
                          prices=json.loads(args.prices) if args.prices else None).start()
         os.environ.update(proxy.environ())
         proxy_settings = {"enabled": True, "upstream": args.upstream, "provider": args.provider,
                           "body_defaults": defaults, "body_overrides": overrides, "base_url": proxy.base_url,
-                          "upstream_key_present": bool(proxy.api_key), "confined_to": confined_to}
+                          "upstream_key_present": bool(proxy.api_key), "confined_to": confined_to, "pinned": pinned}
 
     # imported once the proxy's address is in the environment, which a learner's module may read as it loads
     make_learner = import_object(args.learner, "learner")
@@ -499,6 +500,9 @@ def build_parser() -> argparse.ArgumentParser:
                                             "models alone, in the fields and to the routes of proxy.LLMProxy's confined "
                                             "mode: comma-separated, each MODEL or MODEL=EFFORT, the reasoning effort every "
                                             "call to it is given")
+    g.add_argument("--pin-providers", help="with --confine-models, the one OpenRouter endpoint each model's calls go to, "
+                                           "with no fallback, so that a run's cells are served alike: comma-separated "
+                                           "MODEL=ENDPOINT, the endpoint by its tag, such as moonshotai/mxfp4")
     g.add_argument("--spend-ledger", help="the file in which a confined run's proxies keep what they have spent and hold "
                                           "back (proxy.SpendLedger)")
     g.add_argument("--spend-cap", type=float, help="the US dollars that ledger may reach")

@@ -825,6 +825,17 @@ def test_a_confined_proxy_sends_a_plain_chat_completion_and_its_own_routing(conf
     assert "leak" not in json.dumps(seen.get("headers", {}))
 
 
+def test_a_pinned_model_is_served_by_its_one_endpoint_alone_whatever_the_call_asks(upstream):
+    """A run's learner, reset and bare cells read alike only if one host serves them all: hosts map an effort differently."""
+    with LLMProxy(upstream.base_url, api_key="sk-run", confined_to={"vendor/named": "medium", "vendor/other": None},
+                  pinned={"vendor/named": "host/fp8"}) as proxy:
+        assert post(proxy, plain(provider={"order": ["mine"], "allow_fallbacks": True})).status_code == 200
+        assert post(proxy, plain("vendor/other")).status_code == 200
+    pinned, other = (request["body"]["provider"] for request in upstream.requests)
+    assert pinned == {**CONFINED_ROUTING, "order": ["host/fp8"], "allow_fallbacks": False}
+    assert other == CONFINED_ROUTING
+
+
 @pytest.mark.parametrize("message", [
     [{"type": "image_url", "image_url": {"url": "https://example.com/leak.png"}}],
     [{"type": "image_url", "image_url": "https://example.com/leak.png"}],

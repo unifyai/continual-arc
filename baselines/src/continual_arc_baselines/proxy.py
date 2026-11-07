@@ -17,7 +17,11 @@ upstream, each at the reasoning effort it names, and only what cannot leave the 
 completion and nothing an upstream would act on apart from the conversation: no other model's name, no fallback list, no
 routing, no plugin or server-side tool, no URL for a provider to fetch, no header or field of its own. Each call goes only
 to the hosts of :data:`CONFINED_HOSTS` that keep no data, and the pace and size of what it sends and how much of it is
-journaled are bounded, since this process runs on the verifier's machine.
+journaled are bounded, since this process runs on the verifier's machine. Where the run pins a model to one endpoint of
+those hosts (:attr:`~LLMProxy.pinned`, ``arc-baselines run --pin-providers``), every call to it goes there alone, so that
+each of a run's cells is served alike: OpenRouter otherwise spreads an open model's calls over every host serving it,
+holding a session on one for an hour or two, and the hosts quantize a model and map a reasoning effort each their own way,
+Kimi K3.1 Pro's medium played as its high on one host and as its low on others (7 November 2026).
 
 A provider's prompt cache outlives a call, and answers whoever sends the same opening, on the provider's account and so
 perhaps on anyone's: a prompt written by one instance and probed by another, or from outside the run through the same
@@ -315,6 +319,15 @@ def _confined(parsed: Any, models: dict[str, str | None]) -> dict:
     return body
 
 
+def confined_routing(model: str, pinned: dict[str, str]) -> dict:
+    """A confined call's routing: the hosts of :data:`CONFINED_ROUTING`, and the one endpoint ``pinned`` names for
+    ``model``, if it names one, with no fallback, so that a host down holds the call back rather than serving it elsewhere."""
+    routing = dict(CONFINED_ROUTING)
+    if model in pinned:
+        routing.update(order=[pinned[model]], allow_fallbacks=False)
+    return routing
+
+
 def _salted(body: dict, salt: str) -> None:
     """``salt`` at the head of ``body``'s first message, of its first tool's description and of its response format's
     schema, the three things a provider may render first and read its cache by, so that no prefix of the prompt is shared
@@ -527,6 +540,7 @@ class LLMProxy:
         thinking_field: str | None = None,
         serve: Any = None,
         confined_to: dict[str, str | None] | None = None,
+        pinned: dict[str, str] | None = None,
         ledger: SpendLedger | None = None,
         prices: dict[str, dict[str, float]] | None = None,
     ):
@@ -563,6 +577,9 @@ class LLMProxy:
         # the models an untrusted learner may call and each one's reasoning effort, for a proxy in the confined mode this
         # module's docstring describes
         self.confined_to = confined_to
+        # for a confined proxy, the one endpoint of CONFINED_HOSTS each model it names is served by, with no fallback
+        # (confined_routing), by OpenRouter's endpoint tag, such as moonshotai/mxfp4
+        self.pinned: dict[str, str] = dict(pinned or {})
         # the run's budget and, for each model it names, what a call costs at most (worst_cost)
         self.ledger, self.prices = ledger, prices or {}
         self.free_calls = 0      # a confined proxy's calls that cost nothing, of which it journals the first few
@@ -713,7 +730,7 @@ class LLMProxy:
                 except (ValueError, RecursionError):
                     raise Refused(400, "a chat completion is a JSON object") from None
                 _salted(parsed, self.salt())
-                parsed["provider"] = dict(CONFINED_ROUTING)
+                parsed["provider"] = confined_routing(parsed["model"], self.pinned)
                 body = json.dumps(parsed).encode()
             else:
                 body = b""

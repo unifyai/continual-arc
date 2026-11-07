@@ -292,7 +292,8 @@ the learner never holds a key. It plays all three tracks: its JSON lines carry a
 hosted as it plays in the runner's own process (`tests/test_hosted_tracks.py` plays `arc2-smoke` and `arc3-smoke` hosted
 and in one process, record for record). That runs on a disposable machine that holds neither the rules nor the key,
 reached from the verifier's by `RemoteLearner` (`systems/remote.py`), and the proxy is confined to the models the
-submission names, each at the effort it names (`--confine-models`), on the hosts of `proxy.CONFINED_HOSTS`, each
+submission names, each at the effort it names (`--confine-models`), on the hosts of `proxy.CONFINED_HOSTS`, each model on
+the one endpoint of them the run pins it to (`--pin-providers`), each
 instance's calls opening with a salt of their own, and within the run's budget (`--spend-ledger`, `--spend-cap`,
 `--prices`). `arc-baselines install-submission --repo URL --commit SHA --venv DIR [--checkout DIR]` installs it into a
 new virtual environment, under the sandbox too, since installing runs the package's build code, its only network a

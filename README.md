@@ -562,7 +562,9 @@ install your repository and run your learner, whole, inside a sandbox on a machi
 ends, which has no public network and holds neither our rules nor the run's key. Its install reaches PyPI and GitHub
 alone, through a filter, and nothing else once the install ends. Your learner reaches nothing but the tracking proxy, on
 our side, which makes every model call on the run's key, as a plain chat completion to a model your form names at the
-effort it names, through a host on our list that keeps no data, each instance's calls opening with a mark of their own
+effort it names, through a host on our list that keeps no data, the same one for every call to that model in the run
+(its maker's own where it keeps no data, else the cheapest that does, named in the result), so that your learner and
+what it is read against are served alike, each instance's calls opening with a mark of their own
 so that no provider's cache carries one instance's prompt to another, and stops the run once its budget is spent; your
 code never holds the key. The proxy drops any other field or header, and refuses any other model, endpoint or URL for a
 provider to fetch and any tool that runs at the provider, and the issue says how many calls it refused. In the sandbox
