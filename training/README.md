@@ -16,13 +16,13 @@ oracle's move as one already made. The paper does not report them.
 The same package plays the reference rows on the open models, the two frozen tests after the stream, and DAgger's
 "training once at the end".
 
-## What produced which rows
+## What each script runs
 
 | Script (`scripts/`) | What it runs | Rows |
 | --- | --- | --- |
 | `realtime.sh` | A trained row on one 8-GPU node: the player, the labeller and the trainer side by side, round r played by the adapter trained on rounds 0..r-2 | DAgger at 1, 2 and 4 users, the stream's 200 rounds, and the OPSD and PG runs the paper does not report |
 | `frozen.sh` | A trained run's two frozen tests on its own node once its stream has ended | The trained rows' held-out and seen tests |
-| `refs.sh` | The untrained student on the trained rows' stack, from nothing, on both tests | Rows H0 and F on Qwen3.5-9B, the trained rows' references, and H0 told c1, the page alone |
+| `refs.sh` | The untrained student on the trained rows' stack, from nothing, on both tests | Rows H0 and F on Qwen3.5-9B, and H0 with expert guidance (h0e) |
 | `reference.sh` | A reference row with its model served by OpenRouter, no GPU | Rows h, h0, hpl, ha and hpl0 (the paper's H, H0, H-E, H-A and H-E0) and the bare-model rows dc, f, m and m0, on GLM-5.3 Flash and Qwen3.5-9B |
 | `teacher-rows.sh` | A teacher's row: Qwen3.5-9B playing the stream and both tests from GLM-5.3 Flash's own harness, each instance from its state before that instance, no GPU | Rows hg, hgpl and hplg (the paper's H-T, H-T-E and H-E-T-E) |
 | `ref-tests.sh` | Each reference row's two frozen tests from its end-of-stream memory | The reference rows' held-out and seen tests |
@@ -39,8 +39,8 @@ Three loops on one GPU node hand each other files in the run's folder ([how a ru
    differently from the base model; prime-agent plays the round's instances through the benchmark's runner, every
    model call saved with the token ids the server saw and sampled.
 2. **The labeller** (DAgger and OPSD) asks the oracle, GLM-5.3 Flash at medium effort through OpenRouter, for its own
-   reply to every call the student made, read exactly as the student read it with c1, the oracle's page of playing
-   rules, at the end. One game in ten is held out.
+   reply to every call the student made, read exactly as the student read it with the shared expert guidance
+   appended. The student never reads the guidance directly. One game in ten is held out.
 3. **The trainer** trains phase k on rounds 0..k from phase k-1's adapter once round k is ready: nothing until 24
    games have been played, then a rank-128 LoRA adapter at LR 1e-4, 64 calls a step, its held-out loss measured every
    5 steps and the phase stopped once 6 measurements in a row have not improved on the best.
@@ -60,8 +60,23 @@ ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 TRAIN_GP
     > /dev/null 2>&1 < /dev/null)
 ```
 
-with `ROW` one of `dagger`, `opsd` and `pg` and `USERS` 1, 2 or 4. The settings left at their defaults are the
-paper's.
+with `ROW` one of `dagger`, `opsd` and `pg` and `USERS` 1, 2 or 4. The training settings match the paper's; expert guidance has since been consolidated as described below.
+
+## Expert guidance
+
+DAgger's teacher and every expert-guided harness use the same
+[`EXPERT_GUIDANCE`](../baselines/src/continual_arc_baselines/systems/guidance.py) text: the deduplicated superset of
+playing and program-library instructions. The program library implements the policy in code. To change E for all
+learners, edit this one source. For a custom teacher-only experiment, `GUIDANCE=/path/to/guidance.md` (or the labeller's
+`--guidance FILE`) replaces the text in full; it is a custom policy, not the benchmark's default E.
+The run saves its exact text in `guidelines.md` and refuses to resume under different guidance. Guided harness
+reference runs record the guidance hash in `driver.json` and likewise reject a changed or unversioned policy on resume.
+
+The paper's original open-model prompts are preserved at
+[`9616cbd`](https://github.com/unifyai/continual-arc/tree/9616cbd2c1d5741142ca7f2590ecb3535028daf9): QDE's teacher read
+c1 alone, while QE and GE read c1 followed by the library procedure. Use that revision when reproducing those prompts.
+The consolidated text has not been reevaluated. The retired `C1` and `ORACLE_RULES` settings are rejected so old launch
+commands cannot silently change policy.
 
 ## What it needs
 

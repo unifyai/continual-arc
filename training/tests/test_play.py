@@ -283,14 +283,14 @@ def test_a_harness_row_plays_under_the_fixed_harness_and_records_its_settings(tm
                     registry=registry)
     play.play_round("opsd", tmp_path / "opsd", schedule, base_url="http://127.0.0.1:1/v1", served_name="r0",
                     registry=registry)
-    play.play_round("h0c1", tmp_path / "h0c1", schedule, base_url="http://127.0.0.1:1/v1", served_name="r0",
+    play.play_round("h0e", tmp_path / "h0e", schedule, base_url="http://127.0.0.1:1/v1", served_name="r0",
                     registry=registry)
-    h0, opsd, h0c1 = captured
-    assert h0["stateless"] is True and opsd["stateless"] is False and h0c1["stateless"] is True
+    h0, opsd, h0e = captured
+    assert h0["stateless"] is True and opsd["stateless"] is False and h0e["stateless"] is True
     assert "rules_page" not in h0 and "rules_page" not in opsd
-    assert h0c1["rules_page"] == play.rules_page("c1") and h0c1["rules_page"].startswith("1. Your action is read")
-    assert json.loads((tmp_path / "h0c1" / "driver.json").read_text())["told"] == "c1"
-    for kw in (h0, opsd, h0c1):
+    assert h0e["program_library"] is True and "rules_page" not in h0e
+    assert json.loads((tmp_path / "h0e" / "driver.json").read_text())["guidance"] == "expert"
+    for kw in (h0, opsd, h0e):
         assert {k: kw[k] for k in play.HARNESS} == play.HARNESS and {k: kw[k] for k in play.TURNS} == play.TURNS
         assert (kw["model"], kw["context_window"], kw["max_tokens"]) == (play.MODEL, play.CONTEXT_WINDOW,
                                                                          play.MAX_TOKENS)

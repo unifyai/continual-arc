@@ -309,7 +309,7 @@ def main() -> None:
     m.set_defaults(fn=cmd_model)
     s = sub.add_parser("play", help="one frozen test of the run, seeded from its end-of-stream state")
     s.add_argument("--run", help="the run whose end-of-stream state the test starts from")
-    s.add_argument("--row", help="a reference played from nothing instead (h0, h0c1 or bare), into --out")
+    s.add_argument("--row", help="a reference played from nothing instead (h0, h0e or bare), into --out")
     s.add_argument("--test", choices=TESTS, required=True)
     s.add_argument("--schedule", help="the test's schedule (default this package's, arc1 at seed 0)")
     s.add_argument("--base-url", dest="base_url", help="a trained run's: the server its model is served on")

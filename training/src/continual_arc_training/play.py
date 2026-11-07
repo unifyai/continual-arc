@@ -5,9 +5,7 @@ Rows (``ROWS``):
 
   h0      the base model in prime-agent, its harness wiped before every instance (the learner reset, transfer's
           reference on the held-out tasks)
-  h0c1    row h0 told c1, the page of playing rules DAgger's oracle labels under (:data:`TOLD_ROWS`), at the start of
-          every conversation: what the page alone gives the untrained student, beside what training on replies written
-          under it carries
+  h0e     row h0 with the shared expert guidance and its storage reminders, as for the guided reference rows
   bare    the bare model with no harness (the baselines' ``BareModelLearner`` at the demo-cache floors' settings,
           :data:`FLOOR`), which keeps nothing from one instance to the next: the stateless floor
   dagger, opsd, pg  the trained rows, prime-agent's memory kept from round to round; the real-time driver plays their
@@ -74,20 +72,14 @@ MAX_TOKENS = CONTEXT_WINDOW - HARNESS["compact_at"] - REPLY_HEADROOM
 # The bare model's settings, every floor's: the harness rows' rules (end "finish"), an empty reply asked again, a wipe
 # archived first
 FLOOR = {"end": "finish", "empty_reply": "reprompt", "archive_wipes": True}
-ROWS = ("h0", "h0c1", "bare", "dagger", "opsd", "pg")
-STATELESS_ROWS = ("h0", "h0c1")
-# the rows told a page of playing rules (rules/NAME.md) at the start of every conversation, as the baselines'
-# ``rules_page``: h0c1 reads c1, the page DAgger's oracle is told, which the trained student never reads
-TOLD_ROWS = {"h0c1": "c1"}
+ROWS = ("h0", "h0e", "bare", "dagger", "opsd", "pg")
+STATELESS_ROWS = ("h0", "h0e")
+# The wiped guided reference reads the same expert guidance as the oracle.
+GUIDED_ROWS = frozenset({"h0e"})
 # rows that keep nothing between instances, whose held-out instances may be dealt wider than the run's users
 TRANSFER_REFERENCES = ("h0", "bare")
 # a captured call's fields, as a game is saved
 CALL_FIELDS = ("call_id", "turn", "phase", "status", "finish_reason", "request", "response")
-
-
-def rules_page(name: str) -> str:
-    """rules/``name``.md, a page of playing rules (c1 is the one DAgger's oracle is told)."""
-    return (Path(__file__).resolve().parent / "rules" / f"{name}.md").read_text().strip()
 
 
 # -- schedules --------------------------------------------------------------------------------------------------
@@ -235,16 +227,18 @@ def play_round(row: str, run_dir: Path, schedule: Any, *, base_url: str, served_
             return BareModelLearner(MODEL, max_tokens=MAX_TOKENS, **FLOOR)
         setting: dict[str, Any] = {"floor": FLOOR, "max_tokens": MAX_TOKENS}
     else:
+        from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE_SHA256
         from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
-        told = {"rules_page": rules_page(TOLD_ROWS[row])} if row in TOLD_ROWS else {}
+        guided = {"program_library": True} if row in GUIDED_ROWS else {}
         kwargs = {"model": MODEL, "context_window": CONTEXT_WINDOW, "max_tokens": MAX_TOKENS,
-                  "stateless": row in STATELESS_ROWS, **HARNESS, **TURNS, **told}
+                  "stateless": row in STATELESS_ROWS, **HARNESS, **TURNS, **guided}
 
         def system(user: int) -> Any:
             return PrimeAgentLearner(**kwargs)
         overrides.update(return_token_ids=True, max_completion_tokens=MAX_TOKENS)
         setting = {"harness": dict(HARNESS), "harness_budget": {"name": "turns", **TURNS}, "max_tokens": MAX_TOKENS,
-                   **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {})}
+                   **({"guidance": "expert", "expert_guidance_sha256": EXPERT_GUIDANCE_SHA256}
+                      if row in GUIDED_ROWS else {})}
     (run_dir / "driver.json").write_text(json.dumps(
         {"row": row, "served": served_name, "stateless": row in STATELESS_ROWS, "model": MODEL, **setting,
          "sampling": SAMPLING}, indent=1))

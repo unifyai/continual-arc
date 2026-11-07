@@ -33,6 +33,7 @@ in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) an
 | `src/continual_arc_baselines/systems/bare.py` | the model alone behind the harness protocol: the two floors of row F (`BareModelLearner`, stateless, and `BareDemoCacheLearner`, which shows a task's bought pairs again when it returns), and the program library of row PL (`BareProgramLibraryLearner`; row PL0 with `stateless=True`; the run records name these rows M and M0) with the sandboxed runner of its programs |
 | `src/continual_arc_baselines/systems/prime_agent.py`, `hermes_agent.py`, `openclaw.py` | the harness adapters of row H: prime-agent over its RPC mode, hermes-agent and openclaw over the Agent Client Protocol (`acp.py`). Row H0 is `stateless=True`, row HA `ask_to_store=True` and row HPL `program_library=True` |
 | `src/continual_arc_baselines/systems/base.py`, `protocol.py` | `SystemLearner`, the adapter base class, with its budgets, restarts, wipes and frozen resets; the messages a learner is shown and the lenient parser that reads an action from a reply |
+| `src/continual_arc_baselines/systems/guidance.py` | `EXPERT_GUIDANCE`, the single policy used by expert-guided harnesses and the DAgger teacher |
 | `src/continual_arc_baselines/systems/sandbox.py`, `seccomp.py` | the sandbox each harness runs in: bubblewrap on Linux, from an empty root with private namespaces, a filter on what it may ask of the kernel and limits on what it consumes, and Seatbelt on macOS |
 | `src/continual_arc_baselines/systems/remote.py`, `connect_filter.py` | a submitted learner served from a machine of its own, and an install's one way out |
 | `src/continual_arc_baselines/systems/hosted.py`, `learner_host.py` | a submitted Python learner run whole inside the sandbox, for verified runs, and the host that serves it there |
@@ -53,6 +54,25 @@ in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) an
 |---|---|---|
 | GPT-6 Luna's rows, at low, medium and high effort: F, PL and PL0, and H, H0, H-A, H-E and H-E0 (HA, HPL and HPL0 in the run names) in each of prime-agent, hermes-agent and openclaw | `BareModelLearner` and `BareDemoCacheLearner` (F), `BareProgramLibraryLearner` (PL, PL0), `PrimeAgentLearner`, `HermesAgentLearner` and `OpenClawLearner` (the H rows) | one `arc-baselines run` a cell (`scripts/launch-cell.sh`), its stream alone; its frozen tests as one round of a hundred users of the cell's own system, each forked from the commit of the stream's end (`arc-baselines test --collective`) |
 | the open models' rows: on Qwen3.5-9B, F, PL, H, H-E (given expert guidance, the program library's procedure), the rows in which the teacher plays the stream and writes the notes and the student plays from them (H-T, H-T-E and H-E-T-E; hg, hgpl and hplg in the run names) and the trained row (DAgger), beside its wiped twin; on GLM-5.3 Flash, F and PL | `CollectiveHarnessLearner`, one state for all its users: `PrimeAgentLearner` for every harness row, `BareModelLearner` and `BareDemoCacheLearner` for the floors, `BareProgramLibraryLearner` for the program library | driven round by round from [`training/`](../training), which serves the model, trains the adapters and lets the teacher write; the one state committed at the end of every round, and the frozen tests played as one round of users forked from the stream's end (`frozen.seed`) |
+
+## Expert guidance
+
+E means the same [expert guidance](src/continual_arc_baselines/systems/guidance.py) in every guided harness and
+the DAgger teacher: load the task's kept demonstrations and program, check the program on every pair before
+submitting, repair it after a wrong answer, and save the pairs, program and a memory naming their files.
+Set `program_library=True` with `end="finish"` for a guided harness. It receives the complete guidance once per
+conversation; `rules_page` cannot be added beside it. Harness paths are supplied separately as runtime context.
+Run metadata records the guidance's SHA256 digest.
+The [program-library learner](src/continual_arc_baselines/systems/bare.py) implements the policy in code and
+does not receive this guidance.
+
+The paper's experiments predate this consolidation. In the open-model runs, the final QDE teacher read `c1` alone
+and guided Qwen/GLM harnesses read `c1` followed by the program-library procedure, preserved at
+[commit `9616cbd`](https://github.com/unifyai/continual-arc/tree/9616cbd2c1d5741142ca7f2590ecb3535028daf9).
+Guided GPT-6 Luna harnesses read an earlier procedure alone, preserved at
+[v0.3.0 (`b2fd5a9`)](https://github.com/unifyai/continual-arc/tree/b2fd5a94572fa83cde9ecd20b38d41d1548d64b9).
+Results have not been rerun with the consolidated text; use these pinned versions and the paper's run settings
+to reproduce or resume the reported experiments. Start runs with the consolidated guidance in new output directories.
 
 ## Install
 

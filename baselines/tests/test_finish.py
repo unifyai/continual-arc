@@ -11,6 +11,7 @@ from continual_arc.tasks import FixedArcSource, TaskRegistry
 
 from continual_arc_baselines.systems import protocol
 from continual_arc_baselines.systems.base import SystemLearner
+from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE
 
 TASKS = {"f": {"train": [{"input": [[1, 0]], "output": [[0, 1]]}, {"input": [[2, 0]], "output": [[0, 2]]}],
                "test": [{"input": [[3, 0]], "output": [[0, 3]]}]}}
@@ -158,6 +159,7 @@ def test_expert_guidance_states_the_whole_procedure_and_asks_for_the_pairs_the_p
     procedure, with the library's folder: the pairs kept beside the program, the kept program checked on them first, a
     memory naming the task's files; the verdict is followed by the ask to save this task's pairs, program and memory; a
     stateless row gets the same messages; the option needs the finish protocol and does not go beside ask_to_store."""
+    import hashlib
     import re
 
     import pytest
@@ -165,12 +167,9 @@ def test_expert_guidance_states_the_whole_procedure_and_asks_for_the_pairs_the_p
     s = Scripted([CORRECT, FINISH], end="finish", program_library=True)
     play(s, tmp_path / "hpl")
     rules = s.sent[0]
-    assert "How to work, in every instance (follow this exactly): keep a library in the folder programs, two files" in rules
-    assert "programs/<task id>.json, every demonstration pair received for the task" in rules
-    assert "Kept pairs count as demonstration pairs you have" in rules
-    assert "look for the task's memory (step 4) among those you are shown, and if there is none, for its files" in rules
-    assert "run it on every kept pair, and if it reproduces them all, run it on the test input" in rules
-    assert "keep one memory for the task that lasts between instances, named for its task id" in rules
+    assert rules.count(EXPERT_GUIDANCE) == 1
+    assert "Expert-guidance library directory: programs" in rules
+    assert EXPERT_GUIDANCE not in s.sent[1]
     label = re.search(r"Task id: (task-[0-9a-f]+)", rules).group(1)
     ask = s.sent[1]
     assert ask.startswith("Your submission was CORRECT. Instance solved with 0 wrong attempt(s).\n\nNow save this "
@@ -179,14 +178,28 @@ def test_expert_guidance_states_the_whole_procedure_and_asks_for_the_pairs_the_p
     assert f"keep the task's memory, named {label}," in ask
     assert ask.endswith('reply with {"action": "finish"}.')
     assert s.stats["library_asks"] == 1 and s.stats["store_asks"] == 0 and s.describe()["program_library"] is True
-    told = Scripted([CORRECT, FINISH], end="finish", program_library=True, rules_page="THE PLAYING RULES")
+    assert s.describe()["expert_guidance_sha256"] == hashlib.sha256(EXPERT_GUIDANCE.encode("utf-8")).hexdigest()
+    with pytest.raises(ValueError, match="one complete policy"):
+        Scripted([], end="finish", program_library=True, rules_page="THE PLAYING RULES")
+    told = Scripted([CORRECT, FINISH], end="finish", rules_page="THE PLAYING RULES")
     play(told, tmp_path / "told")
-    assert told.sent[0].index("THE PLAYING RULES") < told.sent[0].index("How to work, in every instance")
+    assert told.sent[0].count("THE PLAYING RULES") == 1 and EXPERT_GUIDANCE not in told.sent[0]
     assert "THE PLAYING RULES" not in told.sent[1] and told.describe()["rules_page"] is True
+    assert "expert_guidance_sha256" not in told.describe()
     h0 = Scripted([CORRECT, FINISH], end="finish", program_library=True, stateless=True)
     play(h0, tmp_path / "hpl0")
-    assert "keep a library in the folder" in h0.sent[0] and "Now save this task's library" in h0.sent[1]
+    assert h0.sent[0].count(EXPERT_GUIDANCE) == 1 and "Now save this task's library" in h0.sent[1]
     with pytest.raises(ValueError):
         Scripted([], end="finish", program_library=True, ask_to_store=True)
     with pytest.raises(ValueError):
         Scripted([], end="closing", program_library=True)
+
+
+def test_expert_guidance_keeps_runtime_paths_out_of_the_shared_policy(tmp_path):
+    s = Scripted([CORRECT, FINISH], end="finish", program_library=True)
+    s.workspace = tmp_path / "workspace with spaces"
+    play(s, tmp_path / "run")
+    assert s.sent[0].count(EXPERT_GUIDANCE) == 1
+    assert f"Expert-guidance library directory: {s.workspace}/programs" in s.sent[0]
+    assert str(s.workspace) not in EXPERT_GUIDANCE
+    assert str(s.workspace / "programs") in s.sent[1]

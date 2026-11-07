@@ -26,9 +26,9 @@ command line; [how a run works](how-a-run-works.md) says how they fit together.
 
 | Module | What it does |
 | --- | --- |
-| `oracle` | The oracle: its relay to OpenRouter, which alone holds the key and pins every request to one model and its hosts (`relay`); its client (`Oracle`); its working rules (`oracle_rules`); one point's label, asked again with a note when the reply names the rules, has no reasoning or makes no move (`ask_label`). Command line: `relay` (`realtime.sh`). |
+| `oracle` | The oracle: its relay to OpenRouter, which alone holds the key and pins every request to one model and its hosts (`relay`); its client (`Oracle`); the shared expert guidance or a custom replacement (`guidance`); one point's label, asked again with a note when the reply names the rules, has no reasoning or makes no move (`ask_label`). Command line: `relay` (`realtime.sh`). |
 | `labeller` | DAgger's and OPSD's labels: every call the student made as the agent as a point (`points`), the oracle's reply at each under the working rules and the round's budget (`label`), the label set rendered as the student writes each label (`label_set`, `student_message`, `render_reply`), and its split into a training side and a held-out side (`split`, `held_game`). |
-| `rules/c1.md` | The playing rules the oracle labels under. |
+| `baselines/.../systems/guidance.py` | The canonical expert guidance shared with the harness adapters. |
 
 ### Training
 

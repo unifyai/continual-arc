@@ -47,12 +47,13 @@ RELAY_PORT=${RELAY_PORT:-18230}; RELAY_PROVIDERS=${RELAY_PROVIDERS:-fireworks,z-
 NEED_THINKING=${NEED_THINKING:-0}; MIN_LABELLED_PCT=${MIN_LABELLED_PCT:-40}
 LABEL_ROUND_BUDGET_USD=${LABEL_ROUND_BUDGET_USD:-20}; LABEL_RUN_BUDGET_USD=${LABEL_RUN_BUDGET_USD:-3000}
 HOLD_EVERY=${HOLD_EVERY:-10}
-# what the oracle is told at the end of its copy of each call, which the student is never told: c1 alone (c1, the
-# paper's), or c1 and the program library's procedure (library: its students opened 47 to 78 percent of fresh puzzles
-# by checking an empty programs folder). A run keeps its oracle's rules to the end: a labeller started under others
-# stops
-ORACLE_RULES=${ORACLE_RULES:-c1}
-case $ORACLE_RULES in library | c1) ;; *) echo "ORACLE_RULES must be library or c1, got $ORACLE_RULES"; exit 1 ;; esac
+# One shared expert guidance by default; GUIDANCE supplies a full replacement for a custom experiment.
+# Refuse retired settings so an old launch command cannot silently select different guidance.
+if [[ ${ORACLE_RULES+x} || ${C1+x} ]]; then
+    echo "ORACLE_RULES and C1 are retired; use the shared expert guidance or GUIDANCE=/path/to/replacement.md"
+    exit 1
+fi
+GUIDANCE=${GUIDANCE:-}
 # a phase of any row: from the last phase's adapter on every round's training side so far, the held-out loss measured
 # every EVAL_STEPS steps, stopped once PATIENCE measurements in a row have not improved on it, at most MAX_STEPS steps.
 # Six, not two: on every label so far a phase's first two measurements often both fall short of its start, and a stop
@@ -65,7 +66,6 @@ SKIP_FIRST=${SKIP_FIRST:-3}   # OPSD: SDFT's code leaves each reply's first 3 id
 START_AFTER=${START_AFTER:-0}; DOSE=${DOSE:-aggregate}; REPLAY_RATIO=${REPLAY_RATIO:-1}
 BATCH=${BATCH:-64}
 MAX_RESTARTS=${MAX_RESTARTS:-5}
-C1=${C1:-$SRC/continual_arc_training/rules/c1.md}
 case $ROW in pg) LOOPS="player trainer" ;; *) LOOPS="player labeller trainer" ;; esac
 
 L=$RUNS/rt/$NAME
@@ -104,10 +104,11 @@ launch() {   # launch LOOP: the driver's LOOP in the background, logging to $L/L
     local loop=$1 args=(--run "$L" --rounds "$ROUNDS" --row "$ROW") env=()
     case $loop in
         player) args+=(--users "$USERS" --name "$NAME" --lag "$LAG" --serve-gpus "$SERVE_GPUS" --serve-dp "$SERVE_DP") ;;
-        labeller) args+=(--c1 "$C1" --oracle-rules "$ORACLE_RULES" --label-model "$LABEL_MODEL"
+        labeller) args+=(--label-model "$LABEL_MODEL"
                          --label-effort "$LABEL_EFFORT" --relay-port "$RELAY_PORT" --need-thinking "$NEED_THINKING"
                          --label-round-budget "$LABEL_ROUND_BUDGET_USD" --label-run-budget "$LABEL_RUN_BUDGET_USD"
-                         --min-labelled-pct "$MIN_LABELLED_PCT" --hold-every "$HOLD_EVERY") ;;
+                         --min-labelled-pct "$MIN_LABELLED_PCT" --hold-every "$HOLD_EVERY")
+                  [[ -n "$GUIDANCE" ]] && args+=(--guidance "$GUIDANCE") ;;
         trainer) args+=(--train-gpus "$TRAIN_GPUS" --lag "$LAG" --lr "$LR" --batch "$BATCH"
                         --eval-steps "$EVAL_STEPS" --patience "$PATIENCE" --max-steps "$MAX_STEPS" --hold-every "$HOLD_EVERY"
                         --val-max-items "$VAL_MAX_ITEMS" --skip-first "$SKIP_FIRST" --start-after "$START_AFTER"
@@ -124,7 +125,7 @@ labels() { [ "$ROW" != pg ]; }
         case ",$SERVE_GPUS," in *",$g,"*) say "TRAIN_GPUS ($TRAIN_GPUS) must be none of SERVE_GPUS ($SERVE_GPUS)"; exit 1 ;; esac
     done
     # every value the run was started with, so that it can be started again with the same ones
-    say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO)$(labels && echo ", oracle rules $ORACLE_RULES"), patience $PATIENCE"
+    say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO)$(labels && echo ", expert guidance ${GUIDANCE:-shared}"), patience $PATIENCE"
     if labels; then start_relay || exit 1; fi
     bash "$HERE/serve.sh" "$SERVE_GPUS" "$SERVE_DP" || { say "the server did not start"; exit 1; }
     declare -A restarts=([player]=0 [labeller]=0 [trainer]=0) started=([player]=0 [labeller]=0 [trainer]=0)

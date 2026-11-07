@@ -19,12 +19,9 @@ Both send a harness's developer prompt as a system one and every earlier reply's
 setting is the one that applies.
 
 The harness rows (:data:`REFERENCE_ROWS`): h, prime-agent with its memory kept; h0, wiped before every instance; hpl,
-row h given expert guidance: c1, the page of playing rules the labeller is told (:data:`TOLD_ROWS`), then the
-baselines' ``program_library``, the program library's whole method as a procedure (``PROGRAM_LIBRARY_RULES``: each
-task's pairs and program kept as two files of the workspace's ``programs`` folder, the kept program checked on the kept
-pairs and run first when the task returns, every program checked on every pair before a submission, and a memory naming
-the task's files, which the harness shows when each instance starts), and every verdict followed by the ask to save
-them (``PROGRAM_LIBRARY_ASK``); ha, row h asked after every verdict to save liberally what could help with the task's later instances;
+row h given the shared expert guidance (``systems.guidance.EXPERT_GUIDANCE``), with every verdict followed by the
+ask to save the task's pairs, program and memory; ha, row h asked after every verdict to save liberally what could help
+with the task's later instances;
 hpl0, row hpl wiped before every instance. The teacher's rows, hg, hgpl and hplg, are the student playing rows h and hpl from
 the teacher's own harness (:mod:`continual_arc_training.teacher_rows`).
 
@@ -69,9 +66,6 @@ STATELESS_ROWS: tuple[str, ...] = (*play.STATELESS_ROWS, "hpl0")
 BARE_ROWS: dict[str, tuple[str, dict[str, Any]]] = {
     "dc": ("BareDemoCacheLearner", {}), "f": ("BareModelLearner", {}),
     "m": ("BareProgramLibraryLearner", {}), "m0": ("BareProgramLibraryLearner", {"stateless": True})}
-# the rows given expert guidance, each told a page of playing rules ahead of the procedure: c1, the labeller's page, so
-# that telling the student and training it start from the same playing rules
-TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1"}
 
 
 def overrides_of(player: str) -> dict[str, Any]:
@@ -87,6 +81,7 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: 
     from continual_arc.runner import run as run_stream
     from continual_arc.tasks import TaskRegistry
     from continual_arc_baselines.collective import CollectiveHarnessLearner
+    from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE_SHA256
     from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
 
     if row not in REFERENCE_ROWS:
@@ -97,14 +92,21 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: 
     kwargs = {"model": spec["model"], "context_window": play.CONTEXT_WINDOW, "max_tokens": play.MAX_TOKENS,
               "stateless": row in STATELESS_ROWS, **play.HARNESS, **play.TURNS, **REFERENCE_ROWS[row]}
     overrides = overrides_of(player)
-    (run_dir / "driver.json").write_text(json.dumps(
+    guided = kwargs.get("program_library", False)
+    driver = run_dir / "driver.json"
+    records = run_dir / "records.jsonl"
+    if guided and records.exists() and records.stat().st_size:
+        saved = json.loads(driver.read_text()) if driver.exists() else {}
+        if saved.get("expert_guidance_sha256") != EXPERT_GUIDANCE_SHA256:
+            raise ValueError("This run's expert guidance differs or has no recorded version. "
+                             "Use the original code revision to resume, or choose a new run directory.")
+    driver.write_text(json.dumps(
         {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "stateless": row in STATELESS_ROWS,
          "model": spec["model"], "harness": {**play.HARNESS, **REFERENCE_ROWS[row]},
          "harness_budget": {"name": "turns", **play.TURNS}, "overrides": overrides,
-         **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {})},
+         **({"guidance": "expert", "expert_guidance_sha256": EXPERT_GUIDANCE_SHA256} if guided else {})},
         indent=1))
-    told = {"rules_page": play.rules_page(TOLD_ROWS[row])} if row in TOLD_ROWS else {}
-    learner = CollectiveHarnessLearner(lambda user: PrimeAgentLearner(**kwargs, **told), run_dir, schedule=schedule,
+    learner = CollectiveHarnessLearner(lambda user: PrimeAgentLearner(**kwargs), run_dir, schedule=schedule,
                                        upstream=OPENROUTER, api_key=api_key, body_overrides=overrides,
                                        body_drop=("reasoning_effort",), role_map={"developer": "system"},
                                        thinking_field="reasoning", declared_context_length=play.CONTEXT_WINDOW,

@@ -64,21 +64,20 @@ def test_a_reference_row_plays_the_trained_rows_harness(tmp_path, monkeypatch, r
     harness, learner = _played(monkeypatch, reference.play_round, player, row, tmp_path / "ref", ONE_USER, api_key="k")
     trained, _ = _played(monkeypatch, play.play_round, PAPER_ROW[row], tmp_path / "trained", ONE_USER,
                          base_url="http://127.0.0.1:8101/v1", served_name="m")
-    told = {"rules_page": play.rules_page(reference.TOLD_ROWS[row])} if row in reference.TOLD_ROWS else {}
-    assert {**harness, "model": None} == {**trained, "model": None, **reference.REFERENCE_ROWS[row], **told}
+    assert {**harness, "model": None} == {**trained, "model": None, **reference.REFERENCE_ROWS[row]}
     assert learner["upstream"] == reference.OPENROUTER and learner["api_key"] == "k"
     assert learner["body_overrides"]["model"] == reference.PLAYERS[player]["model"]
     assert learner["declared_context_length"] == play.CONTEXT_WINDOW
     assert learner["role_map"] == {"developer": "system"} and learner["body_drop"] == ("reasoning_effort",)
 
 
-def test_row_hpl_is_given_c1_then_the_program_library_and_keeps_its_memory(tmp_path, monkeypatch):
+def test_row_hpl_uses_shared_expert_guidance_and_keeps_its_memory(tmp_path, monkeypatch):
     from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
     harness, _ = _played(monkeypatch, reference.play_round, "qwen", "hpl", tmp_path / "ref", None, api_key="k")
     system = PrimeAgentLearner(**harness)
     assert system.program_library and system.end == "finish" and not system.stateless
-    assert system.rules_page == play.rules_page("c1") and system.rules_page.startswith("1. Your action is read")
-    assert json.loads((tmp_path / "ref" / "driver.json").read_text())["told"] == "c1"
+    assert system.rules_page == ""
+    assert json.loads((tmp_path / "ref" / "driver.json").read_text())["guidance"] == "expert"
 
 
 def test_rows_ha_and_hpl0_are_the_ablations(tmp_path, monkeypatch):
@@ -208,3 +207,28 @@ def test_a_dc_run_that_kept_its_cache_in_demo_cache_cannot_go_on(tmp_path):
     (tmp_path / "play" / "demo-cache").mkdir(parents=True)
     with pytest.raises(SystemExit, match="demo-cache"):
         reference.play_bare_round("qwen", "dc", tmp_path / "play", None, api_key="k")
+
+
+@pytest.mark.parametrize("row", ["hpl", "hpl0"])
+@pytest.mark.parametrize("saved", [{"told": "c1"}, {"expert_guidance_sha256": "another policy"}])
+def test_guided_reference_refuses_old_policy_before_overwriting_driver(tmp_path, monkeypatch, row, saved):
+    run = tmp_path / "ref"
+    run.mkdir()
+    driver = run / "driver.json"
+    driver.write_text(json.dumps(saved))
+    (run / "records.jsonl").write_text('{"step":0}\n')
+    original = driver.read_text()
+    with pytest.raises(ValueError, match="original code revision"):
+        _played(monkeypatch, reference.play_round, "qwen", row, run, ONE_USER, api_key="k")
+    assert driver.read_text() == original
+
+
+def test_guided_reference_resumes_with_identical_recorded_guidance(tmp_path, monkeypatch):
+    from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE_SHA256
+
+    run = tmp_path / "ref"
+    _played(monkeypatch, reference.play_round, "qwen", "hpl", run, ONE_USER, api_key="k")
+    assert json.loads((run / "driver.json").read_text())["expert_guidance_sha256"] == EXPERT_GUIDANCE_SHA256
+    (run / "records.jsonl").write_text('{"step":0}\n')
+    _played(monkeypatch, reference.play_round, "qwen", "hpl", run, ONE_USER, api_key="k")
+    assert json.loads((run / "driver.json").read_text())["expert_guidance_sha256"] == EXPERT_GUIDANCE_SHA256

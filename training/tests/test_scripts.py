@@ -198,7 +198,7 @@ def test_refs_sh_plays_the_three_references_from_nothing_once_the_runs_tests_are
     (home / "runs" / "rt" / "pg-u2-lag1" / "frozen").mkdir(parents=True)
     (home / "runs" / "rt" / "pg-u2-lag1" / "frozen" / "done").touch()
     assert _run(scripts, env, "refs.sh", "pg-u2-lag1", "0,1,2,3").returncode == 0
-    assert (home / "refs").read_text().splitlines() == ["h0 qwen-h0 0,1,2,3", "h0c1 qwen-h0c1 0,1,2,3",
+    assert (home / "refs").read_text().splitlines() == ["h0 qwen-h0 0,1,2,3", "h0e qwen-h0e 0,1,2,3",
                                                        "bare qwen-f 0,1,2,3"]
 
 

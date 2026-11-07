@@ -7,9 +7,8 @@ move there.
   and its hosts, so the loops never hold the key and reach nothing but that model.
 - **Its client** (:class:`Oracle`): a call's messages and tools as the student's server got them, every earlier
   reply's reasoning left out (the student's private text, not the game), its reasoning switched on.
-- **Its working rules** (:func:`oracle_rules`): c1, the playing rules (``rules/c1.md``), and the program library's
-  procedure (the baselines' ``PROGRAM_LIBRARY_RULES``, row HPL's text), which the student is never told, so the
-  procedure reaches the student's weights through the labels alone; or c1 alone.
+- **Its expert guidance** (:func:`guidance`): the same canonical text used by expert-guided harnesses. The student
+  never reads it directly; the policy reaches its weights through the labels alone.
 - **An ask's checks** (:func:`ask_label`): a reply that names the rules, has no reasoning or makes no move is asked
   again, each time with a note saying what was wrong.
 """
@@ -27,15 +26,12 @@ from typing import Any
 
 OPENROUTER = "https://openrouter.ai/api/v1"
 KEY = "OPENROUTER_API_KEY"
-RULES = Path(__file__).resolve().parent / "rules" / "c1.md"
 THINKING_KEYS = ("reasoning_content", "reasoning", "thinking")
 # a reasoning model's budget covers its reasoning too (GLM-5.3 at medium effort reasoned 15,000 tokens on one moment)
 MAX_TOKENS = 32_768
 # under prime-agent's idle timeout (600 s) with room for one retry
 TIMEOUT_S = 420.0
 RETRIES = 1
-# what the oracle is told (realtime.sh's ORACLE_RULES)
-ORACLE_RULES = ("library", "c1")
 
 # The rules go at the end of the last message, and close by asking for reasoning in the oracle's own words with the
 # rules unspoken (the student never sees them): on one round's 380 moments this labelled 89% against 79% for the rules
@@ -63,14 +59,16 @@ RULE_RETRIES = 3
 ACTION_START = re.compile(r'(?:```(?:json)?\s*)?\{\s*"action"\s*:')
 
 
-def oracle_rules(c1: str, rules: str) -> str:
-    """The working rules the oracle labels every call under (the module docstring): ``library``, c1 and the program
-    library's procedure with the library in ``programs``; or ``c1``, c1 alone, so that the procedure is the one
-    difference between the two oracles."""
-    if rules == "c1":
-        return c1.strip()
-    from continual_arc_baselines.systems.protocol import PROGRAM_LIBRARY_RULES
-    return c1.strip() + "\n\n" + PROGRAM_LIBRARY_RULES.format(programs="programs")
+def guidance(path: str | Path | None = None) -> str:
+    """The shared expert guidance, or a researcher's complete replacement read from ``path``."""
+    from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE
+
+    if path is None:
+        return EXPERT_GUIDANCE
+    text = Path(path).expanduser().read_text().strip()
+    if not text:
+        raise ValueError(f"guidance file is empty: {path}")
+    return text
 
 
 def split_reply(content: str | None) -> tuple[str, str]:

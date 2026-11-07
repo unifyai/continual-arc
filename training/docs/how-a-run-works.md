@@ -89,9 +89,9 @@ again within a pass when it is found down.
   in the round's `captured/`.
 - **labeller** (DAgger and OPSD): the oracle (GLM-5.3 Flash at medium effort, through the relay) writes its own reply
   to every call the student made as the agent, each read exactly as the student read it with the oracle's working
-  rules at the end of its last message, asked once, its reasoning left to it (`labeller`, `oracle`). The rules are
-  `ORACLE_RULES`'s: the playing rules, c1 (`rules/c1.md`), alone (`c1`, the default), or with the program library's
-  procedure (`library`). The student never reads them. The run's `guidelines.md` keeps them, and a labeller started again under
+  rules at the end of its last message, asked once, its reasoning left to it (`labeller`, `oracle`). The guidance is the
+  baselines' `EXPERT_GUIDANCE`, also used by every expert-guided harness. `GUIDANCE` may name a full replacement for a
+  custom experiment. The student never reads it. The run's `guidelines.md` keeps it, and a labeller started again under
   other rules stops before it labels, rather than change the oracle mid-run. A game is labelled as it lands and the
   round once more when it is played. Then the label set, each label as the student writes it (DAgger's target), and
   its split, one game in `HOLD_EVERY` (10) held out (`labeller.held_game`). A held-out game is played and scored like

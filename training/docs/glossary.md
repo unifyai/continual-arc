@@ -32,9 +32,9 @@ the benchmark's README at the repository root.
 | **Finish protocol** | The harness's end of an instance: after the verdict it takes a turn to save what it wants, then finishes. |
 | **Action budget / "Decide now"** | The harness stops a long action (40 model calls, or a time limit) and tells the model to act now. |
 | **Compaction** | prime-agent summarises a long conversation to save space: at 48k tokens, keeping 8k. Its summarizer's calls are never trained on. |
-| **Grid loader** | Code in the playing rules (c1's rule 4) that reads the demo grids from the instance's own session log, so the model never retypes them. |
-| **c1** | The playing rules, six of them (`rules/c1.md`): the oracle's working rules. |
-| **Program library's procedure** | The habit row HPL's rules tell a learner (the baselines' `PROGRAM_LIBRARY_RULES`): keep one Python program per task in `programs/`, run it first when the task comes back, and save or fix it after the verdict. The oracle labels under c1 and this procedure; the student is never told it. |
+| **Grid loader** | The shared guidance's loader reads grids from the current Prime Agent session log; other harnesses use their own conversation access. |
+| **Expert guidance (E)** | One text, `baselines/.../systems/guidance.py:EXPERT_GUIDANCE`, shared by the DAgger teacher and guided harnesses: check demonstrations, retain programs and pairs, reuse verified programs, and save after the verdict. The student receives it only through teacher labels. |
+| **Program library** | An implementation of the policy: keep a Python program and demonstrations per task, check the program against the demonstrations, and run it first when the task returns. |
 
 ## Rows
 
@@ -42,8 +42,8 @@ the benchmark's README at the repository root.
 | --- | --- |
 | **Row** | One learner of the results: a model, a harness setting and, for the trained rows, an update. |
 | **H, H0** | The model in prime-agent, untrained: H keeps the harness's memory, H0 wipes it before every instance (the learner reset). |
-| **HPL, HPL0, HA** | H told the program library's procedure; HPL wiped before every instance; H asked after every verdict to save what could help later. |
-| **HG, HPLG, HGPL** | The turn after each verdict driven by GLM (the storer) instead of the player: HG plain, HPLG with both told the procedure, HGPL with the storer alone told it. |
+| **HPL, HPL0, HA** | H given expert guidance; HPL wiped before every instance; H asked after every verdict to save what could help later. |
+| **HG, HPLG, HGPL** | Qwen plays each instance from the state GLM held before it: HG without guidance, HPLG with both given E, HGPL with only GLM given E. |
 | **DC, F** | The bare model behind the benchmark's protocol: DC (the demo-cache floor) with the demos bought for a task shown again when the task returns, one cache for the team, as every row's memory is one; F (the stateless floor, `bare`) with nothing kept. |
 | **M, M0** | The program library on the bare model: every submission a program, the last that reproduces all of a task's pairs kept and run first when the task returns; M0 wiped before every instance. |
 | **DAgger, OPSD, PG** | The trained rows: a LoRA adapter of Qwen3.5-9B trained between rounds with a one-round lag. |

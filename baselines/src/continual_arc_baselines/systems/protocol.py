@@ -703,35 +703,7 @@ ASK_TO_STORE = (
     '{{"action": "finish"}}.'
 )
 
-# Expert guidance, the rows H-E (a system's program_library: the model instructed exactly how to behave, in the manner
-# of the program library): the finish protocol's facts-only rules, then the program
-# library's whole method as a procedure the harness carries out itself with its own tools. The program library is the
-# demo-cache floor in which every submission is a program: it keeps each task's bought pairs, shows them again free when
-# the task returns, runs the program that reproduced them first, and checks every program on every pair before it is
-# submitted. Here the harness keeps the pairs and the program as two files of a folder in its workspace, checks the kept
-# program on the kept pairs before submitting its answer, and names each task's files in a memory of its own, which the
-# harness shows the agent when each instance starts, so that nothing it kept waits in a folder it is never told to open.
-# {programs}: the folder, which only a stateless row wipes.
-PROGRAM_LIBRARY_RULES = (
-    "How to work, in every instance (follow this exactly): keep a library in the folder {programs}, two files per task, "
-    "named for its task id: {programs}/<task id>.py, defining transform(grid), which takes an input grid as a list of "
-    "lists of integers and returns the output grid; and {programs}/<task id>.json, every demonstration pair received for "
-    "the task, as a list of {{\"input\": grid, \"output\": grid}}. Kept pairs count as demonstration pairs you have, and "
-    "reading them is free.\n"
-    "1. When an instance starts, look for the task's memory (step 4) among those you are shown, and if there is none, for "
-    "its files in the folder. If the task has kept pairs, load them; if it has a program, run it on every kept pair, and "
-    "if it reproduces them all, run it on the test input and submit the result before anything else.\n"
-    "2. Otherwise, or if that answer was wrong, request demonstration pairs as you judge necessary, write or fix "
-    "transform, and run it on every pair you have, kept and new, until it reproduces all of them; then submit its output "
-    "for the test input. Checking a program on the pairs is free.\n"
-    "3. Submit only grids that your program produced.\n"
-    "4. After the verdict, in one Python call if you can: add every pair you received to the task's .json file, save the "
-    "program that reproduced all the pairs to its .py file, replacing any older version, and keep one memory for the task "
-    "that lasts between instances, named for its task id, saying where its two files are and whether its program "
-    "reproduces every kept pair. Then finish."
-)
-
-# The ask after each verdict for a row given expert guidance: the procedure's step 4 for this task's own files.
+# A task-specific reminder after the verdict, for the policy in guidance.EXPERT_GUIDANCE.
 # {note}: what the harness keeps, in its own terms (storage_note); {task}: the task's id as the agent sees it.
 PROGRAM_LIBRARY_ASK = (
     "Now save this task's library, in one Python call if you can.{note} Add every demonstration pair you received to "

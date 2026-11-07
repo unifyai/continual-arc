@@ -52,6 +52,7 @@ from continual_arc_baselines.attempt import ROOT
 from continual_arc_baselines.frozen import put_back
 from continual_arc_baselines.statelog import StateLog
 from continual_arc_baselines.systems import arc3_protocol, protocol
+from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE, EXPERT_GUIDANCE_SHA256
 from continual_arc_baselines.systems.protocol import Transcript
 from continual_arc_baselines.tracking import instance_ended
 
@@ -134,18 +135,14 @@ class SystemLearner(BaseLearner):
         if ask_to_store and self.end != "finish":
             raise ValueError("ask_to_store is an addition to the finish protocol (end='finish')")
         self.ask_to_store = ask_to_store
-        # Expert guidance, the rows H-E: the finish protocol's rules gain the program library's whole method as a
-        # procedure (protocol.PROGRAM_LIBRARY_RULES: each task's pairs and program kept as two files of a folder of the
-        # workspace, the program checked on the kept pairs and run first when the task returns, every program
-        # checked on every pair before a submission, and a memory naming the task's files), and the verdict is followed
-        # by the ask to save them (library_ask). A stateless row gets the same messages, so that H-E0 differs from H-E
-        # only in what survives.
+        # Every expert-guided row reads the one policy in guidance.EXPERT_GUIDANCE. A stateless row gets the same
+        # messages, including the post-verdict reminder, so that only what survives differs.
         if program_library and (self.end != "finish" or ask_to_store):
             raise ValueError("program_library is an addition to the finish protocol, and not beside ask_to_store")
         self.program_library = program_library
-        # A page of playing rules the system is told, such as the trained rows' labeller's c1 for the rows given expert
-        # guidance: shown after the storage note and before the procedure at the start of every conversation, and in
-        # none of the asks that quote the storage note, so that a row is told it once an instance.
+        if program_library and rules_page:
+            raise ValueError("expert guidance is one complete policy; do not append a rules_page")
+        # A custom page for an unguided row, shown once per conversation. Expert-guided rows use the shared policy.
         self.rules_page = rules_page
         # An empty reply to an observation or a re-prompt. "restart": the system is taken for dead and restarted, state
         # intact, the rule the paper's earliest cells ran under (scripts/paper-grid.txt marks them). "reprompt": it is an
@@ -272,7 +269,8 @@ class SystemLearner(BaseLearner):
                 "session_per_instance": self.session_per_instance, "instance_gap_s": self.instance_gap_s, "stateless": self.stateless, "storage_turn": self.storage_turn,
                 "end": self.end, "empty_reply": self.empty_reply, "archive_wipes": self.archive_wipes,
                 "ask_to_store": self.ask_to_store, "program_library": self.program_library,
-                "rules_page": bool(self.rules_page)}
+                "rules_page": bool(self.rules_page),
+                **({"expert_guidance_sha256": EXPERT_GUIDANCE_SHA256} if self.program_library else {})}
 
     def system_usage(self) -> dict[str, float]:
         """What the system itself reports about its usage (secondary to the proxy)."""
@@ -471,8 +469,9 @@ class SystemLearner(BaseLearner):
             raise ValueError("expert guidance (program_library) is the grid tracks' procedure")
         pending = self.transcript.take()
         finish = self.end == "finish"
-        procedure = protocol.PROGRAM_LIBRARY_RULES.format(programs=self.programs_dir()) if self.program_library else ""
-        note = "\n\n".join(x for x in (self.storage_note, self.rules_page, procedure) if x)
+        guidance = (f"Expert-guidance library directory: {self.programs_dir()}\n\n{EXPERT_GUIDANCE}"
+                    if self.program_library else self.rules_page)
+        note = "\n\n".join(x for x in (self.storage_note, guidance) if x)
         extra = {"finish": True, "rules_note": note} if finish else {}
 
         def observation(fresh: bool) -> str:
@@ -539,7 +538,7 @@ class SystemLearner(BaseLearner):
                 self._session_pending = True
 
     def library_files(self, task_id: str) -> dict[str, str]:
-        """The expert guidance's two files for ``task_id`` (protocol.PROGRAM_LIBRARY_RULES), its program and its kept
+        """The expert guidance's two files for ``task_id`` (guidance.EXPERT_GUIDANCE), its program and its kept
         pairs, with the task's id as the agent sees it, which names the task's memory."""
         return {"program": f"{self.programs_dir()}/{task_id}.py", "pairs": f"{self.programs_dir()}/{task_id}.json",
                 "task": task_id}

@@ -53,7 +53,6 @@ import json
 import logging
 import os
 import random
-import re
 import shutil
 import signal
 import subprocess
@@ -289,29 +288,19 @@ def finish_round(a: argparse.Namespace, run: Path, round_: int) -> dict[str, Any
     return json.loads((split / "split.json").read_text())
 
 
-def started_oracle_rules(run: Path) -> str:
-    """What the run's oracle is told (realtime.sh's ORACLE_RULES), as the run's last "started:" line names it, the line
-    a relaunch takes the run's settings from; ``library`` for a line that names none, the rules every run started
-    before the driver named them labelled under."""
-    started = re.findall(r"realtime\.sh: started: .*", (run / "progress").read_text())[-1]
-    named = re.search(r", oracle rules ([a-z0-9]+)(?:, patience \d+)?$", started)
-    return named[1] if named else "library"
-
-
 def cmd_labeller(a: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     run = Path(a.run).expanduser()
     guidelines = run / "guidelines.md"
-    rules = oracle.oracle_rules(Path(a.c1).expanduser().read_text(), a.oracle_rules)
-    # a relaunch under other rules, or a c1 changed under it, would label every later round under other rules than the
-    # earlier ones, changing the oracle mid-run
+    rules = oracle.guidance(a.guidance)
+    # Keep the teacher fixed across restarts, including changes to the canonical source or a custom file.
     if not guidelines.exists():
         tmp = guidelines.with_name(guidelines.name + ".tmp")   # whole or not at all, since it is never written again
         tmp.write_text(rules)
         tmp.rename(guidelines)
     elif guidelines.read_text() != rules:
-        say(run, f"the labeller stops: guidelines.md, the rules the run's oracle has labelled under, is not what "
-                 f"--oracle-rules {a.oracle_rules} gives with {a.c1} (to change them on purpose, remove guidelines.md)")
+        say(run, "the labeller stops: guidelines.md differs from the requested guidance. "
+                 "Resume with the original guidance or use a new run directory.")
         raise SystemExit(1)
     r, asked = ready_rounds(run, a.rounds, a.row), set()
     while r < a.rounds:
@@ -763,9 +752,8 @@ def parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("labeller")
     common(s)
-    s.add_argument("--c1", default=str(oracle.RULES), help="the oracle's playing rules")
-    s.add_argument("--oracle-rules", choices=oracle.ORACLE_RULES, default="c1", dest="oracle_rules",
-                   help="what the oracle is told: c1 alone (c1), or c1 and the program library's procedure (library)")
+    s.add_argument("--guidance", metavar="FILE",
+                   help="replace the shared expert guidance with this file for a custom experiment")
     s.add_argument("--label-model", required=True, dest="label_model")
     s.add_argument("--label-effort", default="medium", dest="label_effort")
     s.add_argument("--relay-port", type=int, required=True, dest="relay_port")

@@ -1,30 +1,27 @@
-"""The oracle's working rules (continual_arc_training/rules/c1.md): rule 4's grid loader, run as the oracle's code runs
-in a user's harness, reads this instance's grids, never an earlier instance's."""
-import json
-import re
-import subprocess
-import sys
-from pathlib import Path
+"""One expert guidance for teachers and harnesses; custom files replace it in full."""
+import pytest
+from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE
 
-from continual_arc_training import oracle
+from continual_arc_training import oracle, realtime
 
 
-def _log(path: Path, test_input: str, pair: str) -> None:
-    text = f"Demo pair 1 input (1x2):\n{pair}\nDemo pair 1 output (1x2):\n{pair}\nTest input (1x2):\n{test_input}\n"
-    path.write_text(json.dumps({"text": text}) + "\n")
+def test_teacher_guidance_is_the_harness_guidance():
+    assert oracle.guidance() == EXPERT_GUIDANCE
 
 
-def test_the_loader_reads_this_instances_grids_not_an_earlier_instances(tmp_path):
-    """prime-agent with memory on keeps one log per instance (sessions/<id>.jsonl) beside each instance's
-    RLM_SESSION_DIR (session-artifacts/<id>)."""
-    state = tmp_path / "users" / "u000" / "system" / "state"
-    (state / "sessions").mkdir(parents=True)
-    _log(state / "sessions" / "older.jsonl", "7 7", "1 1")   # an earlier instance of another task, written first
-    _log(state / "sessions" / "current.jsonl", "3 4", "2 2")
-    (state / "session-artifacts" / "current").mkdir(parents=True)
-    loader = re.search(r"```\n(.*?)```", oracle.RULES.read_text(), re.S).group(1)
-    code = loader + "\nimport json\nprint(json.dumps(load()))\n"
-    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60,
-                         env={"RLM_SESSION_DIR": str(state / "session-artifacts" / "current")})
-    grids = json.loads(out.stdout.strip().splitlines()[-1])
-    assert grids["Test input"] == [[3, 4]] and grids["Demo pair 1 input"] == [[2, 2]], out.stderr[-300:]
+def test_custom_guidance_replaces_instead_of_extending_the_default(tmp_path):
+    path = tmp_path / "custom.md"
+    path.write_text("  A different policy.\n")
+    assert oracle.guidance(path) == "A different policy."
+    path.write_text(" \n")
+    with pytest.raises(ValueError, match="guidance file is empty"):
+        oracle.guidance(path)
+
+
+def test_labeller_defaults_to_shared_guidance_and_rejects_old_modes():
+    args = ["labeller", "--run", "/tmp/run", "--rounds", "1", "--row", "dagger", "--label-model", "test",
+            "--relay-port", "18230", "--label-round-budget", "1", "--label-run-budget", "1"]
+    assert realtime.parser().parse_args(args).guidance is None
+    for old in (["--oracle-rules", "c1"], ["--c1", "rules/c1.md"]):
+        with pytest.raises(SystemExit):
+            realtime.parser().parse_args(args + old)

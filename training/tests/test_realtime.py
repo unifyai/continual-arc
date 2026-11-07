@@ -550,8 +550,8 @@ def test_serving_a_phase_loads_its_adapter_checks_it_and_unloads_the_runs_others
 # -- the labeller ------------------------------------------------------------------------------------------------
 
 def _labeller_args(run: Path, row: str = "dagger", rounds: int = 1,
-                   oracle_rules: str = "library") -> argparse.Namespace:
-    return argparse.Namespace(run=str(run), rounds=rounds, row=row, c1=str(run / "c1.md"), oracle_rules=oracle_rules,
+                   guidance: str | None = None) -> argparse.Namespace:
+    return argparse.Namespace(run=str(run), rounds=rounds, row=row, guidance=guidance,
                               label_model="z-ai/glm-5.3-flash", label_effort="medium", relay_port=18230,
                               label_workers=256, label_set_workers=4, need_thinking=4, label_round_budget=20.0,
                               label_run_budget=100.0, min_labelled_pct=40.0, hold_every=10)
@@ -629,15 +629,6 @@ def test_finishing_a_round_splits_its_label_set_under_the_rounds_own_names(tmp_p
     assert realtime.ready_rounds(tmp_path, 8, "dagger") == 0   # round 0 first: round 7 alone is not a run of rounds
 
 
-def test_the_oracles_working_rules_are_c1_and_the_program_librarys_procedure_or_c1_alone():
-    """DAgger's and OPSD's labels are written under c1 and the program library's procedure (row HPL's text), or, with
-    ORACLE_RULES=c1, under c1 alone, so that the procedure is the one difference between the two oracles."""
-    from continual_arc_baselines.systems.protocol import PROGRAM_LIBRARY_RULES
-    c1 = "1. End every reply with one action line.\n"
-    assert oracle.oracle_rules(c1, "library") == c1.strip() + "\n\n" + PROGRAM_LIBRARY_RULES.format(programs="programs")
-    assert oracle.oracle_rules(c1, "c1") == c1.strip()
-
-
 def _label_round(monkeypatch, run: Path, r: int, a: argparse.Namespace, asked: list) -> None:
     """Round ``r`` played and labelled by the labeller, the oracle faked."""
     _fake_oracle(monkeypatch, asked)
@@ -647,37 +638,32 @@ def _label_round(monkeypatch, run: Path, r: int, a: argparse.Namespace, asked: l
 
 
 @pytest.mark.parametrize("row", ["dagger", "opsd"])
-def test_the_labeller_tells_the_oracle_its_rules_and_builds_daggers_split_for_both_labelled_rows(tmp_path, monkeypatch,
-                                                                                                  row):
-    """DAgger's and OPSD's labellers are one: the round's labels under the working rules, kept with the run, then its
-    label set and split, which mark it labelled, so OPSD trains on DAgger's own label sets."""
-    told = {}
-    for rules in ("library", "c1"):
-        run = tmp_path / rules
-        run.mkdir()
-        (run / "c1.md").write_text("1. End every reply with one action line.\n")
-        told[rules] = []
-        _label_round(monkeypatch, run, 0, _labeller_args(run, row, oracle_rules=rules), told[rules])
-        assert (run / "guidelines.md").read_text() == told[rules][0][2]   # what the oracle read, kept with the run
-        assert realtime.ready_rounds(run, 1, row) == 1 and (run / "labeller.done").exists()
-        assert 'round 0 labelled: {"train-r0000":{"games":1},"dev-r0000":{"games":1}}' in \
-            (run / "progress").read_text()
-    assert told["library"][0][2] == oracle.oracle_rules("1. End every reply with one action line.\n", "library")
-    assert told["c1"] == [([0], 40.0, "1. End every reply with one action line.")]
+def test_the_labeller_uses_and_records_the_shared_guidance(tmp_path, monkeypatch, row):
+    """Both labelled methods use the same guidance, preserved with their labels."""
+    from continual_arc_baselines.systems.guidance import EXPERT_GUIDANCE
 
-
-def test_a_labeller_started_again_under_other_oracle_rules_stops_before_it_labels(tmp_path, monkeypatch):
-    """A run keeps its oracle's rules to the end: a relaunch that lost ORACLE_RULES=c1 would tell the oracle the
-    procedure from its next round on, so its labeller stops there; started again under its own rules, it goes on."""
-    (tmp_path / "c1.md").write_text("c1")
     told = []
-    _label_round(monkeypatch, tmp_path, 0, _labeller_args(tmp_path, rounds=1, oracle_rules="c1"), told)
+    _label_round(monkeypatch, tmp_path, 0, _labeller_args(tmp_path, row), told)
+    assert told == [([0], 40.0, EXPERT_GUIDANCE)]
+    assert (tmp_path / "guidelines.md").read_text() == EXPERT_GUIDANCE
+    assert realtime.ready_rounds(tmp_path, 1, row) == 1 and (tmp_path / "labeller.done").exists()
+    assert 'round 0 labelled: {"train-r0000":{"games":1},"dev-r0000":{"games":1}}' in (tmp_path / "progress").read_text()
+
+
+def test_changed_guidance_stops_a_resumed_labeller_before_it_labels(tmp_path, monkeypatch):
+    """A replacement or a changed source cannot change the teacher during a run."""
+    custom = tmp_path / "custom.md"
+    custom.write_text("Custom experiment guidance.")
+    told = []
+    _label_round(monkeypatch, tmp_path, 0, _labeller_args(tmp_path, rounds=1, guidance=str(custom)), told)
     with pytest.raises(SystemExit):
-        _label_round(monkeypatch, tmp_path, 1, _labeller_args(tmp_path, rounds=2, oracle_rules="library"), told)
-    assert [t[2] for t in told] == ["c1"] and (tmp_path / "guidelines.md").read_text() == "c1"
+        _label_round(monkeypatch, tmp_path, 1, _labeller_args(tmp_path, rounds=2), told)
+    assert [t[2] for t in told] == [custom.read_text()]
+    assert (tmp_path / "guidelines.md").read_text() == custom.read_text()
     assert "the labeller stops: guidelines.md" in (tmp_path / "progress").read_text()
-    realtime.cmd_labeller(_labeller_args(tmp_path, rounds=2, oracle_rules="c1"))
-    assert [t[2] for t in told] == ["c1", "c1"] and realtime.ready_rounds(tmp_path, 2, "dagger") == 2
+    realtime.cmd_labeller(_labeller_args(tmp_path, rounds=2, guidance=str(custom)))
+    assert [t[2] for t in told] == [custom.read_text()] * 2
+    assert realtime.ready_rounds(tmp_path, 2, "dagger") == 2
 
 
 # -- realtime.sh -------------------------------------------------------------------------------------------------
@@ -699,39 +685,26 @@ def _realtime_sh(env: dict[str, str], then: str, home: Path = Path("/home/u")) -
                           capture_output=True, text=True)
 
 
-def test_realtime_sh_names_the_oracles_rules_in_its_started_line_for_the_labelled_rows_alone():
+def test_realtime_sh_records_shared_or_custom_guidance_only_for_labelled_rows():
     tail = "batch 64, start after 24 games, dose aggregate (replay 1)"
     assert _realtime_sh({**SETTINGS, "ROW": "dagger"}, "started").stdout.endswith(
-        f"{tail}, oracle rules c1, patience 6\n")
-    assert _realtime_sh({**SETTINGS, "ROW": "opsd", "ORACLE_RULES": "library"}, "started").stdout == (
-        "started: opsd, 4 users, 200 rounds, lag 1, LR 1e-4, serving on 0,1, training on 2,3,4,5,6,7, "
-        f"{tail}, oracle rules library, patience 6\n")
-    assert _realtime_sh({**SETTINGS, "ROW": "pg", "ORACLE_RULES": "library"}, "started").stdout.endswith(
-        f"{tail}, patience 6\n")
-    refused = _realtime_sh({**SETTINGS, "ROW": "dagger", "ORACLE_RULES": "none"}, "started")
-    assert refused.returncode == 1 and refused.stdout == "ORACLE_RULES must be library or c1, got none\n"
+        f"{tail}, expert guidance shared, patience 6\n")
+    assert _realtime_sh({**SETTINGS, "ROW": "opsd", "GUIDANCE": "/tmp/custom.md"}, "started").stdout.endswith(
+        f"{tail}, expert guidance /tmp/custom.md, patience 6\n")
+    assert _realtime_sh({**SETTINGS, "ROW": "pg"}, "started").stdout.endswith(f"{tail}, patience 6\n")
 
 
-def test_a_runs_oracle_rules_are_read_back_from_its_last_started_line(tmp_path):
-    """The rules a run's oracle labels under, read back from its progress: those realtime.sh's last "started:" line
-    names (the driver's own "phase N started:" lines are not realtime.sh's), or the default for a line that names
-    none."""
-    before = ("10-20 01:16 realtime.sh: started: dagger, 1 users, 200 rounds, lag 1, LR 1e-4, serving on 0,1,2,3, "
-              "training on 4,5, batch 64, start after 0 games, dose aggregate (replay 1)\n")
-    phase_line = ("10-20 01:30 realtime: phase 1 started: rounds 0-1, 134 labels, 0 held-out games, 1 pass(es), "
-                  "no held-out stop\n")
-    (tmp_path / "progress").write_text(before + phase_line)
-    assert realtime.started_oracle_rules(tmp_path) == "library"
-    for env, rules in (({"ROW": "opsd", "ORACLE_RULES": "library"}, "library"), ({"ROW": "dagger"}, "c1")):
-        started = _realtime_sh({**SETTINGS, **env}, "started").stdout
-        (tmp_path / "progress").write_text(f"{before}10-20 21:30 realtime.sh: {started}{phase_line}")
-        assert realtime.started_oracle_rules(tmp_path) == rules
+@pytest.mark.parametrize("retired", ["ORACLE_RULES", "C1"])
+def test_realtime_sh_rejects_retired_guidance_settings(retired):
+    refused = _realtime_sh({**SETTINGS, "ROW": "dagger", retired: "c1"}, "started")
+    assert refused.returncode == 1
+    assert "ORACLE_RULES and C1 are retired" in refused.stdout
 
 
 @pytest.mark.parametrize("loop", ["player", "labeller", "trainer"])
 def test_realtime_sh_launches_each_loop_with_its_settings(tmp_path, monkeypatch, loop):
     """The arguments launch() gives the driver (uv and setsid stand-ins recording them) read by the driver's own
-    parser, ORACLE_RULES reaching the labeller."""
+    parser, a custom GUIDANCE path reaching the labeller."""
     tools = tmp_path / "bin"
     tools.mkdir()
     (tools / "setsid").write_text('#!/bin/sh\nexec "$@"\n')
@@ -741,7 +714,7 @@ def test_realtime_sh_launches_each_loop_with_its_settings(tmp_path, monkeypatch,
         tool.chmod(0o755)
     (tmp_path / "prime-rl").mkdir()
     (tmp_path / "run").mkdir()
-    env = {**SETTINGS, "ROW": "opsd", "ORACLE_RULES": "c1", "PATH": f"{tools}:{os.environ['PATH']}"}
+    env = {**SETTINGS, "ROW": "opsd", "GUIDANCE": "/tmp/custom rules.md", "PATH": f"{tools}:{os.environ['PATH']}"}
     assert _realtime_sh(env, f"launch {loop}", tmp_path).returncode == 0
     for _ in range(100):   # launch() leaves the driver in the background
         if (tmp_path / "argv").exists():
@@ -755,7 +728,7 @@ def test_realtime_sh_launches_each_loop_with_its_settings(tmp_path, monkeypatch,
     a.fn(a)
     assert (seen["row"], seen["run"], seen["rounds"]) == ("opsd", f"{tmp_path}/run", 200)
     if loop == "labeller":
-        assert seen["oracle_rules"] == "c1" and seen["c1"] == str(oracle.RULES)
+        assert seen["guidance"] == "/tmp/custom rules.md"
     if loop == "trainer":
         assert (seen["train_gpus"], seen["lr"], seen["start_after"], seen["dose"]) == ("2,3,4,5,6,7", 1e-4, 24,
                                                                                        "aggregate")
