@@ -42,6 +42,22 @@ def _load_plugins(specs: list[str], kwargs_values: list[str]) -> list:
     return plugins
 
 
+def _level_source(spec: str | None):
+    """The :class:`~continual_arc.arc3.instances.LevelSource` a zero-argument factory ``package.module:name`` gives, as
+    ``arc-baselines run --registry`` takes it on ARC-AGI-3, or the pinned games' own."""
+    from continual_arc.arc3.instances import LevelSource
+
+    if spec is None:
+        return LevelSource()
+    if ":" not in spec:
+        raise SystemExit("--registry must look like package.module:factory")
+    module_name, name = spec.split(":", 1)
+    source = getattr(importlib.import_module(module_name), name)()
+    if not isinstance(source, LevelSource):
+        raise SystemExit(f"{spec} gave a {type(source).__name__}, not a LevelSource")
+    return source
+
+
 def _env_config(args, schedule):
     """The env config for a schedule, of its track's kind: its config's ``env`` block, then CLI overrides."""
     from continual_arc.runner import is_arc3, load_config
@@ -230,7 +246,7 @@ def cmd_learned(args) -> int:
 
 
 def cmd_precompute(args) -> int:
-    from continual_arc.arc3.instances import LevelSource, precompute
+    from continual_arc.arc3.instances import precompute
     from continual_arc.configs import build_schedule, test_schedule, with_users
     from continual_arc.runner import is_arc3
     from continual_arc.schedule import TESTS, Schedule
@@ -250,7 +266,7 @@ def cmd_precompute(args) -> int:
         if not args.quiet and (done % 10 == 0 or done == total):
             print(f"[{done}/{total}] {game}", file=sys.stderr)
 
-    n = precompute(LevelSource(), instances, demo_cap, workers=args.workers, progress=progress)
+    n = precompute(_level_source(args.registry), instances, demo_cap, workers=args.workers, progress=progress)
     print(f"{n} instances and their first {demo_cap} demonstrations solved and cached")
     return 0
 
@@ -340,6 +356,8 @@ def build_parser() -> argparse.ArgumentParser:
     pc.add_argument("--seed", type=int, default=0)
     pc.add_argument("--users", type=int, default=1, help="the users the configuration is served to (with_users)")
     pc.add_argument("--schedule", action="append", help="a schedule file to precompute instead of --config; repeat")
+    pc.add_argument("--registry", help="import path of a zero-argument factory of the LevelSource that draws the games' "
+                                       "levels, as arc-baselines run --registry takes it (default: the pinned games')")
     pc.add_argument("--demos", type=int, help="demonstrations of each instance to solve (default its demo cap)")
     pc.add_argument("--workers", type=int, default=4,
                     help="solver processes at once (a game's search may hold a few GB)")

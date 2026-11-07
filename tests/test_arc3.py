@@ -276,6 +276,43 @@ def test_precompute_solves_every_instance_and_demonstration_ahead(source, monkey
             assert warm.demonstration("sp80", seed, k, drawn.layout).steps
 
 
+REGISTRY_CACHE = None   # where test_precompute_takes_the_registry_a_run_takes keeps its solutions
+
+
+def sp80_registry() -> LevelSource:
+    """The test generator's levels, solved where its test keeps them: a factory as ``--registry`` names one."""
+    return LevelSource(GENERATORS, cache=REGISTRY_CACHE)
+
+
+def grid_registry() -> TaskRegistry:
+    return TaskRegistry()
+
+
+@needs_arc3
+def test_precompute_takes_the_registry_a_run_takes(tmp_path, monkeypatch):
+    """``continual-arc precompute --registry`` solves a schedule's levels with the LevelSource a factory gives, as
+    ``arc-baselines run --registry`` draws them, so a verified run solves its own games' levels ahead in a process of
+    its own."""
+    from continual_arc.arc3 import levels
+    from continual_arc.cli import main
+
+    monkeypatch.setitem(globals(), "REGISTRY_CACHE", tmp_path / "solutions")
+    Schedule(name="sp80", seed=0, slots=[Slot("sp80", seed, "stream") for seed in (21, 22)], sources={"sp80": SOURCE_ARC3},
+             meta={"dataset": "arc3", "track": "arc3"}).save(tmp_path / "schedule.json")
+    args = ["precompute", "--schedule", str(tmp_path / "schedule.json"), "--demos", "1", "--workers", "2", "--quiet"]
+    assert main([*args, "--registry", f"{__name__}:sp80_registry"]) == 0
+
+    def no_search(*args, **kwargs):
+        raise AssertionError("a run waited on the solver")
+
+    monkeypatch.setattr(levels, "bfs", no_search)
+    warm = sp80_registry()
+    for seed in (21, 22):
+        assert warm.demonstration("sp80", seed, 0, warm.instance("sp80", seed).layout).steps
+    with pytest.raises(SystemExit, match="not a LevelSource"):
+        main([*args, "--registry", f"{__name__}:grid_registry"])
+
+
 @needs_arc3
 def test_a_demonstration_is_the_solver_s_play_of_another_fresh_level(source):
     from continual_arc.arc3 import levels

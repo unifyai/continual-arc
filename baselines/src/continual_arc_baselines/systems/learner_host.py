@@ -15,10 +15,14 @@ serves it over JSON lines, one request read and one reply written per call::
     {"op": "resources"}                                          -> {"ok": true, "result": {"calls": 3.0}}
     {"op": "close"}
 
-Observations are ``LearnerObservation.to_json()``; actions and feedback carry their class name under ``type``
-(``Submit``, ``RequestDemos``, ``GiveUp``; ``SubmitFeedback``, ``DemosFeedback``, ``GiveUpFeedback``) beside their
-fields. Before any request the host writes one line saying the learner was built. An exception in the learner comes back as
-``{"ok": false, "error": ..., "traceback": ...}``; after one in building it, the host exits.
+Every observation, action and feedback carries its class's name under ``type`` beside its fields, so that the learner is
+given the benchmark's own objects on every track: a grid's ``LearnerObservation`` answered with ``Submit``,
+``RequestDemos`` or ``GiveUp`` and told ``SubmitFeedback``, ``DemosFeedback`` or ``GiveUpFeedback``; an ARC-AGI-3 game's
+``Arc3LearnerObservation`` answered with ``Act`` (its ``action``, ``x`` and ``y``, integers or null), ``ResetLevel``,
+``RequestDemos`` or ``GiveUp`` and told ``ActFeedback``, ``ResetFeedback``, ``DemonstrationFeedback`` (its demonstration as
+``Demonstration.to_json`` gives it) or ``GiveUpFeedback``. Before any request the host writes one line saying the learner
+was built. An exception in the learner comes back as ``{"ok": false, "error": ..., "traceback": ...}``; after one in
+building it, the host exits.
 
 The channel lives on duplicates of the original stdin and stdout. File descriptor 0 then reads /dev/null and 1 writes
 to stderr, so neither the learner's prints, nor a C extension's writes, nor a process it starts can corrupt a reply or
@@ -32,12 +36,21 @@ import argparse
 import dataclasses
 import importlib
 import json
+import operator
 import os
 import sys
 import traceback
 from pathlib import Path
 
 import continual_arc
+from continual_arc.arc3.env import (
+    ActFeedback,
+    Arc3LearnerObservation,
+    DemonstrationFeedback,
+    ResetFeedback,
+    ResetLevel,
+)
+from continual_arc.arc3.instances import Act, Demonstration
 from continual_arc.env import (
     DemosFeedback,
     GiveUp,
@@ -49,8 +62,10 @@ from continual_arc.env import (
 )
 from continual_arc.tasks import Pair
 
-ACTIONS = {cls.__name__: cls for cls in (Submit, RequestDemos, GiveUp)}
-FEEDBACK = {cls.__name__: cls for cls in (SubmitFeedback, DemosFeedback, GiveUpFeedback)}
+OBSERVATIONS = {cls.__name__: cls for cls in (LearnerObservation, Arc3LearnerObservation)}
+ACTIONS = {cls.__name__: cls for cls in (Submit, Act, ResetLevel, RequestDemos, GiveUp)}
+FEEDBACK = {cls.__name__: cls for cls in (SubmitFeedback, DemosFeedback, GiveUpFeedback, ActFeedback, ResetFeedback,
+                                          DemonstrationFeedback)}
 
 
 def _build(cls, data: dict):
@@ -59,29 +74,40 @@ def _build(cls, data: dict):
     return cls(**{k: v for k, v in data.items() if k in names})
 
 
-def observation(data: dict) -> LearnerObservation:
-    return _build(LearnerObservation, data)
+def _typed(table: dict, data: dict):
+    data = dict(data)
+    return table[data.pop("type")], data
+
+
+def observation(data: dict) -> LearnerObservation | Arc3LearnerObservation:
+    return _build(*_typed(OBSERVATIONS, data))
 
 
 def action(data: dict):
-    data = dict(data)
-    return _build(ACTIONS[data.pop("type")], data)
+    """An action the environment took, which the learner observes."""
+    return _build(*_typed(ACTIONS, data))
 
 
 def feedback(data: dict):
-    data = dict(data)
-    cls = FEEDBACK[data.pop("type")]
+    cls, data = _typed(FEEDBACK, data)
     if cls is DemosFeedback:
         data["pairs"] = [Pair(input=p["input"], output=p["output"], note=p.get("note")) for p in data["pairs"]]
+    if cls is DemonstrationFeedback and data["demonstration"] is not None:
+        data["demonstration"] = Demonstration.from_json(data["demonstration"])
     return _build(cls, data)
 
 
 def encode_action(value) -> dict:
+    """The learner's action as the wire carries it: an Act's action and coordinates as plain integers (``operator.index``
+    takes NumPy's too), since the other side refuses anything else."""
     if not isinstance(value, tuple(ACTIONS.values())):
-        raise TypeError(f"act() returned {value!r}, not a Submit, RequestDemos or GiveUp")
+        raise TypeError(f"act() returned {value!r}, not a Submit, Act, ResetLevel, RequestDemos or GiveUp")
     out = {"type": type(value).__name__}
     if isinstance(value, Submit):
         out["grid"] = value.grid
+    if isinstance(value, Act):
+        out.update(action=operator.index(value.action), x=None if value.x is None else operator.index(value.x),
+                   y=None if value.y is None else operator.index(value.y))
     return out
 
 

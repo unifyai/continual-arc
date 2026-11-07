@@ -6,16 +6,31 @@ be exercised without the Re-ARC data and without any model.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import random
+import shutil
+import sys
+import tempfile
 import threading
 import time
 from collections import Counter
+from pathlib import Path
 
+from continual_arc.arc3.env import (
+    ActFeedback,
+    Arc3LearnerObservation,
+    DemonstrationFeedback,
+    ResetFeedback,
+    ResetLevel,
+)
+from continual_arc.arc3.instances import COMPLEX_ACTION, Act
 from continual_arc.env import (
     Action,
     DemosFeedback,
     Feedback,
     GiveUp,
+    GiveUpFeedback,
     Observation,
     RequestDemos,
     Submit,
@@ -65,6 +80,93 @@ class FakeSource:
 class GiveUpLearner(BaseLearner):
     def act(self, obs: Observation) -> Action:
         return GiveUp()
+
+
+def files_digest(root: Path) -> str:
+    """A digest of every file under ``root``, its path and its bytes: the same for two trees exactly when they hold the
+    same files, and the digest of nothing for an empty one."""
+    h = hashlib.sha256()
+    for path in sorted(p for p in Path(root).rglob("*") if p.is_file()):
+        h.update(str(path.relative_to(root)).encode() + b"\0" + path.read_bytes() + b"\0")
+    return h.hexdigest()
+
+
+class Arc3NotesLearner(BaseLearner):
+    """An ARC-AGI-3 learner with no model that keeps everything it learns as files, for checking a run end to end, a
+    hosted learner's frozen tests above all. Its files are one folder, ``arc3-notes`` in the working directory
+    ``attach`` gives it (a temporary directory of its own when it is given none): ``games/<game>.json`` counts the
+    instances it has begun of each game, and ``instances/<n>.json`` notes how each ended. On a game it has never met it
+    buys a demonstration and keeps its length; then it plays one action the game offers (a click at the board's centre
+    where clicks are offered), reloads the level and gives up, so that every action and feedback of the track passes in
+    each instance and none takes long. As an instance begins it prints ``START`` and a JSON object with the digest of its
+    folder (:func:`files_digest`) to stderr, and as it ends ``END`` and the digest it leaves, so that a run can show what
+    each instance began from. ``reset`` deletes the folder. Every choice it makes is read from the observation and its
+    files, so it plays a round of many instances, each in turn, as it plays one."""
+
+    FOLDER = "arc3-notes"
+
+    def __init__(self) -> None:
+        self.workdir: Path | None = None
+
+    def attach(self, workdir: Path, environ: dict, **_: object) -> None:
+        self.workdir = Path(workdir)
+
+    @property
+    def folder(self) -> Path:
+        if self.workdir is None:
+            self.workdir = Path(tempfile.mkdtemp(prefix="arc3-notes-"))
+        return self.workdir / self.FOLDER
+
+    def _game(self, task_id: str) -> Path:
+        return self.folder / "games" / f"{task_id}.json"
+
+    def _read(self, task_id: str) -> dict:
+        path = self._game(task_id)
+        return json.loads(path.read_text()) if path.exists() else {"met": 0}
+
+    def _write(self, task_id: str, kept: dict) -> None:
+        path = self._game(task_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(kept))
+
+    @staticmethod
+    def _say(kind: str, **fields: object) -> None:
+        print(f"{kind} {json.dumps(fields)}", file=sys.stderr, flush=True)
+
+    def act(self, obs: Arc3LearnerObservation) -> Action:
+        if obs.is_fresh:
+            self._say("START", step=obs.step, task=obs.task_id, state=files_digest(self.folder))
+            kept = self._read(obs.task_id)
+            kept["met"] += 1
+            self._write(obs.task_id, kept)
+            if kept["met"] == 1 and obs.demo_cap > 0:
+                return RequestDemos()
+        if obs.actions_used == 0:
+            if COMPLEX_ACTION in obs.available_actions:
+                return Act(COMPLEX_ACTION, 32, 32)
+            return Act(obs.available_actions[0] if obs.available_actions else 1)
+        if obs.resets_used == 0:
+            return ResetLevel()
+        return GiveUp()
+
+    def observe(self, obs: Arc3LearnerObservation, action: Action, feedback: Feedback) -> None:
+        if isinstance(feedback, DemonstrationFeedback) and feedback.demonstration is not None:
+            kept = self._read(obs.task_id)
+            kept["demonstration"] = len(feedback.demonstration.steps)
+            self._write(obs.task_id, kept)
+        ended = isinstance(feedback, GiveUpFeedback) or (
+            isinstance(feedback, ActFeedback) and (feedback.level_completed or feedback.failed)) or (
+            isinstance(feedback, ResetFeedback) and feedback.failed)
+        if ended:
+            instances = self.folder / "instances"
+            instances.mkdir(parents=True, exist_ok=True)
+            (instances / f"{len(list(instances.iterdir())):04d}.json").write_text(json.dumps(
+                {"step": obs.step, "task": obs.task_id, "ended": type(feedback).__name__}))
+            self._say("END", step=obs.step, state=files_digest(self.folder))
+
+    def reset(self) -> None:
+        if self.folder.exists():
+            shutil.rmtree(self.folder)
 
 
 class EchoLearner(BaseLearner):

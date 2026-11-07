@@ -54,6 +54,14 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from continual_arc.arc3.env import (
+    ActFeedback,
+    Arc3LearnerObservation,
+    DemonstrationFeedback,
+    ResetFeedback,
+    ResetLevel,
+)
+from continual_arc.arc3.instances import Act
 from continual_arc.env import (
     DemosFeedback,
     GiveUp,
@@ -98,7 +106,6 @@ MAX_RESOURCES = 64
 INHERITED_ENV = ("LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
 BASE_URL_VARIABLES = ("OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENROUTER_BASE_URL", "ARC_LLM_BASE_URL")
 KEY_VARIABLES = ("OPENAI_API_KEY", "OPENROUTER_API_KEY", "ARC_LLM_API_KEY")
-FEEDBACK_TYPES = (SubmitFeedback, DemosFeedback, GiveUpFeedback)
 TMP_PREFIX = "arc-hl-"
 WRITABLE = ("state", "home")
 """What the learner can write that outlasts its host, under the attempt's system folder: everything a frozen test puts
@@ -239,10 +246,10 @@ class ServedLearner(BaseLearner):
         self._call("end_round")
         self._round = None
 
-    def act(self, obs: LearnerObservation):
-        return decode_action(self._call("act", obs=encode_observation(obs)))
+    def act(self, obs: LearnerObservation | Arc3LearnerObservation):
+        return decode_action(self._call("act", obs=encode_observation(obs)), obs)
 
-    def observe(self, obs: LearnerObservation, action, feedback) -> None:
+    def observe(self, obs: LearnerObservation | Arc3LearnerObservation, action, feedback) -> None:
         self._call("observe", obs=encode_observation(obs), action=encode_action(action),
                    feedback=encode_feedback(feedback))
 
@@ -484,37 +491,66 @@ class HostedLearner(ServedLearner):
 
 
 # -- the wire format ---------------------------------------------------------
+#
+# Every message carries its class's name under ``type`` beside its fields, as learner_host decodes it. An observation is
+# its track's own (``LearnerObservation`` of a grid, ``Arc3LearnerObservation`` of an ARC-AGI-3 game), and a learner
+# answers it with one of its track's actions: a grid takes ``Submit``, a game ``Act`` and ``ResetLevel``, and both take
+# ``RequestDemos`` and ``GiveUp``.
+
+GRID_ACTIONS = ("Submit", "RequestDemos", "GiveUp")
+GAME_ACTIONS = ("Act", "ResetLevel", "RequestDemos", "GiveUp")
+BARE_ACTIONS = {cls.__name__: cls for cls in (RequestDemos, GiveUp, ResetLevel)}
+"""The actions that carry no field."""
+FEEDBACK_TYPES = (SubmitFeedback, DemosFeedback, GiveUpFeedback, ActFeedback, ResetFeedback, DemonstrationFeedback)
 
 
-def encode_observation(obs: LearnerObservation) -> dict:
-    return obs.to_json()
+def encode_observation(obs: LearnerObservation | Arc3LearnerObservation) -> dict:
+    return {"type": type(obs).__name__, **obs.to_json()}
 
 
 def encode_action(action) -> dict:
+    """An action the environment took, which the learner observes."""
     if isinstance(action, Submit):
         return {"type": "Submit", "grid": action.grid}
-    if isinstance(action, RequestDemos | GiveUp):
+    if isinstance(action, Act):
+        return {"type": "Act", "action": action.action, "x": action.x, "y": action.y}
+    if isinstance(action, tuple(BARE_ACTIONS.values())):
         return {"type": type(action).__name__}
     raise TypeError(f"unknown action {action!r}")
 
 
-def decode_action(data: Any):
-    """The learner's action. A Submit's grid is passed on as it came: the environment counts one that is not a
-    grid as an invalid submission."""
+def _integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def decode_action(data: Any, obs: LearnerObservation | Arc3LearnerObservation):
+    """The learner's action on ``obs``: one of its track's, of which nothing but the type and its own fields is read. A
+    Submit's grid is passed on as it came, since the environment counts one that is not a grid as an invalid submission.
+    An Act's action is an integer and each of its coordinates an integer or null, since the environment counts any
+    integer it cannot play as an invalid action, and anything else would stop it."""
+    game = isinstance(obs, Arc3LearnerObservation)
+    kinds = GAME_ACTIONS if game else GRID_ACTIONS
     kind = data.get("type") if isinstance(data, dict) else None
-    if kind == "Submit":
-        return Submit(grid=data.get("grid"))
-    if kind == "RequestDemos":
-        return RequestDemos()
-    if kind == "GiveUp":
-        return GiveUp()
-    raise HostedLearnerError(f"act returned {data!r}, not a Submit, RequestDemos or GiveUp")
+    if kind in kinds:
+        if kind == "Submit":
+            return Submit(grid=data.get("grid"))
+        if kind != "Act":
+            return BARE_ACTIONS[kind]()
+        action, x, y = (data.get(name) for name in ("action", "x", "y"))
+        if _integer(action) and all(v is None or _integer(v) for v in (x, y)):
+            return Act(action, x, y)
+    raise HostedLearnerError(f"act returned {repr(data)[:300]}, not one of the actions on {'a game' if game else 'a grid'} "
+                             f"({', '.join(kinds)}) with its fields")
 
 
 def encode_feedback(feedback) -> dict:
+    """What the environment said of an action: a demonstration of a game as its own JSON (``Demonstration.to_json``)."""
     if not isinstance(feedback, FEEDBACK_TYPES):
         raise TypeError(f"unknown feedback {feedback!r}")
-    return {"type": type(feedback).__name__, **dataclasses.asdict(feedback)}
+    out = {"type": type(feedback).__name__, **dataclasses.asdict(feedback)}
+    if isinstance(feedback, DemonstrationFeedback) and feedback.demonstration is not None:
+        out["demonstration"] = feedback.demonstration.to_json()
+    return out
 
 
 # -- installing a submission -------------------------------------------------

@@ -33,7 +33,7 @@ the drift mode, which comes later.
 | demonstration | the solver's play of another fresh level of the game, its seed derived from the instance's and the request's index, any layout equal to the instance's skipped; one unit, at most three an instance, at any time while the instance is open, leaving the level being played as it was | as on track 1, one more example of the rule at a price; asking before acting or after a game over, the moments the design named, are both allowed, and allowing it mid-level as well gives a learner nothing a request before acting would not, so the simplest rule is also fair |
 | reproducibility | every solve is bounded by states expanded, never by time, and replayed in a fresh game before it is kept | a level is solved, or not, the same way on every machine |
 | the cache | only solutions are kept on disk, one file a draw, keyed by game, pinned version, a digest of the generator module's source and the draw's seed, with a digest of the layout drawn; levels are drawn again from their seeds | generating is deterministic and under 2 s, solving can take a minute; the layout's digest catches a generator that is not deterministic before a stale solution is served |
-| precompute | `continual-arc precompute --config arc3 --seed 0` solves a configuration's every instance and its three demonstrations ahead of a run, in processes of its own | a run never waits on a solver |
+| precompute | `continual-arc precompute --config arc3 --seed 0` solves a configuration's every instance and its three demonstrations ahead of a run, in processes of its own; `--schedule` takes a run's own schedules instead, and `--registry` the `LevelSource` of games outside the pinned 25, as `arc-baselines run --registry` does | a run never waits on a solver |
 | users | one: users bring tasks of their own, and the 15 stream games are `arc3`'s one block, so the track is individual alone; a frozen test is still one round of users, every open instance a game of its own | the frozen tests need rounds of users; a second user would need 15 more games |
 
 ## The protocol
@@ -63,6 +63,15 @@ its first board, each action with the cells it changed, and its last board: abou
 level, some 3,000 to 4,000 tokens. The demo-cache floor keeps the demonstrations it bought for a game and shows them
 again, free, when the game returns.
 
+A submitted learner plays the track hosted as it plays the grid tracks, and as it would in the runner's own process: the
+baselines' hosted learner (`systems/hosted.py`, and `systems/remote.py` from a machine of its own) carries
+`Arc3LearnerObservation`, `Act`, `ResetLevel`, `RequestDemos` and `GiveUp`, and the track's feedback, over its JSON lines,
+each a class's name and its fields, and takes from the learner's side an `Act` of integers alone and none of a grid
+track's actions. A verified run draws its seed, then solves every level of its stream and tests and their
+demonstrations ahead, in a process of its own (`continual-arc precompute --schedule ... --registry ...`), with the
+`LevelSource` its runs take as their registry (`arc-baselines run --registry`). `continual_arc.testing.Arc3NotesLearner`
+plays the track with no model, keeping what it learns as files, for checking such a run end to end.
+
 ## Configurations
 
 | configuration | stream | seen test | held-out test |
@@ -78,5 +87,4 @@ dormancy of median 16 steps, a new game every two). The held-out test is the epi
 
 * The drift mode: rules that change over the stream, with a game's later levels as its first source.
 * A human baseline on fresh levels: the published counts are for level 0, scaled here by the solver's lengths.
-* The program library and the trained rows do not play this track; a hosted submission's wire format carries grids
-  alone.
+* The program library and the trained rows do not play this track.

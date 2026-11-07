@@ -266,16 +266,21 @@ depends on this package alone, which brings the benchmark with it.
 
 For a verified run we rerun the submission's code on held-out rules with `HostedLearner` (`systems/hosted.py`), which
 runs a submitted learner whole inside the sandbox, with the submission's own interpreter, behind the tracking proxy, so
-the learner never holds a key. That runs on a disposable machine that holds neither the rules nor the key, reached from
-the verifier's by `RemoteLearner` (`systems/remote.py`), and the proxy is confined to the models the submission names,
-each at the effort it names (`--confine-models`), on the hosts of `proxy.CONFINED_HOSTS`, each instance's calls opening
-with a salt of their own, and within the run's budget (`--spend-ledger`, `--spend-cap`, `--prices`). `arc-baselines
-install-submission --repo URL --commit SHA --venv DIR [--checkout DIR]` installs it into a new virtual environment,
-under the sandbox too, since installing runs the package's build code, its only network a filter to the package index
-and the code host (`systems/connect_filter.py`). Nothing the build or the learner wrote decides anything outside the
-sandbox: its links are not followed, and `pyvenv.cfg` names nothing that is bound. A hosted learner plays `arc-baselines
-run --test` one instance at a time, whatever it is: before each, its host is ended and its files put back as the stream
-left them, and on an arena the machine reboots, so what it carries from its stream is what it keeps as files.
+the learner never holds a key. It plays all three tracks: its JSON lines carry a grid's observation, `Submit`,
+`RequestDemos` and `GiveUp` and their feedback, and an ARC-AGI-3 game's `Arc3LearnerObservation`, `Act`, `ResetLevel`,
+`RequestDemos` and `GiveUp` and theirs, each checked on this side against what its track takes, so a learner plays
+hosted as it plays in the runner's own process (`tests/test_hosted_tracks.py` plays `arc2-smoke` and `arc3-smoke` hosted
+and in one process, record for record). That runs on a disposable machine that holds neither the rules nor the key,
+reached from the verifier's by `RemoteLearner` (`systems/remote.py`), and the proxy is confined to the models the
+submission names, each at the effort it names (`--confine-models`), on the hosts of `proxy.CONFINED_HOSTS`, each
+instance's calls opening with a salt of their own, and within the run's budget (`--spend-ledger`, `--spend-cap`,
+`--prices`). `arc-baselines install-submission --repo URL --commit SHA --venv DIR [--checkout DIR]` installs it into a
+new virtual environment, under the sandbox too, since installing runs the package's build code, its only network a
+filter to the package index and the code host (`systems/connect_filter.py`). Nothing the build or the learner wrote
+decides anything outside the sandbox: its links are not followed, and `pyvenv.cfg` names nothing that is bound. A hosted
+learner plays `arc-baselines run --test` one instance at a time, whatever it is: before each, its host is ended and its
+files put back as the stream left them, and on an arena the machine reboots, so what it carries from its stream is what
+it keeps as files.
 
 ## Reproduce the paper's runs
 
