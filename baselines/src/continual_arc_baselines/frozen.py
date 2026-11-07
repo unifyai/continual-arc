@@ -481,7 +481,12 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
     finally:
         learner.close()
     for user in range(test.users):
-        shutil.rmtree(user_system(out, user) / "state")
+        system = user_system(out, user)
+        shutil.rmtree(system / "state")
+        # A prime-agent user's own copy of the kernel venv (PrimeAgentLearner.own_venv), some 300 MB, sits beside its
+        # state and nothing reads it once the round is committed, so a test of 100 users would leave some 30 GB.
+        if (system / "kernel-venv").exists():
+            shutil.rmtree(system / "kernel-venv")
     return out
 
 

@@ -448,6 +448,14 @@ class Remembering:
         pass
 
 
+class RememberingOnItsOwnVenv(Remembering):
+    """Remembering with a runtime of its own beside its state, as prime-agent's own copy of the kernel venv is."""
+
+    def attach(self, workdir: Path, environ: dict[str, str], tracker=None) -> None:
+        super().attach(workdir, environ, tracker)
+        (self.workdir / "kernel-venv" / "bin").mkdir(parents=True, exist_ok=True)
+
+
 class Stateless(SystemLearner):
     """A system of rows H0, HPL0 and PL0 (``stateless=True``) behind the harness protocol: it solves a task from the rule
     its state's ``memory.json`` holds for it, else from a demonstration it asks for, and each time it starts notes what
@@ -684,8 +692,9 @@ def test_a_stream_still_being_played_is_not_tested(stream_run, tmp_path):
 def test_a_test_is_played_from_the_runs_own_launch_every_user_from_the_streams_memory(stream_run, tmp_path):
     run, system, log = stream_run
     server = FakeUpstream().start()
-    argv = ["run", "--learner", "tests.test_frozen:Remembering", "--learner-kwargs", '{"model": "vendor/row-model"}',
-            "--llm-defaults", '{"reasoning_effort": "low"}', "--config", "arc1", "--out", str(run),
+    argv = ["run", "--learner", "tests.test_frozen:RememberingOnItsOwnVenv", "--learner-kwargs",
+            '{"model": "vendor/row-model"}', "--llm-defaults", '{"reasoning_effort": "low"}', "--config", "arc1",
+            "--out", str(run),
             "--upstream", server.base_url, "--upstream-key-env", "NO_SUCH_KEY", "--registry",
             "tests.test_frozen:registry", "--quiet"]
     (run / "launches.jsonl").write_text(json.dumps({"argv": argv}) + "\n")
@@ -710,6 +719,7 @@ def test_a_test_is_played_from_the_runs_own_launch_every_user_from_the_streams_m
     for user in range(4):
         mine = out / "users" / f"u{user:03d}" / "system"
         assert not (mine / "state").exists()   # its working tree gone, its state in its repository
+        assert not (mine / "kernel-venv").exists()   # and its runtime with it
         assert git(mine / "state.git", "log", "--format=%s").splitlines()[:2] == ["round 3", f"relocated from {system}"]
         assert json.loads((mine / "state-log.jsonl").read_text().splitlines()[-1])["round"] == 3
     assert json.loads((out / "frozen.json").read_text())["from"]["commit"] == log.commit_of(2)
