@@ -533,12 +533,12 @@ which nobody outside unify has seen ([verified results](#verified-results)).
 
 ### Verified results
 
-Verified runs take all three tracks, each on a held-out season of its own that nobody outside unify has seen. On
+Verified runs take all three tracks, each on a private set of its own that nobody outside unify has seen. On
 `arc1` and `arc2` it is 50 new ARC-style rules, each a generator of fresh instances, checked against every public ARC
 task: 25 streamed over 200 instances, as the track streams its 25 tasks, and 25 held out. On `arc3` it is new games on
 ARC Prize's engine, each a generator of fresh levels with a solver, streamed and held out as `arc3` serves its own: 8
-fresh levels of each stream game and 4 of each held-out game. A track whose held-out season is not ready reruns a
-learner on its public tasks at a seed of the run's own instead, and the result shows as reproduced, not verified,
+fresh levels of each stream game and 4 of each held-out game. If a track's private set is withdrawn, a
+learner is rerun on its public tasks at a seed of the run's own instead, and the result shows as reproduced, not verified,
 since their answers are public. To have a learner verified:
 
 1. Open an issue with the [Verify my learner](https://github.com/unifyai/continual-arc/issues/new?template=verify.yml)
@@ -555,7 +555,7 @@ since their answers are public. To have a learner verified:
 2. Pay the invoice we post on the issue, by card on Stripe's page: the budget, OpenRouter's 5.5 percent fee on buying
    that credit, and Stripe's fee on the payment. We make a key for your run on our own OpenRouter account, capped at the
    budget, which pays for your learner, its reset and each model you name played bare. What the run does not spend goes
-   back to your card, less Stripe's fee. A person, and a card, may have 10 runs in a season.
+   back to your card, less Stripe's fee. A person, and a card, may have 10 runs on each private set.
 
 Once it is paid and a runner is free, the issue says the run has started: one run plays at a time on each runner. We
 install your repository and run your learner, whole, inside a sandbox on a machine of its own, deleted when the run
@@ -570,12 +570,12 @@ code never holds the key. The proxy drops any other field or header, and refuses
 provider to fetch and any tool that runs at the provider, and the issue says how many calls it refused. In the sandbox
 new namespaces, io_uring, BPF and the like are refused, so a harness adapter on the baselines starts no sandbox of its
 own there, and any other nested sandbox would fail. It may hold 8,192 processes and 64 GiB in one file, and a run stops
-at 120 hours. At a seed of its own, your learner plays the season's stream and then its two frozen tests from where the
+at 120 hours. At a seed of its own, your learner plays the private set's stream and then its two frozen tests from where the
 stream left it: the seen test, four fresh instances of each streamed rule or game, and the held-out test, one
 instance of each held-out rule or four fresh levels of each held-out game. Your learner plays them one at a time, whatever it is: before each one we restart the
 machine it runs on and put its working files back as the stream left them, so what it carries from the stream to the
 tests is what it keeps as files, and a learner whose memory lives only in its process plays the tests from nothing. Only
-once it has finished does anything else play. Your learner reset plays the season's stream wiped before every instance,
+once it has finished does anything else play. Your learner reset plays the private set's stream wiped before every instance,
 for the share learned, and the same test instances one at a time, wiped before each, which both tests are read against;
 each model you name plays the test instances bare too, and a test is flagged beside it when your reset plays below one
 of them that costs no more than the reset, or below the cheapest, when your learner plays no better than one that costs
