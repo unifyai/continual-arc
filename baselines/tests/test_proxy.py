@@ -768,7 +768,9 @@ def test_the_upstreams_own_figure_replaces_what_a_call_with_no_price_was_held_at
     with budgeted(upstream, tmp_path, 2.5) as proxy:
         proxy.ledger.settle(0.0, 1.5)  # a client that went away: the most its call could have cost
         # 1.5 spent leaves less than a call's 1.28 at most; the upstream's 0.75 leaves room for it
+        since = time.monotonic()
         assert post(proxy, plain()).status_code == 200
+        assert not proxy.tracker.wait_ended(since, 30)  # its cost is settled as the call ends, once its reply has gone out
         assert proxy.ledger.spent == 0.75 + 0.5 and not proxy.ledger.over
 
 
