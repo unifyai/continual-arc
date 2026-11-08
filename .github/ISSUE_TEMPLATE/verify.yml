@@ -6,9 +6,9 @@ body:
   - type: markdown
     attributes:
       value: |
-        We rerun your learner on the private set of the track you name, at a seed of its own: on ARC-AGI-1 and ARC-AGI-2, 25 new rules nobody outside unify has seen, streamed over 200 instances, and on ARC-AGI-3 new games nobody outside unify has seen, 8 fresh levels of each streamed; then two frozen tests played from where the stream left your learner: fresh instances of the streamed rules or games (the seen test) and more held out (the held-out test). If a track's private set is withdrawn, your learner is rerun on its public tasks at a seed of its own instead, and the result shows as reproduced, not verified, since their answers are public. The share of its reset's spend it saves on each places it on the leaderboard's plane, memorization across and generalization up, read against your learner reset on the same instances, with the budget used and share solved by both beside it and each model you name shown bare too; its share learned is read against your learner reset on the same stream. Your code runs in a sandbox on a machine of its own, which has no public network and holds neither our rules nor the run's key, and reaches nothing but our tracking proxy, which makes its model calls on a key we make for the run: chat completions to the models you name here, each at the effort you name, and nothing else. Before each test instance we restart that machine and put your learner's files back as the stream left them, so what it carries from the stream to the tests is what it keeps as files. Your package installs from PyPI and GitHub alone. The result is posted on this issue and joins the leaderboard, as verified or as reproduced. How it works: the README's "Verified results".
+        We rerun your learner on the private set of the track you name, at a seed of its own: on ARC-AGI-1 and ARC-AGI-2, 25 new rules nobody outside unify has seen, streamed over 200 instances, and on ARC-AGI-3 new games nobody outside unify has seen, 8 fresh levels of each streamed; then two frozen tests played from where the stream left your learner: fresh instances of the streamed rules or games (the seen test) and more held out (the held-out test). If a track's private set is withdrawn, your learner is rerun on its public tasks at a seed of its own instead, and the result shows as reproduced, not verified, since their answers are public. The share of its reset's spend it saves on each places it on the leaderboard's plane, memorization across and generalization up, read against your learner reset on the same instances, with the budget used and share solved by both beside it and each model you name shown bare too; its share learned is read against your learner reset on the same stream. Your code runs in a sandbox on a machine of its own, which has no public network and holds neither our rules nor the run's key, and reaches nothing but our tracking proxy, which makes its model calls on a key we make for the run: chat completions to the models you name here, each at the effort you name, and nothing else. Before each test instance we restart that machine and put your learner's files back as the stream left them, so what it carries from the stream to the tests is what it keeps as files. Your package installs from PyPI and GitHub alone. A learner that trains its weights plays instead in sandboxes on GPUs we rent on Modal, with no network, and you pay for its GPU time ahead (the README's "Verified results"). The result is posted on this issue and joins the leaderboard, as verified or as reproduced. How it works: the README's "Verified results".
 
-        You pay ahead for your run's model calls, which we make on a key of our own capped at the budget you set here: it pays for your learner, its reset and each model you name played bare. We pay for the machines. Once the issue is checked we post a link to pay by card on Stripe's page: the budget, OpenRouter's 5.5 percent fee on buying that credit, and Stripe's fee on the payment. What the run does not spend goes back to your card, less Stripe's fee. A GPT-6 Luna learner, its reset and its model bare have cost tens of dollars on ARC-AGI-1; ARC-AGI-3's games are long conversations and cost far more.
+        You pay ahead for your run's model calls, which we make on a key of our own capped at the budget you set here: it pays for your learner, its reset and each model you name played bare. We pay for the machines, except the GPUs a learner that trains its weights plays on, which you pay for at Modal's price. Once the issue is checked we post a link to pay by card on Stripe's page: the budget, OpenRouter's 5.5 percent fee on buying that credit, and Stripe's fee on the payment. What the run does not spend goes back to your card, less Stripe's fee. A GPT-6 Luna learner, its reset and its model bare have cost tens of dollars on ARC-AGI-1; ARC-AGI-3's games are long conversations and cost far more.
   - type: input
     id: name
     attributes:
@@ -103,6 +103,28 @@ body:
     validations:
       required: true
   - type: input
+    id: weights
+    attributes:
+      label: Student's open weights
+      description: Only for a learner that trains its weights. The open weights it starts from, a Hugging Face model at a commit, `org/name@` and the full 40-character commit. They are in its sandbox read-only, at the path in ARC_READ_PATHS.
+      placeholder: Qwen/Qwen3.5-9B@0123456789abcdef0123456789abcdef01234567
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: GPU
+      description: Only for a learner that trains its weights. The GPU each of its sandboxes gets on Modal.
+      options: [L4, L40S, A100-80GB, H100, H200, B200]
+  - type: input
+    id: gpu_count
+    attributes:
+      label: GPUs per sandbox
+      description: Only for a learner that trains its weights. From 1 to 8; 1 if left empty.
+  - type: input
+    id: gpu_budget
+    attributes:
+      label: Budget for its GPU time (USD)
+      description: Only for a learner that trains its weights. Whole US dollars, from 5 to 10,000. It pays for the GPU time of your learner, its reset and its reset's stream at Modal's price for that GPU, by the second, and the run stops if they spend it.
+  - type: input
     id: country
     attributes:
       label: Billing country
@@ -122,6 +144,4 @@ body:
         - label: My learner calls only the models named above, and keeps as files whatever it is to carry from the stream to the tests.
           required: true
         - label: The code is public under an open licence and keeps to the README's "What a learner may use".
-          required: true
-        - label: The learner does not train its weights, which we cannot verify yet.
           required: true

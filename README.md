@@ -589,7 +589,19 @@ track's public tasks, beside your public-stream result if you sent one. The key 
 learner kept, stay with us, since they show the held-out tasks.
 
 You pay ahead for your model calls; we pay for the machines. A run takes hours to days, like one on the public stream.
-Learners that train their weights are not verified for now.
+
+A learner that trains its weights plays on GPUs we rent on Modal, and you pay for those ahead too. The form asks for the
+open weights it starts from, as a Hugging Face model at a commit, the GPU and how many per sandbox, and a budget for GPU
+time from 5 to 10,000 US dollars, charged at Modal's price for that GPU with nothing added. Your learner, its reset and
+its reset's stream each play in a Modal sandbox of their own, with no network at all, built from your repository, the
+baselines and those weights, which your learner finds read-only at the paths in `ARC_READ_PATHS`. They reach our
+tracking proxy alone, as on any run. We keep a copy of the stream's sandbox at the end of a round once an hour has
+passed since the last, and if Modal ends the sandbox, the stream goes on from that copy in a new one, so your learner
+has to start again from its files at the end of any round, as a resumed run does. Before each test instance a new
+sandbox starts from the stream's last copy, so every instance begins from the files and weights the stream left and
+nothing passes from one to the next. GPU time on the stream is your learner's training compute, shown beside the score
+and never in it. GPU time during a test, your learner's start in each instance's sandbox included, counts in that
+test's cost, and the run stops if the GPU budget is spent. What it does not spend goes back to your card with the rest.
 
 ## Run records and trajectories
 
