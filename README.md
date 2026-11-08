@@ -481,10 +481,10 @@ training/        the training of the paper's trained rows on Qwen3.5-9B (trainin
 
 ## Submitting a result
 
-The [leaderboard](https://continual-arc.unify.ai/leaderboard) opens with the paper's runs and takes anyone's. A result
+The [leaderboard](https://continual-arc.unify.ai/leaderboard) opens with the paper's runs and presents any verified submission of a genuine learning algorithm, novel or not. A result
 is a learning method on a student model and, if it has one, a teacher model, placed on the plane of the two tests'
-shares saved. A result on the public stream is taken as reported. It is marked verified once we have rerun its code on the held-out rules,
-which nobody outside unify has seen ([verified results](#verified-results)).
+shares saved. A result on the public stream is a claim until we have rerun its code on the held-out rules,
+which nobody outside unify has seen, so nothing goes on the leaderboard until your learner is verified ([verified results](#verified-results)).
 
 1. Run your learner on the track's canonical protocol at seed 0 (`arc1`): its stream with
    `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset: on the same
@@ -529,7 +529,7 @@ which nobody outside unify has seen ([verified results](#verified-results)).
    plane, the share saved on the seen and the held-out test with their intervals, T and the budget used and share
    solved by your learner and its reset on each, with the flag if your reset plays below the bare model, then the
    share learned over the stream.
-5. Open a pull request. Questions go to this repository's issues.
+5. Have your learner verified, then open a pull request with these runs to stand beside its verified result. Questions go to this repository's issues.
 
 ### Verified results
 
