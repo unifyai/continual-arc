@@ -162,7 +162,7 @@ for test in ("held-out", "seen"):
 A learner that holds a model client or a process saves what it keeps instead, and loads it into a new instance for
 each test. The references play the same instances one at a time, `--width 1`, so that the runner resets the learner
 before each, each into a directory of its own, and `continual-arc transfer` reads the share saved and T from the two
-runs of a test, the learner's and its reset's, each with a 95 percent interval from a bootstrap over tasks, beside the
+runs of a test, the learner's and its reset's, each with a 95% interval from a bootstrap over tasks, beside the
 budget used and share solved of each (`--json` prints them all; `--also-run` and `--also-reset` add further plays of
 either side on the same instances, read as their mean on each instance, as the paper reads its rows):
 
@@ -207,7 +207,7 @@ continual-arc run --learner my_pkg.learners:MyLearner --schedule stream-reset.js
 continual-arc learned runs/my-stream runs/my-stream-reset
 ```
 
-prints the share with a 95 percent interval from a bootstrap over tasks
+prints the share with a 95% interval from a bootstrap over tasks
 (`continual_arc.metrics.share_learned`). `--reset-each` serves the same stream with the learner
 wiped before every slot; a learner that keeps nothing between instances is its own reset. Each
 of the run's instances is read against the reset's play of the same instance, or, for one the
@@ -552,7 +552,7 @@ since their answers are public. To have a learner verified:
    is not taken. A harness adapter on the baselines' `SystemLearner` depends on
    `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.6.0#subdirectory=baselines` alone,
    which brings the benchmark with it.
-2. Pay the invoice we post on the issue, by card on Stripe's page: the budget, OpenRouter's 5.5 percent fee on buying
+2. Pay the invoice we post on the issue, by card on Stripe's page: the budget, OpenRouter's 5.5% fee on buying
    that credit, and Stripe's fee on the payment. We make a key for your run on our own OpenRouter account, capped at the
    budget, which pays for your learner, its reset and each model you name played bare. What the run does not spend goes
    back to your card, less Stripe's fee. A person, and a card, may have 10 runs on each private set.
@@ -581,7 +581,7 @@ each model you name plays the test instances bare too, and a test is flagged bes
 of them that costs no more than the reset, or below the cheapest, when your learner plays no better than one that costs
 no more than your learner, or when your learner sends a larger share of its calls to a dearer model than its reset does.
 Spend outside any instance counts as the learner's. The issue then gets your place on the plane: the share saved on the
-seen and the held-out test, each with its 95 percent interval, T and the budget used and share solved by your learner
+seen and the held-out test, each with its 95% interval, T and the budget used and share solved by your learner
 and its reset on each, then the share learned on the stream with its interval, the learnable budget, the budget
 used and share solved on the stream and what each run's model calls cost, shares rounded to a hundredth, points to a
 whole point and dollars to a whole dollar, and the result joins the leaderboard as verified, or as reproduced on a
