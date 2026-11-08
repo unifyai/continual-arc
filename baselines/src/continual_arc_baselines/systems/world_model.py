@@ -18,9 +18,11 @@ there, which ends it. A demonstration is one; so is each stretch of a learner's 
 it: it must give each board the game showed, cell for cell, and say ``won``, and ``lost`` where it defines it, exactly
 where the level completed or the game ended. The board after a win or a game over is never compared, so a program
 need not draw an end screen; and running from each level's first board, never from a board midway, lets a program
-track what the board hides. A state a program renders as None is never a win: no board is compared there and the
-rest of that trajectory is not checked, but a level that completed there is a failure, so a program may leave an
-outcome it cannot simulate unknown and still be held to where the level is won. :func:`plan` replays a level's trajectory so far
+track what the board hides. A demonstration's boards must all be given; on a learner's own play a program may render
+a state as None, which is never a win: no board is compared there and the rest of that trajectory is not checked, but
+a level that completed there is a failure. So a program may leave unknown an outcome no demonstration shows, such as
+what a wrong move spills, and is still held to every board of the winning plays it was shown and to where a level is
+won; a program that leaves everything unknown passes nothing. :func:`plan` replays a level's trajectory so far
 in the program and searches it breadth-first for the shortest winning sequence from there, over the actions the game
 accepts and the clicks ``clicks(state)`` names (by default one cell of each one-colored patch of the board), states
 merged by ``key``, never through a state that is lost or unknown, bounded by states expanded and guarded by a
@@ -158,9 +160,10 @@ def boards(trajectory: dict) -> list[Board]:
 
 def trajectory_of_demonstration(demo: dict, name: str) -> dict:
     """A demonstration as the benchmark serializes it (``Demonstration.to_json``: its first frame, then each action
-    with the cells it changed) as a trajectory: one action a step, the last one winning."""
+    with the cells it changed) as a trajectory: one action a step, the last one winning, marked as a demonstration,
+    whose every board a program must give."""
     steps = demo["steps"]
-    return {"name": name, "start": demo["start"],
+    return {"name": name, "demonstration": True, "start": demo["start"],
             "steps": [{"actions": [list(s["action"])], "changes": [list(c) for c in s["changes"]],
                        "won": i == len(steps) - 1, "over": False} for i, s in enumerate(steps)]}
 
@@ -364,7 +367,10 @@ def check(program: Program | str, trajectories: list[dict], seconds: float = SEC
                 for action in step["actions"]:
                     state = program.step(state, action)
                 if program.unknown(state):
-                    # an outcome the program leaves unknown, which is never a win: nothing after it is checked
+                    # an outcome the program leaves unknown, which is never a win: nothing after it is checked, but
+                    # a demonstration's every board must be given
+                    if trajectory.get("demonstration"):
+                        return _failure(trajectory, index, "unknown demonstration", k)
                     if step["won"]:
                         return _failure(trajectory, index, "not won", k)
                     break
@@ -423,6 +429,8 @@ def describe(failure: dict) -> str:
                 f"gives\n{_listed([[x, y, got[y][x]] for x, y in wrong])}")
     return {
         "unknown start": f"Your program renders no board {where}: init and render must give every level's first board.",
+        "unknown demonstration": f"Your program renders no board {where}: it must give every board of a demonstration, "
+                                 "and may leave unknown only an outcome of your own play.",
         "won early": f"Your program says won {where}, where the level had not completed.",
         "not won": f"The level completed {where}, but your program does not say won there.",
         "lost early": f"Your program says lost {where}, where the game went on.",

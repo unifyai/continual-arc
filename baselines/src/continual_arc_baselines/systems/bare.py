@@ -256,10 +256,11 @@ Here you may also answer with the game's rules as a program. In one ```python bl
 define step(board, action), the board after an action, and won(board), whether a board shows the level completed. A
 board is a list of 64 rows of 64 colors 0-15, top row first, as boards are shown here; an action is [id], or [6, x, y]
 for a click. To carry what a board does not show, also define init(board), your state at a level's first board, and
-render(state), the board a state shows; step and won then take that state. Where your program cannot tell the board,
-such as after an action whose outcome it does not model, render may return None (or step, if your states are boards):
-that board is not compared, nothing after it in that level is checked, and the search never goes through it, but it
-is never a win, so the check fails where the level completed. You may define lost(state), whether the game is over;
+render(state), the board a state shows; step and won then take that state. It must give every board of every
+demonstration. Where it cannot tell the board after an action of your own play whose outcome no demonstration shows,
+render may return None (or step, if your states are boards): that board is not compared, nothing after it in that
+level is checked, and the search never goes through it, but it is never a win, so the check fails where the level
+completed. You may define lost(state), whether the game is over;
 clicks(state), the [x, y] clicks worth trying (by default one cell of each one-colored patch of the board); and
 key(state), a value equal for states that are the same. End your reply with {{"action": "model"}}.
 Your program is checked at no cost: it is run from the first board of every level of this game you have seen, a

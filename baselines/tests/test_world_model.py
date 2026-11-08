@@ -138,10 +138,19 @@ def test_won_is_read_exactly_where_the_level_completed():
     assert check(always, demos())["kind"] == "won early"
 
 
-def test_a_program_may_leave_an_outcome_unknown_but_never_a_win():
+def test_a_program_may_leave_an_outcome_of_its_own_play_unknown_but_never_a_win_nor_a_demonstration_s():
     blind = RIGHT.replace("    cells = [(x, y) for y in range(63)", "    if action[0] == 3:\n        return None\n"
                           "    cells = [(x, y) for y in range(63)", 1)
-    assert check(blind, demos()) is None   # demonstration 2 moves left at once: nothing after it is checked
+    shown = [world_model.trajectory_of_demonstration(
+        {"start": t["start"], "steps": [{"action": s["actions"][0], "changes": s["changes"]} for s in t["steps"]]},
+        t["name"]) for t in demos()]
+    assert all(t["demonstration"] for t in shown) and check(RIGHT, shown) is None
+    failure = check(blind, shown)   # demonstration 2 moves left at once, and a demonstration's boards are owed
+    assert failure["kind"] == "unknown demonstration" and failure["trajectory"] == 1 and failure["step"] == 0
+    assert describe(failure).startswith("Your program renders no board after action 1 of demonstration 2")
+    nothing = "def step(board, action):\n    return None\n\ndef won(board):\n    return False\n"
+    assert check(nothing, shown)["kind"] == "unknown demonstration"   # a program that tells nothing passes nothing
+    assert check(blind, demos()) is None   # its own play moving left: nothing after it is checked
     found = plan(blind, {"start": level_b().board(), "steps": []}, [1, 2, 3, 4])
     assert not found["found"] and found["reason"] == "exhausted"   # never through an unknown state
     one_left = play(Toy(player=(12, 10), goal=(10, 10)), [[3]], "one move left")
