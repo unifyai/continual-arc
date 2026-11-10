@@ -18,7 +18,7 @@
 # Continual-ARC
 
 ARC-AGI measures how efficiently a system picks up a new skill from a few examples, but it serves each task once.
-Continual-ARC serves a lifelong stream of ARC-AGI-1 tasks instead, in which the same tasks return
+Continual-ARC serves a lifelong stream built from the three ARC-AGI editions instead, in which the same tasks recur
 after dormant gaps with fresh instances while new tasks keep arriving. On each instance the learner may pay for one
 more demonstration or submit an answer, and it may try again after a wrong one. On an instance it solves, a wrong
 answer and a demonstration each cost one; an instance it does not solve costs the whole budget of sixteen, however it
@@ -36,7 +36,7 @@ a large share of a small spend is a small gain. A learner may keep anything at a
 agent harness keeping notes and a model updating its weights on the same scale.
 
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
-Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the track and the measures.
+Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the tracks and the measures.
 The learners the paper evaluates, adapters for three agent harnesses among them, are in
 [`baselines/`](baselines), and the training of its trained rows is in [`training/`](training). The records of its
 GPT-6 Luna runs, with the trajectories behind them, are plain JSON in git at

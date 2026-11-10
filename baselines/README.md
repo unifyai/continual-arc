@@ -333,8 +333,8 @@ cell that prints forever, is restarted after the idle timeout, as a hung turn is
 empty root, with private user, IPC, UTS and cgroup namespaces, a filter on what it may ask of the kernel and limits on
 what it may consume, where the cells' could read the rest of the operating system and had private network and pid
 namespaces alone; and rows H-E and H-E0 (HPL and HPL0 in the run names) are told to keep each task's demonstration
-pairs beside its program, with a memory naming both, where the paper's kept the program alone. Every cell the paper reports re-prompted an empty reply
-(`empty_reply="reprompt"`).
+pairs beside its program, with a memory naming both, where the paper's kept the program alone. Every cell the paper
+reports re-prompted an empty reply (`empty_reply="reprompt"`).
 
 The paper's rows went through a proxy that forwarded any path, where this one forwards chat completions and reads of
 the models alone; the open-model rows' sent each chat completion to the row's model, and the GPT-6 Luna rows' systems
