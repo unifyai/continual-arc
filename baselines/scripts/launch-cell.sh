@@ -4,7 +4,11 @@
 # no epilogue (--no-epilogue), so that a harness cell's two frozen tests can follow it from the state the stream left
 # (arc-baselines test runs/<track>/<cell> --schedule TEST.json, README). A cell whose run directory exists is
 # skipped, so a line can be run again; RESUME=1 continues a cell that stopped part-way. DRY_RUN=1 prints each cell's
-# run directory and command and runs nothing. RUNS=<dir> writes somewhere other than runs/.
+# run directory and command and runs nothing. RUNS=<dir> writes somewhere other than runs/. EPILOGUE=play keeps the
+# configuration's epilogue after the stream, and EPILOGUE=cut builds the schedule with it and plays the stream, its
+# literal prefix, alone (--stream-only). PILOT=N stops each cell after N instances (--stop-after), and RESUME=1 then
+# continues it. LOG_STATE=1 commits the system's state at the end of every round (--log-state), which `arc-baselines
+# test --collective` forks for a cell's frozen tests.
 #
 #   bash scripts/launch-cell.sh floors <preset> <order> <seed> [config]          row F: the bare model, stateless and
 #                                                                                 with its demonstration cache (two cells)
@@ -22,9 +26,8 @@
 # fresh, the transfer reference; configuration arc1.
 #
 # An empty reply is re-prompted like any unusable reply, and a system is restarted only when its process is dead or
-# silent. EMPTY_REPLY=restart gives the earlier rule, under which an empty reply restarted the system: the paper's
-# cells launched before 17:11 UTC on 28 September 2026 ran under it (scripts/paper-grid.txt marks them; the
-# paper's Appendix D).
+# silent. EMPTY_REPLY=restart gives the earlier rule, under which an empty reply restarted the system; every cell the
+# paper reports was re-prompted (scripts/paper-grid.txt).
 #
 # Model calls go through OpenRouter: OPENROUTER_API_KEY must be in the environment. The harness rows need the harness
 # installed (README) and Linux with bubblewrap for the sandbox.
@@ -53,8 +56,11 @@ launch() {  # cell learner kwargs defaults config order seed
     local cell=$1 learner=$2 kwargs=$3 defaults=$4 cfg=$5 order=$6 seed=$7
     local dir="$RUNS/${cfg%%-*}/$cell"
     local cmd=(uv run --no-sync python -m continual_arc_baselines run --learner "$learner" --learner-kwargs "$kwargs"
-               --llm-defaults "$defaults" --config "$cfg" --order "$order" --seed "$seed" --no-epilogue --out "$dir"
-               --events --quiet)
+               --llm-defaults "$defaults" --config "$cfg" --order "$order" --seed "$seed" --out "$dir" --events --quiet)
+    case ${EPILOGUE:-none} in none) cmd+=(--no-epilogue);; cut) cmd+=(--stream-only);; play) ;;
+        *) echo "EPILOGUE is none, play or cut"; exit 1;; esac
+    [ -n "${LOG_STATE:-}" ] && cmd+=(--log-state)
+    [ -n "${PILOT:-}" ] && [ -z "${RESUME:-}" ] && cmd+=(--stop-after "$PILOT")
     [ -n "${RESUME:-}" ] && cmd+=(--resume)
     if [ -n "${DRY_RUN:-}" ]; then echo "$dir"; printf '  %q' "${cmd[@]}"; echo; return; fi
     [ -d "$dir" ] && [ -z "${RESUME:-}" ] && { echo "exists: $dir"; return; }

@@ -308,25 +308,33 @@ it keeps as files.
 
 ## Reproduce the paper's runs
 
-`bash scripts/paper-grid.sh` launches every cell of the GPT-6 Luna grid on its stream alone: 198 runs on the ARC-AGI-1
-track, at low, medium and high effort. Each writes `runs/<track>/<cell>/`, under the name its record carries in the run
-records. Every cell is detached and long-lived, so launch a part at a time (`bash scripts/paper-grid.sh luna6-low`),
-and `DRY_RUN=1` shows each cell's command first. The paper's 198 runs made about 1,500 USD of model calls through
-OpenRouter, by the cost the proxy recorded on each instance. The models are sampled through provider APIs, so a rerun
-differs from the paper's by about the spread the paper reports. A cell plays its stream alone (`--no-epilogue`), so a
-harness cell's frozen tests can follow it with `arc-baselines test`, one instance at a time; `--collective`, as the
-paper played them, needs the stream launched with `--log-state`. The paper's cells also played a learning-on epilogue,
-which no measure reads since the frozen tests replaced it.
+`bash scripts/paper-grid.sh` launches every cell of the GPT-6 Luna grid that the paper reports, each as it was
+launched: 228 runs on the ARC-AGI-1 track, at low, medium and high effort, in the workstreams order, the sequential and
+random orders of the paper's side experiment, and fresh, which plays the epilogue alone, reset before each instance.
+Each writes `runs/<track>/<cell>/`, under the name its record carries in the run records. Every cell is detached and
+long-lived, so launch a part at a time (`bash scripts/paper-grid.sh luna6-low`), and `DRY_RUN=1` shows each cell's
+command first. The paper's 228 runs made about 1,480 USD of model calls through OpenRouter, by the cost the proxy
+recorded on each instance. The models are sampled through provider APIs, so a rerun differs from the paper's by about
+the spread the paper reports. Every cell commits its state at the end of each round (`--log-state`), so a harness
+cell's frozen tests can follow it with `arc-baselines test --collective`, as the paper played them. The sequential and
+random cells play their stream alone (`--stream-only`), and the workstreams cells go on to the epilogue they were
+launched with, though a separate script cut 30 hermes-agent and openclaw cells among them short of it, 15 of them
+partway through, so a rerun plays more of it than they did. `PILOT=25` stops each cell after 25 instances, as the
+paper's were stopped to be checked, and `RESUME=1` then continues it.
 
-The paper's cells were launched between 27 and 29 September 2026, each row from the code of its launch day. The
-learners here are that code as it stood once the last row was launched, with four differences: the rules a learner
-reads say that an instance it does not solve costs the whole budget, as the benchmark charges it; the proxy limits the
-upstream connections it keeps open (`max_connections`); a harness can put back a saved state when reset, which only its
-frozen tests use; and the first instance after any start opens a conversation of its own, and a stateless row's is
-wiped first, as every later instance's is, where the cells' streams did neither on the first instance of a launch, so
-their records count no session there (and a stateless row no wipe). The cells launched before 17:11 UTC on 28
-September ran under the earlier rule for empty replies (`empty_reply="restart"`), and `paper-grid.txt` launches them
-under it.
+The paper's cells were launched on 20 and 21 October 2026. The learners here play a cell as that code did, with these
+differences: a harness can put back a saved state when reset, which only its frozen tests use; the first instance
+after any start opens a conversation of its own, and a stateless row's is wiped first, as every later instance's is,
+where on the cells' code the first instance after a cell's pilot pause or a restart skipped a stateless row's wipe,
+and openclaw's went on in the conversation of the instance before; prime-agent's Python skills, `refine` among them,
+import, where in the paper's runs they failed to (its Appendix D), its `settings.json` is written afresh at every
+start, where an agent's edit to it outlasted a stateless row's wipe, and a run it leaves hung between turns, or in a
+cell that prints forever, is restarted after the idle timeout, as a hung turn is; each harness's sandbox starts from an
+empty root, with private user, IPC, UTS and cgroup namespaces, a filter on what it may ask of the kernel and limits on
+what it may consume, where the cells' could read the rest of the operating system and had private network and pid
+namespaces alone; and rows H-E and H-E0 (HPL and HPL0 in the run names) are told to keep each task's demonstration
+pairs beside its program, with a memory naming both, where the paper's kept the program alone. Every cell the paper reports re-prompted an empty reply
+(`empty_reply="reprompt"`).
 
 The paper's rows went through a proxy that forwarded any path, where this one forwards chat completions and reads of
 the models alone; the open-model rows' sent each chat completion to the row's model, and the GPT-6 Luna rows' systems
