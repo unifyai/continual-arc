@@ -93,7 +93,7 @@ uv run pytest                                          # no network or keys need
 Or, as a dependency of your own learner, which brings the benchmark from the same repository:
 
 ```bash
-pip install "continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.6.0#subdirectory=baselines"
+pip install "continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.6.2#subdirectory=baselines"
 ```
 
 On Ubuntu 24.04, bubblewrap needs unprivileged user namespaces, which AppArmor restricts by default:

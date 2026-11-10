@@ -550,7 +550,7 @@ since their answers are public. To have a learner verified:
    country you pay from. Each is a model as OpenRouter lists it, with no variant
    such as `:online`, and with an endpoint that keeps no data; a router or a model that searches the web as part of a call
    is not taken. A harness adapter on the baselines' `SystemLearner` depends on
-   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.6.0#subdirectory=baselines` alone,
+   `continual-arc-baselines @ git+https://github.com/unifyai/continual-arc@v0.6.2#subdirectory=baselines` alone,
    which brings the benchmark with it.
 2. Pay the invoice we post on the issue, by card on Stripe's page: the budget, OpenRouter's 5.5% fee on buying
    that credit, and Stripe's fee on the payment. We make a key for your run on our own OpenRouter account, capped at the
