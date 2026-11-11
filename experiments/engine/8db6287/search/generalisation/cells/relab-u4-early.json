@@ -1,0 +1,27 @@
+{
+ "name": "relab-u4-early",
+ "kind": "relabel",
+ "what": "dagger-u4-lag1's moments of rounds 0-68, played by the student of phases 0-67, under the original rule, labelled again as R's round 1 labelled hers (GLM-5.3-flash at medium effort, Fireworks then Z.ai, c1 alone at the end of the message, no reasoning required), then her recipe on 12,000 of them (the late half holds 14,396 moments) and a turn-based validation: whether the online run's moments teach better as its student improves, the early half against the late (the author, 26 Oct 2026), since her labeller on all of rounds 0-135 (relab-u4) taught 14 points less than on her own moments",
+ "run": "NODE-paper-dagger2-spot/dagger-u4-lag1",
+ "rounds": [
+  0,
+  68
+ ],
+ "labeller": {
+  "expert": "z-ai/glm-5.3-flash",
+  "providers": "fireworks,z-ai",
+  "effort": "medium",
+  "budget": 400,
+  "workers": 96,
+  "guidelines": "NODE-fwd-common/c1.md",
+  "guidelines_at": "message",
+  "rule_retries": 3,
+  "min_labelled_pct": 85
+ },
+ "target": 12000,
+ "lr": "5e-5",
+ "batch": 16,
+ "epochs": 2,
+ "held": "7e0986d6,f76d97a5,25ff71a9,6773b310",
+ "bundle": "code-dagger-rows-turns"
+}

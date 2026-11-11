@@ -1,0 +1,15 @@
+[project]
+name = "teacher-vllm-plugin"
+version = "0.1.0"
+description = "vLLM general plugin: let a /v1/completions request opt into reading the prefix cache despite prompt_logprobs."
+requires-python = ">=3.10"
+
+[project.entry-points."vllm.general_plugins"]
+teacher_read_prefix_cache = "teacher_vllm_plugin:register"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["teacher_vllm_plugin"]

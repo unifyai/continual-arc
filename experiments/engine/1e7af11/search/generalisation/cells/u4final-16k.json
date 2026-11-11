@@ -1,0 +1,19 @@
+{
+ "name": "u4final-16k",
+ "kind": "recipe",
+ "bundle": "code-dagger-rows-turns",
+ "what": "R's recipe from the base model on the gating final run dagger-u4-final's own labels of rounds 0-51 (her labeller on its student's turn-based moments), every one of its 16,052 outside her four held-out puzzles, 92% of her 17,449 (rounds 0-49 held 15,747 of them, too few for her count), then her 100 puzzles turn-based and the paper's two frozen tests: whether the gating run's labels reach her recipe's 57 to 63 when trained her way once, where its own checkpoints sit at 47 to 52 from phase 30 to 42 (gate-val-3 and gate-val-4), so whether its online training or its moments hold it there",
+ "labels": {
+  "run": "NODE-cross-fork2/dagger-u4-final",
+  "rounds": [
+   0,
+   51
+  ]
+ },
+ "target": 16052,
+ "lr": "5e-5",
+ "batch": 16,
+ "epochs": 2,
+ "held": "7e0986d6,f76d97a5,25ff71a9,6773b310",
+ "run": "NODE-cross-fork2/dagger-u4-final"
+}

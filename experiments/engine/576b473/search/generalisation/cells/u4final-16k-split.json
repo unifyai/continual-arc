@@ -1,0 +1,20 @@
+{
+ "name": "u4final-16k-split",
+ "kind": "recipe",
+ "bundle": "code-dagger-rows-turns",
+ "what": "R's recipe from the base model on the gating final run dagger-u4-final's own labels of rounds 0-51, every one of its 16,052 outside her four held-out puzzles, as u4final-16k trains on them, but with every reply weighing alike in the loss and half of each reply's weight on its reasoning and half on its move (train.py --weighting split: the tokens before its </think> and the rest), so that neither long reasoning nor a reply's length outweighs what the student does (the author, 27 Oct 2026); then her 100 puzzles turn-based and the paper's two frozen tests, read against u4final-16k's and u4final-16k-turn's",
+ "labels": {
+  "run": "NODE-cross-fork2/dagger-u4-final",
+  "rounds": [
+   0,
+   51
+  ]
+ },
+ "target": 16052,
+ "lr": "5e-5",
+ "batch": 16,
+ "epochs": 2,
+ "held": "7e0986d6,f76d97a5,25ff71a9,6773b310",
+ "run": "NODE-cross-fork2/dagger-u4-final",
+ "weighting": "split"
+}

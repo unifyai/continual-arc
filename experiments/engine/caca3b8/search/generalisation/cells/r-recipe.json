@@ -1,0 +1,15 @@
+{
+ "name": "r-recipe",
+ "kind": "recipe",
+ "what": "R's recipe reproduced cleanly, every log kept: the base model trained on her round-1 label set (GLM-5.3-flash's every move of b6's 296 fresh games, c1 alone, reasoning not required) as NODE-paper-grpo's base-100pct was on 19 Oct 2026 (games taken whole until 17,417 examples, 2 passes, LR 5e-5, batch 16, her three puzzles held out), which solved 60 of 99 of her puzzles served one model on eight H100s but whose play was stopped at the cutoff before its records were written; the milestone for a launch (the author, 25 Oct 2026: a clean run with all of the logs showing Qwen's training getting to 60% on the validation set); its validation waits for every game (grid-exp.sh), so that all 100 end and its records are written",
+ "labels": {
+  "set": "NODE-fwd-comparison/labels/comparison-stage1.tar.gz",
+  "dir": "stage1/set"
+ },
+ "target": 17417,
+ "lr": "5e-5",
+ "batch": 16,
+ "epochs": 2,
+ "held": "7ddcd7ec,7e0986d6,f76d97a5",
+ "run": "NODE-paper-dagger2-spot/dagger-u4-lag1"
+}

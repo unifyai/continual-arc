@@ -1,0 +1,216 @@
+diff --git a/loop.py b/loop.py
+--- a/loop.py
++++ b/loop.py
+@@ -19,9 +19,10 @@
+             each held-out task: tasks/rules100.json, forward.sh's non-numeric rounds)
+   play      run the served model (``--model``: the base or an adapter) through prime-agent over a schedule, one fresh
+             user per instance, under the finish protocol, with
+-            the team rows' harness settings (``--harness block`` for the RL baselines' option: the 40-call cap, with
+-            the per-action and follow-up seconds raised to 1,740 s, just under the 1,800 s hard ceiling); every model
+-            call saved token-exact as each instance ends; with
++            the team rows' harness settings and a turn-based budget (``--harness turns``, the default: 40 model calls
++            an action and 6 a follow-up, no seconds, a liveness guard of hours whose firing ends the instance as an
++            infrastructure failure; ``block``, the RL baselines' option, cuts a turn at 1,740 s, ``default`` at
++            prime-agent's 900 s); every model call saved token-exact as each instance ends; with
+             ``--context-file``, that text shown at every model call: appended to the last message, or with
+             ``--context-placement thought`` as the opening of the model's own reasoning (the server's chat template
+             must take ``reasoning_prefill``: qwen35_prefill.jinja, as serve.sh serves Qwen3.5); with ``--expert``,
+@@ -84,18 +85,48 @@
+     prime-agent's default (a 16,384-token reserve under the context window; a 20,000-token tail)."""
+     return {**HARNESS, "compact_at": compact_at or None, "compact_keep": compact_keep or None}
+ BUDGET_STOP = "exceeded the time or model-call budget"
++# A turn-based play's liveness guard: PrimeAgentLearner's timeout_s, the hard ceiling on one turn (and on the wait for a
++# compaction before a prompt), set far above any turn a working server takes. On the slowest layout measured (one shared
++# H100 a model, eight models at once, 25 Oct 2026) a game made a quarter of the calls it made on two H200s within the
++# same 1,740 s budgets (24.6 against 97.5), each generating about 2,400 tokens, so a turn of 40 calls there takes on the
++# order of an hour or two; six hours fires only on a stuck harness or server, and when it fires the instance ends as an
++# infrastructure failure, never the model's give-up (the baselines' SystemStalled)
++TURN_LIVENESS_S = 6 * 3600.0
++# seconds that never bind: above TURN_LIVENESS_S, so the liveness guard always fires first
++NEVER_S = 30 * 24 * 3600.0
+ # play --harness: PrimeAgentLearner kwargs beyond HARNESS. "default" leaves prime-agent's own action budget (900 s or
+ # 40 model calls, a follow-up of 300 s or 6 calls). "block" is the RL baselines' harness (the plan's decision 4): the
+ # call cap (40) is meant to be the only thing that routinely stops a turn, so the per-action and follow-up seconds are
+ # raised close to timeout_s's 1,800 s hard ceiling (left at its default), not equal to it: at 1,800 exactly, the hard
+-# ceiling fires first (PrimeAgentLearner._turn checks it before the action budget) and aborts the whole turn with a
+-# restart (SystemUnavailable, eventually a forced give-up) instead of the budget's graceful "decide now" with 60 s to
+-# collect an answer. 1,740 s leaves that 60 s of room; the follow-up's 6 calls are kept
++# ceiling fires first (PrimeAgentLearner._turn checks it before the action budget) and aborts the whole turn instead of
++# the budget's graceful "decide now" with 60 s to collect an answer. 1,740 s leaves that 60 s of room; the follow-up's 6
++# calls are kept. Both still cut a turn at its seconds, so a model's score under them moves with how fast it is served:
++# dagger-u4-lag1's phase 17 solved 42 of R's 100 validation puzzles on two H200s a model, 32 on two H100s and 13 on
++# one shared H100, generating the same ~2,400 tokens a call each time (25 Oct 2026).
++# "turns" (PLAY_BUDGET, what every new play takes): only the counts bind, 40 model calls an action and 6 a follow-up,
++# the seconds NEVER_S and the hard ceiling TURN_LIVENESS_S, below them, so that no score depends on GPU speed, serving
++# load or API traffic (the author, 25 Oct 2026). A run keeps the budget it started under to the end (run_budget)
+ HARNESS_BUDGETS = {
+     "default": {},
+     "block": {"max_model_calls": 40, "action_budget_s": 1740.0, "reprompt_budget_s": 1740.0,
+               "reprompt_max_model_calls": 6},
++    "turns": {"max_model_calls": 40, "reprompt_max_model_calls": 6, "action_budget_s": NEVER_S,
++              "reprompt_budget_s": NEVER_S, "timeout_s": TURN_LIVENESS_S},
+ }
++PLAY_BUDGET = "turns"
++
++
++def run_budget(run_dir: Path, asked: str | None = None) -> str:
++    """The harness budget (a :data:`HARNESS_BUDGETS` name) a run plays under: the one its ``driver.json`` recorded
++    when it first played, else ``asked``, else :data:`PLAY_BUDGET`. A run keeps its budget to the end, so a relaunch on
++    newer code never changes it between one round and the next (the paper rows started under "block" stay there, while
++    every run started since plays turn-based); ``asked`` against the recorded one is refused."""
++    f = Path(run_dir) / "driver.json"
++    recorded = (json.loads(f.read_text()).get("harness_budget") or {}).get("name") if f.exists() else None
++    if asked and recorded and asked != recorded:
++        raise SystemExit(f"{run_dir} plays under the harness budget {recorded!r}, which it started under, "
++                         f"not {asked!r}")
++    return recorded or asked or PLAY_BUDGET
+ # vLLM serves the Qwen3.5 architecture (Qwen3.5-9B, Qwen3.8-27B, ...) as its multimodal class, which maps the
+ # checkpoint's names (model.language_model.layers...) onto its modules; PEFT on the text-only class the trainer loads
+ # writes model.layers..., which match no module, and vLLM then serves the adapter as the base model without a word
+@@ -757,9 +788,11 @@
+     context = Path(a.context_file).expanduser().read_text() if a.context_file else None
+     settings = {k: v for k, v in vars(a).items() if k != "fn"}
+     harness = harness_of(a.compact_at, a.compact_keep)
+-    budget = HARNESS_BUDGETS[a.harness]
++    budget_name = run_budget(run_dir, a.harness)
++    budget = HARNESS_BUDGETS[budget_name]
+     (run_dir / "driver.json").write_text(json.dumps(
+-        {**settings, "harness": harness, "harness_budget": {"name": a.harness, **budget}, "context": context}, indent=1))
++        {**settings, "harness": harness, "harness_budget": {"name": budget_name, **budget}, "context": context},
++        indent=1))
+ 
+     # every user's proxy: the run's own, with each of the play's options below wrapped around it
+     proxy = LLMProxy
+@@ -986,8 +1019,11 @@
+                     help="the tokens a summary keeps word for word; 0: prime-agent's default")
+     pl.add_argument("--stop-after", type=int, default=0,
+                     help="cut each game after the student's first N calls (stop_proxy; 0: whole games)")
+-    pl.add_argument("--harness", choices=sorted(HARNESS_BUDGETS), default="default",
+-                    help="default: prime-agent's own action budget (900 s or 40 model calls, follow-up 300 s or 6 "
++    pl.add_argument("--harness", choices=sorted(HARNESS_BUDGETS), default=None,
++                    help="the action budget (default: the run's own, as its driver.json recorded it, else turns). "
++                         "turns: only the counts bind, 40 model calls an action and 6 a follow-up, with a liveness "
++                         "guard of 6 hours a turn whose firing ends the instance as an infrastructure failure; "
++                         "default: prime-agent's own action budget (900 s or 40 model calls, follow-up 300 s or 6 "
+                          "calls); block: the RL baselines' harness (40 calls meant to stop a turn; the per-action and "
+                          "follow-up seconds raised to 1,740 s, just under the 1,800 s hard ceiling; the follow-up's "
+                          "6 calls kept)")
+diff --git a/paper.py b/paper.py
+--- a/paper.py
++++ b/paper.py
+@@ -85,8 +85,8 @@
+ STATELESS_ROWS = ("h0",)
+ 
+ # The shared settings every row plays under: temperature 1, top_p 1, no top_k forced on every call, with
+-# return_token_ids. loop.HARNESS_BUDGETS["block"] already codifies the call cap and its time budget, and loop.HARNESS
+-# the compaction point (32,768 tokens, keeping 8,000) -- read from there, never hard-coded here.
++# return_token_ids. The harness's budget is loop.run_budget's (the run's own, else loop.PLAY_BUDGET, the turn-based
++# one), and loop.HARNESS the compaction point (32,768 tokens, keeping 8,000) -- read from there, never hard-coded here.
+ SAMPLING = {"temperature": 1.0, "top_p": 1.0, "top_k": -1}
+ 
+ DEFAULT_EPILOGUE_ROUND = 20
+@@ -409,15 +409,18 @@
+     run_dir = Path(run_dir).expanduser()
+     run_dir.mkdir(parents=True, exist_ok=True)
+     # the fixed harness settings every row plays under: loop.HARNESS's own compaction point (49,152 tokens, keeping
+-    # 8,000) and loop.HARNESS_BUDGETS["block"]'s call cap, never overridden per round
+-    budget = loop.HARNESS_BUDGETS["block"]
++    # 8,000) and the run's budget, never changed between rounds: the one its driver.json recorded when it first played,
++    # else the turn-based one, 40 model calls an action with no seconds, so that no score depends on how fast the model
++    # is served (loop.HARNESS_BUDGETS); a frozen test plays into a folder of its own, from nothing, so it is turn-based
++    name = loop.run_budget(run_dir)
++    budget = loop.HARNESS_BUDGETS[name]
+     kwargs = {"model": loop.MODEL, "context_window": 131_072, "max_tokens": 32_768,
+               "stateless": row in STATELESS_ROWS, **loop.HARNESS, **budget}
+     overrides = {"model": served_name, "chat_template_kwargs": dict(loop.TEMPLATE_KWARGS), "return_token_ids": True,
+                  **SAMPLING}
+     (run_dir / "driver.json").write_text(json.dumps(
+         {"row": row, "served": served_name, "stateless": row in STATELESS_ROWS, "model": loop.MODEL,
+-         "harness": dict(loop.HARNESS), "harness_budget": {"name": "block", **budget}, "sampling": SAMPLING},
++         "harness": dict(loop.HARNESS), "harness_budget": {"name": name, **budget}, "sampling": SAMPLING},
+         indent=1))
+     resume = None
+     if RESUME_CALLS and not round_recorded(run_dir, schedule):
+diff --git a/realtime.py b/realtime.py
+--- a/realtime.py
++++ b/realtime.py
+@@ -466,6 +466,12 @@
+                                        init, None, rng, val_items=val)
+ 
+ 
++# the recent dose's window: a phase trains on the last RECENT_ROUNDS rounds' labels and as many earlier games' (the
++# frontier check of 21 Oct 2026, search/frontier_check.py, lowered the loss on the rounds still to come with this mix
++# and not with every round's, nor with a uniform draw of the same size)
++RECENT_ROUNDS = 10
++
++
+ def dose(a: argparse.Namespace, k: int, init: Path | None, per_round: dict[int, list[Any]],
+          held_out: bool) -> tuple[list[Any], int, bool]:
+     """Phase ``k``'s training calls under ``--dose``, DAgger's and OPSD's alike, from ``per_round`` (each round's
+@@ -474,6 +480,12 @@
+     every = [c for r in sorted(per_round) for c in per_round[r]]
+     if a.dose == "aggregate":
+         return every, a.max_epochs if held_out else 1, held_out   # no held-out game yet: one pass, nothing to stop on
++    if a.dose == "recent":   # the last RECENT_ROUNDS rounds' labels and as many earlier games', under the held-out stop
++        since = k + 1 - RECENT_ROUNDS
++        recent = [c for r in sorted(per_round) if r >= since for c in per_round[r]]
++        earlier = [c for r in sorted(per_round) if r < since for c in per_round[r]]
++        return (dagger.replay_plan(recent, earlier, True, a.replay_ratio, random.Random(1000 + k)),
++                a.max_epochs if held_out else 1, held_out)
+     if init is None or paper.adapter_is_untrained(init):   # the replay dose's first phase that trains
+         return every, a.first_epochs, held_out
+     earlier = [c for r in sorted(per_round) if r != k for c in per_round[r]]
+@@ -657,7 +669,7 @@
+     s.add_argument("--max-minutes", type=float, default=240, dest="max_minutes")
+     s.add_argument("--start-after", type=int, default=0, dest="start_after",
+                    help="games played (every user's) before any phase trains: the base model plays until then")
+-    s.add_argument("--dose", choices=("aggregate", "replay"), default="aggregate",
++    s.add_argument("--dose", choices=("aggregate", "replay", "recent"), default="aggregate",
+                    help="every row: a phase trains on every round's so far (aggregate) or on its round's and a "
+                         "replay of earlier games (replay)")
+     s.add_argument("--replay-ratio", type=float, default=1.0, dest="replay_ratio",
+diff --git a/realtime.sh b/realtime.sh
+--- a/realtime.sh
++++ b/realtime.sh
+@@ -108,7 +108,7 @@
+     for g in ${TRAIN_GPUS//,/ }; do   # OPSD draws its fresh replies from the server while it trains
+         case ",$SERVE_GPUS," in *",$g,"*) say "TRAIN_GPUS ($TRAIN_GPUS) must be none of SERVE_GPUS ($SERVE_GPUS)"; exit 1 ;; esac
+     done
+-    say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO, first $FIRST_EPOCHS passes)"
++    say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO, first $FIRST_EPOCHS passes), patience $PATIENCE"
+     if labels; then start_relay || exit 1; fi
+     bash ~/loop/serve.sh "$SERVE_GPUS" "$SERVE_DP" || { say "the server did not start"; exit 1; }
+     declare -A restarts=([player]=0 [labeller]=0 [trainer]=0) started=([player]=0 [labeller]=0 [trainer]=0)
+diff --git a/reference.py b/reference.py
+--- a/reference.py
++++ b/reference.py
+@@ -1,7 +1,8 @@
+ """Reference rows for the RL graph (the author, 19 Oct 2026): the paper's frozen rows, h (harness memory kept) and h0 (wiped),
+ and hpl, row h told the program library's procedure, all played exactly as :func:`paper.play_round` plays them -- the
+ same stream cut a round at a time, the same harness with its compaction point and call budgets (``loop.HARNESS``,
+-``loop.HARNESS_BUDGETS["block"]``), the same 131,072-token window and 32,768-token replies -- but with the model served
++the run's own budget, ``loop.run_budget``: turn-based for a run started on this code), the same 131,072-token window
++and 32,768-token replies -- but with the model served
+ by OpenRouter instead of our own vLLM, so that no GPU and no machine of the trained rows' is touched (the author, 19 Oct 2026:
+ nothing may slow the trained rows down).
+ 
+@@ -102,7 +103,9 @@
+     spec = PLAYERS[player]
+     run_dir = Path(run_dir).expanduser()
+     run_dir.mkdir(parents=True, exist_ok=True)
+-    budget = loop.HARNESS_BUDGETS["block"]
++    # the run's own budget, never changed between rounds: turn-based unless it started under another (loop.run_budget)
++    budget_name = loop.run_budget(run_dir)
++    budget = loop.HARNESS_BUDGETS[budget_name]
+     harness = harness or loop.HARNESS
+     kwargs = {"model": spec["model"], "context_window": CONTEXT_WINDOW, "max_tokens": MAX_TOKENS,
+               "stateless": row in paper.STATELESS_ROWS, **harness, **budget, **REFERENCE_ROWS[row]}
+@@ -110,7 +113,7 @@
+     (run_dir / "driver.json").write_text(json.dumps(
+         {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "stateless": row in paper.STATELESS_ROWS,
+          "model": spec["model"], "harness": {**harness, **REFERENCE_ROWS[row]},
+-         "harness_budget": {"name": "block", **budget}, "overrides": overrides}, indent=1))
++         "harness_budget": {"name": budget_name, **budget}, "overrides": overrides}, indent=1))
+     learner = CollectiveHarnessLearner(lambda user: PrimeAgentLearner(**kwargs), run_dir, schedule=schedule,
+                                        upstream=OPENROUTER, api_key=api_key, body_overrides=overrides,
+                                        body_drop=("reasoning_effort",),

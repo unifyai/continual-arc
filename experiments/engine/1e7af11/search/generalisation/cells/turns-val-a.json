@@ -1,0 +1,12 @@
+{
+ "name": "turns-val-a",
+ "kind": "val",
+ "bundle": "code-dagger-rows-turns",
+ "what": "the base model, R's recipe on all her round-1 labels (base-100pct, 60 of 99 under her 900 s budget), her own round-1 model (fwd2-final) and her recipe on dagger-u4-lag1's labels (u4lab-17k) on R's 100 validation puzzles under the turn-based budget (40 model calls an action, 6 a follow-up, no seconds), where the serving sets only how long a play takes, never its score (the author, 25 Oct 2026): the key models of the generalisation search validated again, so that every gap between them is read without the clock",
+ "adapters": {
+  "base": null,
+  "base-100pct": "NODE-paper-grpo/exp-base-100pct/model/adapter",
+  "fwd2-final": "NODE-fwd-comparison/adapters/fwd2-final/adapter",
+  "u4lab-17k": "NODE-cross-train/cross-u4/models/u4lab-17k/adapter"
+ }
+}

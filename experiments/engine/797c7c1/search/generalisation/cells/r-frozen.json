@@ -1,0 +1,12 @@
+{
+ "name": "r-frozen",
+ "kind": "frozen",
+ "what": "R's round-1 model, her recipe from the base model on all and on a tenth of her labels, and dagger-u4-lag1's phase 17 on the paper's two frozen tests from an empty memory",
+ "run": "NODE-paper-dagger2-spot/dagger-u4-lag1",
+ "adapters": {
+  "fwd2-final": "NODE-fwd-comparison/adapters/fwd2-final/adapter",
+  "base-100pct": "NODE-paper-grpo/exp-base-100pct/model/adapter",
+  "base-10pct": "NODE-paper-dagger3/exp-base-10pct/model/adapter",
+  "u4-p0017": "NODE-paper-dagger2-spot/dagger-u4-lag1/train/p0017/adapter"
+ }
+}

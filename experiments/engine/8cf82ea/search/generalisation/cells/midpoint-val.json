@@ -1,0 +1,10 @@
+{
+ "name": "midpoint-val",
+ "kind": "val",
+ "what": "the search's three midpoint models on R's 100 puzzles served as NODE-cross-val's checkpoints and NODE-cross-test's references of her models were (two H100s a model, four at a time), so all three read on one footing: her recipe on dagger-u4-lag1's own labels (u4lab-17k), on the same moments labelled again her way (u4relab-17k), and the run's own trainer once on all its labels (scratch-u4). Their adapters reach the bucket once each node's model is copied under ~/runs/rt/cross-u4/models (the operator plan's search item); run it on an 8x H100 then",
+ "adapters": {
+  "u4lab-17k": "NODE-cross-train/cross-u4/models/u4lab-17k/adapter",
+  "u4relab-17k": "NODE-cross-relab/cross-u4/models/u4relab-17k/adapter",
+  "scratch-u4": "NODE-cross-scratch/cross-u4/models/scratch-u4/adapter"
+ }
+}

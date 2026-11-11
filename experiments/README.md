@@ -19,7 +19,8 @@ The code is of two kinds:
   are copied from the private repositories the experiments ran from with only credentials, machine and host names,
   bucket names, home paths and people's names taken out, each replaced by a placeholder ([Placeholders](#placeholders)).
   They document what ran and with what settings; most drive a private engine of their day that `training/` replaced
-  and do not run against `main` unchanged, which each entry says.
+  and do not run against `main` unchanged, which each entry says. That engine is in [`engine/`](engine), at every
+  commit a play under `runs/` ran code from, with [`engine/plays.tsv`](engine/plays.tsv) naming each play's.
 
 ## Row names
 
@@ -83,7 +84,9 @@ user, and QC0, QC, QP, QP0 and Q0 at two and four.
   [`ref-tests.sh`](../training/scripts/ref-tests.sh) (`continual_arc_training.frozen`). The expert guidance the
   E rows read is the consolidated text on `main`; the paper's rows read the text kept at
   [`9616cbd`](https://github.com/unifyai/continual-arc/tree/9616cbd2c1d5741142ca7f2590ecb3535028daf9) (c1 followed by
-  the library procedure), so check out that commit to play QE, QE0, GE and GE0 as they ran.
+  the library procedure), so check out that commit to play QE, QE0, GE and GE0 as they ran. The runs themselves were
+  played by the private engine at [`ee7a4b3`](engine/ee7a4b3) (at two and four users [`b4b564a`](engine/b4b564a)),
+  with the baselines at [`1543c2e`](engine/baselines-1543c2e).
 - **Command**, on a machine with prime-agent 0.9.6, Node 22, bubblewrap and `OPENROUTER_API_KEY` in `baselines/.env`:
 
   ```bash
@@ -100,7 +103,8 @@ user, and QC0, QC, QP, QP0 and Q0 at two and four.
 
 - **Code** (public): [`training/scripts/teacher-rows.sh`](../training/scripts/teacher-rows.sh)
   (`continual_arc_training.teacher_rows`), once the teacher's reference row (`glm-h-u1` for `hg`, `glm-hpl-u1` for
-  the others) has played; QTE and QETE as they ran at `9616cbd`, as above.
+  the others) has played; QTE and QETE as they ran at `9616cbd`, as above. The runs themselves were played by
+  `glm_harness.py` at [`2d9c273`](engine/2d9c273) on the private engine at [`ee7a4b3`](engine/ee7a4b3).
 - **Command**: `ROW=hg|hgpl|hplg setsid nohup bash training/scripts/teacher-rows.sh > /dev/null 2>&1 < /dev/null &`
 - **Runs**: `runs/arc1/{QT,QTE,QETE}-prime-agent-qwen3.5-9b-ws0-u1`.
 
@@ -110,7 +114,8 @@ user, and QC0, QC, QP, QP0 and Q0 at two and four.
   player, the labeller and the trainer, `continual_arc_training.realtime`), then
   [`frozen.sh`](../training/scripts/frozen.sh) for both tests. The runs' teacher read the playing rules (c1) alone,
   as `9616cbd` keeps them; `main` gives it the consolidated expert guidance. The runs themselves were played by the
-  private engine `training/` was consolidated from (the `-plays-a` and `-cross-fork2` machines in
+  private engine `training/` was consolidated from, at [`1e7af11`](engine/1e7af11) and [`b4b564a`](engine/b4b564a),
+  their tests with [`6a55104`](engine/6a55104)'s frozen tools (the `-plays-a` and `-cross-fork2` machines in
   [`configuration-search/`](configuration-search/README.md)), whose settings these commands repeat.
 - **Command**, on the node:
 
@@ -128,7 +133,7 @@ user, and QC0, QC, QP, QP0 and Q0 at two and four.
   [`longtrain.py`](configuration-search/longtrain.py) `--from-base` on all of a final DAgger run's labels, then the
   tests by [`trained-rows-resets/more-plays.sh`](trained-rows-resets/more-plays.sh). The public
   [`scratch.sh`](../training/scripts/scratch.sh) does the same training once at a run's end but is not what made these
-  runs.
+  runs. They ran at [`8d57163`](engine/8d57163), on the engine at [`b4b564a`](engine/b4b564a).
 - **Command**: `bash experiments/configuration-search/frombase.sh RUN OUT GPUS EVAL_STEPS PATIENCE` on each final run's
   node.
 - **Runs**: `runs/arc1/QDE-qwen3.5-9b-ws0-u{1,2,4}-from-base`.
@@ -144,7 +149,9 @@ playing rules its teacher reads.
   [`trained-rows-resets/replay.sh`](trained-rows-resets/replay.sh) and [`replay.py`](trained-rows-resets/replay.py)
   for the games played again after a context overrun (`<play>.replay/`). The public successor is
   [`refs.sh`](../training/scripts/refs.sh) and `frozen.sh` with `ROW=h0`; `9616cbd` also keeps `ROW=h0c1`, the page
-  alone, which `main` retired.
+  alone, which `main` retired. The first plays ran on the engine at [`caca3b8`](engine/caca3b8) (29 and 30 Oct; its
+  `search/final-resets.sh` is the one that ran) and [`6a55104`](engine/6a55104) (1 Nov), the later plays and the
+  replays on [`b4b564a`](engine/b4b564a) with [`6a55104`](engine/6a55104)'s frozen tools.
 - **Command**: `(setsid -f nohup bash experiments/configuration-search/final-resets.sh > /dev/null 2>&1 < /dev/null)`
   on an 8-GPU node; `bash experiments/trained-rows-resets/more-plays.sh JOBS`;
   `bash experiments/trained-rows-resets/replay.sh LIST GPUS`. At `9616cbd`:
@@ -157,8 +164,9 @@ playing rules its teacher reads.
 
 - **Code** (here): [`teachers-letter/glm_harness.py`](teachers-letter/glm_harness.py) and
   [`glm_harness.sh`](teachers-letter/glm_harness.sh), rows `h0` and `hpl0` with no source, each stream played as two
-  parts of 100 users. The nearest public code is `PLAYER=qwen ROW=h0|hpl0 USERS=1 bash training/scripts/reference.sh`,
-  which plays the same rows round by round.
+  parts of 100 users, as they ran at [`2d9c273`](engine/2d9c273) on the engine at [`ee7a4b3`](engine/ee7a4b3). The
+  nearest public code is `PLAYER=qwen ROW=h0|hpl0 USERS=1 bash training/scripts/reference.sh`, which plays the same
+  rows round by round.
 - **Command**: `python experiments/teachers-letter/glm_harness.py plan --run RUN --row h0 --streams > jobs`, then
   `bash experiments/teachers-letter/glm_harness.sh jobs` (and the same with `--row hpl0`).
 - **Runs**: `runs/arc1/Q0-prime-agent-qwen3.5-9b-ws0-u1-same-window`,
@@ -169,6 +177,8 @@ playing rules its teacher reads.
 - **Code** (here): [`teachers-letter/teach.py`](teachers-letter/teach.py) writes GLM-5.3 Flash's letter to its
   student after each round; [`glm_harness.py`](teachers-letter/glm_harness.py) and
   [`glm_harness.sh`](teachers-letter/glm_harness.sh) play the tests with the letter ending the student's system prompt.
+  They ran at [`6d522a8`](engine/6d522a8) and [`c6da762`](engine/c6da762) (`teach.py`) and
+  [`def2b6f`](engine/def2b6f) (`glm_harness.py`), on the engine at [`ee7a4b3`](engine/ee7a4b3).
 - **Command**:
 
   ```bash
@@ -187,7 +197,8 @@ playing rules its teacher reads.
 - **Code** (here): [`building-blocks/`](building-blocks): `baselines-blocks.patch` (the learner's side) and
   `reference-blocks.patch` (the reference rows' driver), [`run.sh`](building-blocks/run.sh), which plays both streams
   and then each test four times, and [`examples.py`](building-blocks/examples.py), the check of the in-context
-  examples. The patches apply to the private trees the rows ran on, not to `main`.
+  examples. The patches apply to the trees the rows ran on, the engine at [`ee7a4b3`](engine/ee7a4b3) and the
+  baselines at [`1543c2e`](engine/baselines-1543c2e), not to `main`.
 - **Command**: `bash experiments/building-blocks/run.sh` (each stream as `PLAYER=glm ROW=hpb|hpb0 USERS=1` through the
   patched reference driver, then `frozen.py play` four times per test).
 - **Runs**: `runs/arc1/GB-prime-agent-glm-5.3-flash-ws0-u1`, `runs/arc1/GB0-prime-agent-glm-5.3-flash-ws0-u1`.
@@ -200,7 +211,8 @@ stream's use (153), on the tests alone.
 - **Code** (here): [`library-ceiling/`](library-ceiling): `baselines.patch` (a superset of the building blocks' patch,
   adding the two primitives modules), `reference.patch`, [`primitives.py`](library-ceiling/primitives.py), which
   writes and checks the primitives modules, and [`run.sh`](library-ceiling/run.sh). `baselines.patch` carries code
-  generated from Re-ARC's `dsl.py` (MIT licence, Michael Hodel).
+  generated from Re-ARC's `dsl.py` (MIT licence, Michael Hodel). The patches apply to the same trees as the building
+  blocks', [`ee7a4b3`](engine/ee7a4b3) and [`baselines-1543c2e`](engine/baselines-1543c2e).
 - **Command**: `python experiments/library-ceiling/primitives.py write DIR`, then
   `bash experiments/library-ceiling/run.sh` (rows `hpl0`, `hpl0d1`, `hpl0d4`, two plays at a time).
 - **Runs**: `runs/arc1/GE0-prime-agent-glm-5.3-flash-ws0-u1-ceiling-no-library`, `-ceiling-one-user-library`,
@@ -218,8 +230,10 @@ under `runs/arc1/`, those laid under rows' names listed in its entry's `rows`.
   `grid-vals.sh`), the generalization cells (`generalisation/`, one JSON per cell), the switch test (`switch/`), the
   long and from-base training (`longtrain.py`, `modal_longtrain.py`), the final checks (`final_checks.py`), and the
   capacity runs whose adapters the `gen-cap-*` cells play (`capacity/`). The OPSD and PG machines ran the same engine
-  and launcher as the search, so they are rows of the same table. The public `realtime.sh` (`ROW=dagger|opsd|pg`) is
-  that engine's successor; it lacks the warm-up rows' `DOSE=replay` and PG's `PG_REWARD`.
+  and launcher as the search, so they are rows of the same table. The engine each run started on, the tools beside it
+  and the code changed under it are in [`engine/`](engine/README.md#experiment-by-experiment), play by play in
+  [`engine/plays.tsv`](engine/plays.tsv). The public `realtime.sh` (`ROW=dagger|opsd|pg`) is that engine's
+  successor; it lacks the warm-up rows' `DOSE=replay` and PG's `PG_REWARD`.
 - **Runs**: `runs/arc1/<machine>/<run>/`, the machines as `runs/machines.json` lists them.
 
 ## ARC-AGI-2 and ARC-AGI-3 on Kimi K3.1 Pro (Appendix K)
@@ -284,9 +298,6 @@ there). The paper's source, with every table as it sets it, is in [`paper/`](../
 - **The private set's rules (Appendix J).** The held-out rules of the private set, their generators and the code
   that wrote, screened, calibrated and selected them stay private by design, as a verified run needs them unseen.
 - **The three openclaw cells with memory search (Appendix E).** No copy of their records survives.
-- **The private engine the search drove.** The drivers in `configuration-search/` and `trained-rows-resets/`, and
-  the patches in `building-blocks/` and `library-ceiling/`, run on the private training engine of each run's day,
-  which `training/` consolidated; its revisions are not published.
 - **The code of Table 13 (Appendix J).** It reads the calibration reports of the private set, kept with its rules.
 
 ## Placeholders
@@ -302,6 +313,6 @@ What was taken out of the files here, and what stands in its place:
 | `ARTIFACTS_BUCKET`, `DATA_BUCKET`, `GCP_PROJECT` | the private Cloud Storage buckets and the Google Cloud project |
 | `MODAL_APP`, `MODAL_CAPACITY`, `MODAL_JOBS_VOLUME`, `MODAL_HF_VOLUME`, `MODAL_ENVIRONMENT` | the Modal app, volumes and environment |
 | `OPENROUTER_API_KEY`, `OPENROUTER_KEY_NAME` | the OpenRouter key, read from the environment, and its name |
-| `~/benchmark-turns` | the private benchmark tree the building blocks and the ceiling played on |
+| `~/benchmark-turns` | the private benchmark tree the reference rows, the building blocks and the ceiling played on, `continual-arc-internal` `060ba32`, whose `src/continual_arc/` and `tests/` are this repository's at `69b4e19` |
 | `R` | the researcher whose offline DAgger recipe the search compares against |
 | "the author" | the paper's author, where a comment quotes a decision |

@@ -1,0 +1,12 @@
+{
+ "name": "turns-val-c",
+ "kind": "val",
+ "bundle": "code-dagger-rows-turns",
+ "what": "the clean reproduction of R's recipe on her round-1 labels (r-recipe, its adapter in the bucket once its train stage has ended on NODE-recipe), the final checkpoints of the 1- and 2-user DAgger rows (dagger-u1-lag1's and dagger-u2-lag1's phase 199) and dagger-u4-lag1's phase 135, whose reasoning ballooned as its score fell, on R's 100 validation puzzles under the turn-based budget (40 model calls an action, 6 a follow-up, no seconds), where the serving sets only how long a play takes, never its score (the author, 25 Oct 2026): the key models of the generalisation search validated again, so that every gap between them is read without the clock",
+ "adapters": {
+  "r-recipe": "NODE-recipe/gen-r-recipe/model/adapter",
+  "u1-p0199": "NODE-paper-dagger-spot/dagger-u1-lag1/train/p0199/adapter",
+  "u2-p0199": "NODE-paper-dagger3/dagger-u2-lag1/train/p0199/adapter",
+  "u4-p0135": "NODE-paper-dagger2-spot/dagger-u4-lag1/train/p0135/adapter"
+ }
+}

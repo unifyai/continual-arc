@@ -1,0 +1,39 @@
+diff --git a/train.py b/train.py
+--- a/train.py
++++ b/train.py
+@@ -95,6 +95,7 @@
+ import collections
+ import concurrent.futures
+ import gzip
++import hashlib
+ import json
+ import random
+ import shutil
+@@ -228,6 +229,9 @@
+ # SDFT's teacher prompt (Shenfeld et al. 2026, section 3, as its code words it): the demonstration after the question, in
+ # the question's own turn; for a harness call, the end of its last message, the one the reply answers
+ SDFT_DEMO = "\n\nThis is an example for a response to the question:\n{demo}\nNow answer with a response of your own, including the thinking process."
++# demo_text's renderings in this process, by label file, call id and label: every phase reads every round so far again,
++# rendering a call's prompt is most of that (about 88 ms a call), and a labelled round's calls and labels never change
++DEMOS: dict[tuple[str, str | None, str], str | None] = {}
+ 
+ 
+ def demo_text(tok: Any, request: dict[str, Any], label: dict[str, Any]) -> str | None:
+@@ -262,11 +266,15 @@
+         if f is None or not f.exists():
+             stats["no_demo"] += 1
+             continue
+-        label = json.loads(f.read_text())
++        text = f.read_text()
++        label = json.loads(text)
+         if not dagger.makes_move(dagger.student_message(label)):
+             stats["no_move"] += 1
+             continue
+-        demo = demo_text(tok, call.request, label)
++        key = (str(f), call.meta["call_id"], hashlib.sha1(text.encode()).hexdigest())
++        if key not in DEMOS:
++            DEMOS[key] = demo_text(tok, call.request, label)
++        demo = DEMOS[key]
+         if demo is None:
+             stats["unrendered"] += 1
+             continue

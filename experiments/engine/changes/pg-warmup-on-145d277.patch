@@ -1,0 +1,69 @@
+diff --git a/realtime.py b/realtime.py
+--- a/realtime.py
++++ b/realtime.py
+@@ -420,17 +420,23 @@
+     return sum(len(list((round_dir(run, r) / "captured").glob("u*.json.gz"))) for r in range(rounds))
+ 
+ 
++def warming_up(run: Path, k: int, start_after: int) -> bool:
++    """Whether phase ``k`` trains nothing, rounds 0..k having played fewer than ``start_after`` games: its adapter is
++    then the untrained one, the base model's own weights. The count only grows with k, so every such phase comes
++    before the first that trains, and the model it leaves in place is the base model."""
++    return games_played(run, k + 1) < start_after
++
++
+ def train_phase(a: argparse.Namespace, run: Path, targs: argparse.Namespace, trainer: Any, k: int, out: Path,
+                 init: Path | None) -> dict[str, Any]:
+     """Phase ``k``, its row's training (the module docstring) from ``init``, into ``out``: DONE's summary."""
+     import train
+     rng = random.Random(k)
+     targs.seed = k
+-    played_games = games_played(run, k + 1)
+-    if played_games < a.start_after:
++    if warming_up(run, k, a.start_after):
+         trainer.reset()
+         trainer.save(out / "adapter")
+-        return {"skipped": True, "games": played_games, "start_after": a.start_after}
++        return {"skipped": True, "games": games_played(run, k + 1), "start_after": a.start_after}
+     if a.row == "dagger":
+         train_runs, dev_runs = phase_runs(run, k + 1)
+         per_round, compactions = {}, 0
+@@ -512,20 +518,23 @@
+     for r in range(k + 1):
+         got, left_out = train.load_calls(round_dir(run, r))
+         compactions += left_out
+-        logps.update(pg_behaviour(run, r, [c for c in got if c.meta["solved"]], trainer, targs))
++        logps.update(pg_behaviour(run, r, [c for c in got if c.meta["solved"]], trainer, targs, a.start_after))
+         per_round[r] = [c for c in got if not forward.held_game(r, c.meta["user"], a.hold_every)]
+         held += train.by_game([c for c in got if forward.held_game(r, c.meta["user"], a.hold_every)])
+     return per_round, held, compactions, logps
+ 
+ 
+-def pg_behaviour(run: Path, r: int, calls: list[Any], trainer: Any,
+-                 targs: argparse.Namespace) -> dict[tuple, list[float]]:
++def pg_behaviour(run: Path, r: int, calls: list[Any], trainer: Any, targs: argparse.Namespace,
++                 start_after: int) -> dict[tuple, list[float]]:
+     """Round ``r``'s ``calls``' reply log-probabilities under the adapter that played the round (its served.json's
+     phase, the base model before any phase trained), keyed as train.behaviour_logps keys them: read from the round's
+     pg_behaviour.json.gz, or taken now (train.behaviour_logps) and written there; none for a round with no calls given
+-    (no game won). A round is first trained in phase ``r``, while the adapter that played it, ``LAG`` phases older, is
+-    still on disk (prune keeps it), so every phase after can take its ratios against the adapter that played each
+-    game, however long ago it was pruned."""
++    (no game won). A round played after the first phase that trains is first trained in phase ``r``, while the
++    adapter that played it, ``LAG`` phases older, is still on disk (prune keeps it), so every phase after can take its
++    ratios against the adapter that played each game, however long ago it was pruned. A round played in the warm-up
++    (:func:`warming_up`, under ``start_after``) is first trained in the first phase that trains, by when prune has
++    deleted most of the warm-up's adapters; its player trained nothing, so it served the base model, which is what
++    the ratios are taken against, without reading its adapter."""
+     import train
+     path = round_dir(run, r) / "pg_behaviour.json.gz"
+     name = round_dir(run, r).name
+@@ -537,7 +546,7 @@
+         return {}
+     played = json.loads((round_dir(run, r) / "served.json").read_text())["phase"]
+     adapter = phase_dir(run, played) / "adapter" if played is not None else None
+-    if adapter is None or paper.adapter_is_untrained(adapter):
++    if adapter is None or warming_up(run, played, start_after) or paper.adapter_is_untrained(adapter):
+         trainer.configure_behaviour(base=True)
+     else:
+         trainer.configure_behaviour(adapter)

@@ -1,0 +1,12 @@
+{
+ "name": "card-val",
+ "kind": "val",
+ "bundle": "code-dagger-rows-turns",
+ "what": "R's 100 validation puzzles under the turn-based budget at Qwen3.5-9B's model-card sampling for thinking mode (temperature 1, top_p 0.95, top_k 20, presence_penalty 1.5), which the trained rows take from the author's go of 28 Oct 2026, where every val before it sent no sampling fields and so drew from the whole distribution: dagger-u4-final's best checkpoint (phase 43's weights, p0044, 56 at the old sampling), its latest (p0085, whose long replies collapsed into word salad there) and her recipe once from the base model on its labels (u4final-16k, 50), side by side on two GPUs each, in place of gate-val-7, which played the run's later checkpoints at the old sampling",
+ "sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5},
+ "adapters": {
+  "p0044": "NODE-cross-fork2/dagger-u4-final/train/p0044/adapter",
+  "p0085": "NODE-cross-fork2/dagger-u4-final/train/p0085/adapter",
+  "16k": "cell:u4final-16k"
+ }
+}

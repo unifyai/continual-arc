@@ -1,0 +1,50 @@
+diff --git a/src/continual_arc_baselines/proxy.py b/src/continual_arc_baselines/proxy.py
+--- a/src/continual_arc_baselines/proxy.py
++++ b/src/continual_arc_baselines/proxy.py
+@@ -60,6 +60,15 @@
+ # limits) carry no such marker and pass straight through. 25 Sep 2026: Alibaba, the one provider of a hosted model in the capability probe, refused
+ # half of all calls at random ("AccessDenied.Unpurchased"), a coin flip per request.
+ PROVIDER_REFUSAL = b"Provider returned error"
++# The fields a chat completion asks its reply budget in, and the mark of a refusal for the room it asks: vLLM's "This
++# model's maximum context length is 131072 tokens. However, you requested 65536 output tokens and your prompt contains
++# 70000 input tokens ...". A call refused only because its prompt and the budget it asks together pass the window is
++# sent once more without the budget, so that the server gives the reply the room the window has left: the paper's
++# player asks the same budget at every call, which vLLM refuses once a conversation passes the window less the budget
++# (continual-arc-paper notes/readings/context-overrun-2026-11-04.txt; the release's proxy does the same). A prompt that
++# fills the window alone is still refused. The captured request is what the server received, the budget left out.
++REPLY_BUDGETS = ("max_tokens", "max_completion_tokens")
++WINDOW_REFUSAL = b"maximum context length"
+ # The keys chat templates read an assistant turn's reasoning from (K2 Horizon's reads all five, in this order).
+ THINKING_KEYS = ("think", "think_fast", "think_faster", "reasoning_content", "reasoning")
+ # Which of a request's past assistant turns keep their reasoning (LLMProxy.keep_reasoning): all of them; those of the
+@@ -778,6 +787,7 @@
+             # with backoff before anything reaches the system, the same for every harness.
+             attempts = 0
+             waits = 0
++            overran: dict[str, Any] = {}   # the reply budget the window had no room for, left out of the call sent again
+             while True:
+                 cm = owner._client.stream(method, owner.upstream_url(self.path), headers=headers, content=body)
+                 response = cm.__enter__()
+@@ -800,6 +810,13 @@
+                     owner.tracker.touch()
+                     time.sleep(min(max(delay, 1.0), 60.0))
+                     continue
++                if (not overran and response.status_code == 400 and parsed is not None
++                        and any(key in parsed for key in REPLY_BUDGETS) and WINDOW_REFUSAL in response.read().lower()):
++                    cm.__exit__(None, None, None)
++                    overran = {key: parsed.pop(key) for key in REPLY_BUDGETS if key in parsed}
++                    body = json.dumps(parsed).encode()
++                    owner.tracker.touch()
++                    continue
+                 break
+             refusal = ""
+             try:
+@@ -810,6 +827,8 @@
+                     call.response_headers["x-proxy-upstream-retries"] = str(attempts)
+                 if waits:
+                     call.response_headers["x-proxy-credit-waits"] = str(waits)
++                if overran:
++                    call.response_headers["x-proxy-reply-budget-dropped"] = json.dumps(overran)
+                 self.send_response(response.status_code)
+                 passthrough = {k: v for k, v in response.headers.items()
+                                if k.lower() not in HOP_BY_HOP and k.lower() != "content-encoding"}

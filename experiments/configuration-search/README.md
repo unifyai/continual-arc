@@ -23,9 +23,11 @@ following taken out:
 
 Every file here drives the training engine deployed on each machine as `~/loop`: the private repository's `loop.py`,
 `paper.py`, `realtime.py`, `realtime.sh`, `train.py`, `frozen.py`, `frozen.sh`, `scratch.py`, `keep.sh` and their
-neighbours at its `main` of the day each run started (`search/deploy-code.sh` put it there). That engine was
-consolidated into `training/` (`continual_arc_training`) for the paper's release and is not copied here, so these
-drivers document what ran and with what settings; they do not run against `training/` unchanged.
+neighbours at its `main` of the day each run started (`search/deploy-code.sh` put it there, or before 19 Oct 2026 an
+rsync of a checkout). That engine was consolidated into `training/` (`continual_arc_training`) for the paper's
+release; it is in [`../engine/`](../engine/README.md) at each commit a run started on or a sync put under it, with
+each play's in [`../engine/plays.tsv`](../engine/plays.tsv). These drivers document what ran and with what settings;
+they do not run against `training/` unchanged.
 
 ## Machine by machine
 

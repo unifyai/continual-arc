@@ -1,0 +1,18 @@
+{
+ "name": "smoke",
+ "kind": "recipe",
+ "what": "the runner's check on a vendor it has not run on: R's recipe from the base model on 500 of dagger-u4-lag1's labels of rounds 0-135, one pass, held out on f76d97a5 alone (438 calls, where the four puzzles the other recipes hold out give 4,418, an hour of held-out loss on 8 A100s); merging the 136 rounds' label sets takes about 25 minutes. Run its train stage (launch.sh DEST smoke train, or modal-train.sh smoke); its play stage is a recipe's whole validation and frozen tests, hours, so stop it once games end",
+ "labels": {
+  "run": "NODE-paper-dagger2-spot/dagger-u4-lag1",
+  "rounds": [
+   0,
+   135
+  ]
+ },
+ "target": 500,
+ "lr": "5e-5",
+ "batch": 16,
+ "epochs": 1,
+ "held": "f76d97a5",
+ "run": "NODE-paper-dagger2-spot/dagger-u4-lag1"
+}

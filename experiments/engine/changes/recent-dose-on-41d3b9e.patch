@@ -1,0 +1,50 @@
+diff --git a/realtime.py b/realtime.py
+--- a/realtime.py
++++ b/realtime.py
+@@ -466,6 +466,12 @@
+                                        init, None, rng, val_items=val)
+ 
+ 
++# the recent dose's window: a phase trains on the last RECENT_ROUNDS rounds' labels and as many earlier games' (the
++# frontier check of 21 Oct 2026, search/frontier_check.py, lowered the loss on the rounds still to come with this mix
++# and not with every round's, nor with a uniform draw of the same size)
++RECENT_ROUNDS = 10
++
++
+ def dose(a: argparse.Namespace, k: int, init: Path | None, per_round: dict[int, list[Any]],
+          held_out: bool) -> tuple[list[Any], int, bool]:
+     """Phase ``k``'s training calls under ``--dose``, DAgger's and OPSD's alike, from ``per_round`` (each round's
+@@ -474,6 +480,12 @@
+     every = [c for r in sorted(per_round) for c in per_round[r]]
+     if a.dose == "aggregate":
+         return every, a.max_epochs if held_out else 1, held_out   # no held-out game yet: one pass, nothing to stop on
++    if a.dose == "recent":   # the last RECENT_ROUNDS rounds' labels and as many earlier games', under the held-out stop
++        since = k + 1 - RECENT_ROUNDS
++        recent = [c for r in sorted(per_round) if r >= since for c in per_round[r]]
++        earlier = [c for r in sorted(per_round) if r < since for c in per_round[r]]
++        return (dagger.replay_plan(recent, earlier, True, a.replay_ratio, random.Random(1000 + k)),
++                a.max_epochs if held_out else 1, held_out)
+     if init is None or paper.adapter_is_untrained(init):   # the replay dose's first phase that trains
+         return every, a.first_epochs, held_out
+     earlier = [c for r in sorted(per_round) if r != k for c in per_round[r]]
+@@ -657,7 +669,7 @@
+     s.add_argument("--max-minutes", type=float, default=240, dest="max_minutes")
+     s.add_argument("--start-after", type=int, default=0, dest="start_after",
+                    help="games played (every user's) before any phase trains: the base model plays until then")
+-    s.add_argument("--dose", choices=("aggregate", "replay"), default="aggregate",
++    s.add_argument("--dose", choices=("aggregate", "replay", "recent"), default="aggregate",
+                    help="every row: a phase trains on every round's so far (aggregate) or on its round's and a "
+                         "replay of earlier games (replay)")
+     s.add_argument("--replay-ratio", type=float, default=1.0, dest="replay_ratio",
+diff --git a/realtime.sh b/realtime.sh
+--- a/realtime.sh
++++ b/realtime.sh
+@@ -108,7 +108,7 @@
+     for g in ${TRAIN_GPUS//,/ }; do   # OPSD draws its fresh replies from the server while it trains
+         case ",$SERVE_GPUS," in *",$g,"*) say "TRAIN_GPUS ($TRAIN_GPUS) must be none of SERVE_GPUS ($SERVE_GPUS)"; exit 1 ;; esac
+     done
+-    say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO, first $FIRST_EPOCHS passes)"
++    say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO, first $FIRST_EPOCHS passes), patience $PATIENCE"
+     if labels; then start_relay || exit 1; fi
+     bash ~/loop/serve.sh "$SERVE_GPUS" "$SERVE_DP" || { say "the server did not start"; exit 1; }
+     declare -A restarts=([player]=0 [labeller]=0 [trainer]=0) started=([player]=0 [labeller]=0 [trainer]=0)
