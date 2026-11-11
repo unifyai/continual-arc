@@ -79,6 +79,7 @@ Everything behind the paper is in this repository, as plain files:
 | The code and command of every experiment | [`experiments/`](experiments), by the paper's section, table and row |
 | The learners and harness adapters | [`baselines/`](baselines) |
 | The training of the trained rows | [`training/`](training) |
+| The code that computes every table and figure | [`paper/`](paper#the-figures-and-tables): `make` there computes them again from `runs/` and compares each with the paper's own |
 | The paper's source | [`paper/`](paper) |
 | A run of your own learner on held-out tasks | [Submitting a result](#submitting-a-result) |
 
@@ -497,7 +498,7 @@ training/        the training of the paper's trained rows on Qwen3.5-9B (trainin
 experiments/     every experiment the paper reports: the code and command that ran it, and its runs (experiments/README.md)
 runs/            the records and trajectories of every run the paper reports (runs/README.md)
 data/            every instance the runs on ARC-AGI-1 and ARC-AGI-2 were served, with their schedules (data/README.md)
-paper/           the paper's LaTeX source, as posted to arXiv (paper/README.md)
+paper/           the paper's LaTeX source, as posted to arXiv, and the code that computes its tables and figures (paper/README.md)
 ```
 
 ## Submitting a result
