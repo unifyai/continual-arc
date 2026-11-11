@@ -272,10 +272,11 @@ under `runs/arc1/`, those laid under rows' names listed in its entry's `rows`.
 
 ## Tables and figures
 
-The tables and figures are computed from the runs' records by the paper's own scripts, which are not in this
-repository yet: they read the open-model runs in the layout the machines that played them kept, which `runs/` does not
-keep, so they cannot yet run from `runs/` ([`paper/README.md`](../paper/README.md#the-figures-and-tables) says which
-of their inputs `runs/` holds). The paper's source, with every table as it sets it, is in [`paper/`](../paper).
+The tables and figures are computed from the runs' records by the paper's own scripts, in
+[`paper/scripts/`](../paper/scripts), which read `runs/` and the few inputs it does not hold, in
+[`paper/data/`](../paper/data); `make` in `paper/` computes them again and compares each with the file the paper sets
+([`paper/README.md`](../paper/README.md#the-figures-and-tables) gives each one's script and what is not computed
+there). The paper's source, with every table as it sets it, is in [`paper/`](../paper).
 
 ## What is not here
 
@@ -285,7 +286,7 @@ of their inputs `runs/` holds). The paper's source, with every table as it sets 
 - **The private engine the search drove.** The drivers in `configuration-search/` and `trained-rows-resets/`, and
   the patches in `building-blocks/` and `library-ceiling/`, run on the private training engine of each run's day,
   which `training/` consolidated; its revisions are not published.
-- **The code that computes the tables and figures**, above.
+- **The code of Table 13 (Appendix J).** It reads the calibration reports of the private set, kept with its rules.
 - **First sight's records.** The answers behind Table `tab:first-sight` are kept with the private set's calibration
   and are not under `runs/`.
 - **The letters and the teacher's state.** The letters QETE `-letter` read, and the `state.git` of GLM-5.3 Flash's
