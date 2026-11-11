@@ -26,8 +26,10 @@ and are in these files alone.
 
 These are the files of the benchmark's [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0)
 assets, `continual-arc-runs-v0.1.0.tar.gz` and `continual-arc-trajectories-v0.1.0.tar.gz`, as plain JSON in git, with
-the trajectories of the open-model runs the site replays, which neither asset holds: about 62,700 files and 3.4 GB on
-disk. Until 11 November 2026 they were a repository of their own,
+what neither asset holds: the trajectories of the open-model runs the site replays, the GPT-6 Luna runs' later plays
+of the frozen tests and DAgger's training records, which the paper's tables and figures read
+([`paper/README.md`](../paper/README.md#the-figures-and-tables)): about 66,600 files and 3.5 GB on disk. Until 11
+November 2026 they were a repository of their own,
 [continual-arc-runs](https://github.com/unifyai/continual-arc-runs), kept read-only with its history; its tag `v0.1.0`
 is that repository as the release went out. Every path in the registries below, such as
 `runs/arc1/H-prime-agent-luna6-low-ws0`, is read from this repository's root, and so are the commands under "Reading
@@ -66,10 +68,18 @@ git clone https://github.com/unifyai/continual-arc   # the runs are in runs/
   - `frozen/<test>/play/`: the same five files for each frozen test the run played after its stream, `seen` and
     `held-out`, each one round of 100 instances, every instance a user of its own starting from the learner's state
     at the end of the stream. A `fresh` run holds instead its reference plays,
-    `seen-reference` and `held-out-reference`: the same instances played from an empty state. An open-model run holds
+    `seen-reference` and `held-out-reference`: the same instances played from an empty state. The runs whose tests the
+    paper reads (its Table 12) played them again with fresh sampling, each workstreams run of a learner that keeps
+    something three more times, `<test>-2` to `<test>-4`, and each `fresh` run of a reset its reference plays twice
+    more, `<test>-reference-2` and `<test>-reference-3`. An open-model run holds
     every play of each test the paper reads, its own and, for a reset, its reference plays, the later ones as
     `<test>-K` and `<test>-reference-K`, and beside a play, in `<play>.replay/`, the games it played again after a
     context overrun, which take the place of the same games in it.
+  - DAgger's runs, `QDE-qwen3.5-9b-ws0-u{1,2,4}`, hold their training records too, as the trainer wrote them: for each
+    phase, one per round, `train/p<phase>/DONE` (the step it kept, and its minutes) and `rounds.json` (the rounds it
+    trained on), and for each phase that trained, `phase.json` (its settings, each step's loss and its held-out
+    measures); and for each round, `rounds/r<round>/labels/split/split.json`, how many of the round's games and
+    labelled calls went to training and how many to the held-out measure. The adapters and the labels are not here.
 
   And, for the GPT-6 Luna runs and the open-model runs the site replays, its trajectories, one format for every learner:
   - `run.json`: the run's instances in the order served, each with its task, phase, exposure index and gap, whether
