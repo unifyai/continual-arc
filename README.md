@@ -77,7 +77,7 @@ Everything behind the paper is in this repository, as plain files:
 | The trajectories | of every run in `runs.json` and `open-models.json`, in `runs/<track>/<run>/i/<step>.json`, a file per instance, and of every frozen test's play of the GPT-6 Luna runs and of the runs that played the tests alone, beside each play's records in `frozen/<play>/play/`: every message the benchmark sent, the learner's reasoning summaries, tool calls and reply, and in `memory.json` what it kept, file by file and version by version; replayed at [continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs) |
 | The instances | [`data/`](data): every instance the runs on ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, with their schedules |
 | First sight's records | [`runs/first-sight/`](runs/first-sight): how often a model solves a track's public tasks the first time it sees them (Appendix K) |
-| The code and command of every experiment | [`experiments/`](experiments), by the paper's section, table and row |
+| The code and command of every experiment | [`experiments/`](experiments), by the paper's section, table and row, with the training engine at each revision its runs played on in [`experiments/engine/`](experiments/engine) |
 | The learners and harness adapters | [`baselines/`](baselines) |
 | The training of the trained rows | [`training/`](training) |
 | The code that computes every table and figure | [`paper/`](paper#the-figures-and-tables): `make` there computes them again from `runs/` and compares each with the paper's own |
