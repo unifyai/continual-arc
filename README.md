@@ -13,7 +13,8 @@
   <a href="baselines">Baselines</a> ·
   <a href="training">Training</a> ·
   <a href="experiments">Experiments</a> ·
-  <a href="runs">Runs</a>
+  <a href="runs">Runs</a> ·
+  <a href="data">Data</a>
 </p>
 
 # Continual-ARC
@@ -65,6 +66,21 @@ about half of it at low effort and three fifths at medium and high. Run your own
 * **Two frozen tests, one plane.** The share of its reset's spend a learner saves on the seen test (memorization)
   and on the held-out test (generalization), with the budget used and share solved beside each, and the share learned
   over the stream as a secondary measure. Compute, tokens and memory are logged, not scored.
+
+## Where everything is
+
+Everything behind the paper is in this repository, as plain files:
+
+| What | Where |
+|---|---|
+| The results, run by run | [`runs/`](runs): `runs.json` lists the 228 GPT-6 Luna runs and `open-models.json` the open-model runs; each run's `summary.json` holds its score and `records.jsonl` a line per instance |
+| The trajectories | of every GPT-6 Luna run and the open-model runs the site replays, in `runs/<track>/<run>/i/<step>.json`, a file per instance: every message the benchmark sent, the learner's reasoning summaries, tool calls and reply, and in `memory.json` what it kept, file by file and version by version; replayed at [continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs) |
+| The instances | [`data/`](data): every instance the runs on ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, with their schedules |
+| The code and command of every experiment | [`experiments/`](experiments), by the paper's section, table and row |
+| The learners and harness adapters | [`baselines/`](baselines) |
+| The training of the trained rows | [`training/`](training) |
+| The paper's source | [`paper/`](paper) |
+| A run of your own learner on held-out tasks | [Submitting a result](#submitting-a-result) |
 
 ## Install
 
@@ -480,6 +496,7 @@ baselines/       the learners the paper evaluates, its harness adapters and the 
 training/        the training of the paper's trained rows on Qwen3.5-9B (training/README.md)
 experiments/     every experiment the paper reports: the code and command that ran it, and its runs (experiments/README.md)
 runs/            the records and trajectories of every run the paper reports (runs/README.md)
+data/            every instance the runs on ARC-AGI-1 and ARC-AGI-2 were served, with their schedules (data/README.md)
 paper/           the paper's LaTeX source, as posted to arXiv (paper/README.md)
 ```
 
@@ -619,7 +636,8 @@ through instance by instance at [continual-arc.unify.ai/runs](https://continual-
 the two frozen tests after its stream, most workstreams runs after a learning-on epilogue on the held-out tasks, which
 no measure reads now. Each run rebuilds slot for slot from its own
 configuration, and every one of their streams is the one `arc1` builds today. They name it `arc1-small`, as every run
-played before v0.6.0 does, when the benchmark still named its configurations by size.
+played before v0.6.0 does, when the benchmark still named its configurations by size. Every instance the runs on
+ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, is in [`data/`](data), with the schedules that served them.
 
 ## Citation
 
@@ -634,7 +652,8 @@ played before v0.6.0 does, when the benchmark still named its configurations by 
 
 ## License
 
-Apache-2.0. Re-ARC is MIT and ARC-AGI is Apache-2.0; both are fetched, not vendored.
+Apache-2.0. Re-ARC is MIT and ARC-AGI is Apache-2.0; both are fetched, not vendored, and the instances in
+[`data/`](data) drawn from them keep their sources' licenses.
 
 ## About
 
