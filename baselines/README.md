@@ -1,4 +1,3 @@
-<!-- ARXIV_ID_PENDING: replace every ARXIV_ID_PENDING in this file with the paper's arXiv id once its listing is out, the evening before the launch, then delete this line -->
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="../assets/continual-arc-readme-banner-dark.png">
@@ -8,7 +7,7 @@
 
 <p align="center">
   <a href="https://continual-arc.unify.ai">Explore every run</a> ·
-  <a href="https://unify.ai/blog/why-we-built-continual-arc">Paper</a> ·
+  <a href="https://arxiv.org/abs/2611.14505">Paper</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
   <a href="https://continual-arc.unify.ai/leaderboard">Leaderboard</a> ·
   <a href="https://github.com/unifyai/continual-arc">Benchmark</a>
@@ -16,7 +15,7 @@
 
 # continual-arc-baselines
 
-The learners that the paper [*Continual-ARC: Measuring Skill Acquisition over a Working Lifetime*](https://unify.ai/blog/why-we-built-continual-arc)
+The learners that the paper [*Continual-ARC: Measuring Skill Acquisition over a Working Lifetime*](https://arxiv.org/abs/2611.14505)
 evaluates on the [Continual-ARC](https://github.com/unifyai/continual-arc) benchmark, and what runs them: the
 adapters that drive three agent harnesses through the benchmark's protocol, the learner that serves a team of users at
 once, the sandbox the harnesses run in, the local proxy through which every model call passes, the frozen tests after a

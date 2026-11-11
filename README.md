@@ -1,4 +1,3 @@
-<!-- ARXIV_ID_PENDING: replace every ARXIV_ID_PENDING in this file with the paper's arXiv id once its listing is out, the evening before the launch, then delete this line -->
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/continual-arc-readme-banner-dark.png">
@@ -8,7 +7,7 @@
 
 <p align="center">
   <a href="https://continual-arc.unify.ai">Explore every run</a> ·
-  <a href="https://unify.ai/blog/why-we-built-continual-arc">Paper</a> ·
+  <a href="https://arxiv.org/abs/2611.14505">Paper</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
   <a href="https://continual-arc.unify.ai/leaderboard">Leaderboard</a> ·
   <a href="baselines">Baselines</a> ·
@@ -36,7 +35,7 @@ a large share of a small spend is a small gain. A learner may keep anything at a
 agent harness keeping notes and a model updating its weights on the same scale.
 
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
-Lifetime*](https://unify.ai/blog/why-we-built-continual-arc): the environment, the schedules, the tracks and the measures.
+Lifetime*](https://arxiv.org/abs/2611.14505): the environment, the schedules, the tracks and the measures.
 The learners the paper evaluates, adapters for three agent harnesses among them, are in
 [`baselines/`](baselines), and the training of its trained rows is in [`training/`](training). The records of its
 GPT-6 Luna runs, with the trajectories behind them, are plain JSON in git at
@@ -44,12 +43,12 @@ GPT-6 Luna runs, with the trajectories behind them, are plain JSON in git at
 [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and every task, figure, run and
 trajectory of the paper can be explored and replayed at [continual-arc.unify.ai](https://continual-arc.unify.ai).
 
-On GPT-6 Luna, its check on a frontier model, the paper ran Prime Agent, Hermes Agent and OpenClaw through the stream
+On GPT-6 Luna, a commercial model, the paper ran Prime Agent, Hermes Agent and OpenClaw through the stream
 with every learning mechanism they ship switched on, and again with everything they wrote deleted before every
 instance. Their persistence saved no measurable budget at any reasoning effort, and left to decide what to keep, they
 kept almost nothing that outlasted an instance: none saved a measurable share of the budget left to learn. A
 deliberately naive program library, which keeps one tested program per task and runs it when the task returns, saved
-about two thirds of it at every effort. Run your own learner through it and [submit the result](#submitting-a-result).
+about half of it at low effort and three fifths at medium and high. Run your own learner through it and [submit the result](#submitting-a-result).
 
 * **Any learner.** The learner is a black box with four methods. Weight updates, external memory, program libraries
   and plain prompting are all welcome.
@@ -621,7 +620,7 @@ played before v0.6.0 does, when the benchmark still named its configurations by 
 @article{lenton2026continualarc,
   title   = {Continual-ARC: Measuring Skill Acquisition over a Working Lifetime},
   author  = {Lenton, Daniel},
-  note    = {Preprint},
+  journal = {arXiv preprint arXiv:2611.14505},
   year    = {2026}
 }
 ```
