@@ -1,0 +1,3538 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-workstreams-r200",
+ "seed": 0,
+ "users": 2,
+ "sources": {
+  "0520fde7": "rearc",
+  "05269061": "rearc",
+  "253bf280": "rearc",
+  "25ff71a9": "rearc",
+  "4612dd53": "rearc",
+  "46442a0e": "rearc",
+  "5614dbcf": "rearc",
+  "56dc2b01": "rearc",
+  "63613498": "rearc",
+  "673ef223": "rearc",
+  "6773b310": "rearc",
+  "7837ac64": "rearc",
+  "7ddcd7ec": "rearc",
+  "7e0986d6": "rearc",
+  "868de0fa": "rearc",
+  "88a10436": "rearc",
+  "8d5021e8": "rearc",
+  "90f3ed37": "rearc",
+  "a699fb00": "rearc",
+  "c1d99e64": "rearc",
+  "c444b776": "rearc",
+  "e5062a87": "rearc",
+  "e73095fd": "rearc",
+  "f2829549": "rearc",
+  "f76d97a5": "rearc",
+  "03560426": "arc_eval",
+  "0934a4d8": "arc_eval",
+  "103eff5b": "arc_eval",
+  "17b80ad2": "arc_eval",
+  "281123b4": "arc_eval",
+  "3194b014": "arc_eval",
+  "3d31c5b3": "arc_eval",
+  "4aab4007": "arc_eval",
+  "506d28a5": "arc_eval",
+  "5289ad53": "arc_eval",
+  "55783887": "arc_eval",
+  "60a26a3e": "arc_eval",
+  "626c0bcc": "arc_eval",
+  "72a961c9": "arc_eval",
+  "8dae5dfc": "arc_eval",
+  "94be5b80": "arc_eval",
+  "c1990cce": "arc_eval",
+  "c48954c1": "arc_eval",
+  "cf133acc": "arc_eval",
+  "d5c634a2": "arc_eval",
+  "d931c21c": "arc_eval",
+  "e66aafb8": "arc_eval",
+  "e9bb6954": "arc_eval",
+  "fd096ab6": "arc_eval",
+  "fea12743": "arc_eval"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 25,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 2,
+   "checkpoints": [],
+   "even_visits": true,
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "mode": "workstreams",
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "epilogue": true,
+  "pools": {
+   "stream": 400,
+   "epilogue": 400,
+   "shared": false,
+   "arc2_new_only": false
+  },
+  "parts": [],
+  "users": {
+   "n": 2,
+   "seeds": [
+    0,
+    6250858382423534097
+   ],
+   "parts": [
+    [
+     {
+      "generator": "stream",
+      "mode": "workstreams",
+      "length": 200,
+      "n_tasks": 25,
+      "params": {
+       "concurrency": 4,
+       "burst_mean": 3.0,
+       "burst_fixed": false,
+       "dormancy_median": 30.0,
+       "dormancy_sigma": 1.0,
+       "arrival_interval": 2.0
+      },
+      "instances_per_task": 8,
+      "n_tasks_introduced": 25,
+      "spells": [
+       [
+        "63613498",
+        0,
+        5
+       ],
+       [
+        "673ef223",
+        0,
+        16
+       ],
+       [
+        "88a10436",
+        0,
+        1
+       ],
+       [
+        "e73095fd",
+        0,
+        10
+       ],
+       [
+        "e5062a87",
+        1,
+        9
+       ],
+       [
+        "8d5021e8",
+        5,
+        41
+       ],
+       [
+        "6773b310",
+        9,
+        19
+       ],
+       [
+        "f76d97a5",
+        10,
+        13
+       ],
+       [
+        "63613498",
+        13,
+        43
+       ],
+       [
+        "46442a0e",
+        16,
+        22
+       ],
+       [
+        "7837ac64",
+        19,
+        36
+       ],
+       [
+        "673ef223",
+        22,
+        24
+       ],
+       [
+        "88a10436",
+        24,
+        45
+       ],
+       [
+        "f2829549",
+        36,
+        57
+       ],
+       [
+        "7e0986d6",
+        41,
+        60
+       ],
+       [
+        "868de0fa",
+        43,
+        71
+       ],
+       [
+        "0520fde7",
+        45,
+        59
+       ],
+       [
+        "5614dbcf",
+        57,
+        77
+       ],
+       [
+        "253bf280",
+        59,
+        68
+       ],
+       [
+        "f2829549",
+        60,
+        80
+       ],
+       [
+        "7ddcd7ec",
+        68,
+        79
+       ],
+       [
+        "6773b310",
+        71,
+        81
+       ],
+       [
+        "c1d99e64",
+        77,
+        86
+       ],
+       [
+        "a699fb00",
+        79,
+        83
+       ],
+       [
+        "90f3ed37",
+        80,
+        97
+       ],
+       [
+        "4612dd53",
+        81,
+        110
+       ],
+       [
+        "05269061",
+        83,
+        85
+       ],
+       [
+        "c444b776",
+        85,
+        116
+       ],
+       [
+        "25ff71a9",
+        86,
+        123
+       ],
+       [
+        "56dc2b01",
+        97,
+        107
+       ],
+       [
+        "5614dbcf",
+        107,
+        121
+       ],
+       [
+        "e5062a87",
+        110,
+        117
+       ],
+       [
+        "f76d97a5",
+        116,
+        130
+       ],
+       [
+        "c1d99e64",
+        117,
+        125
+       ],
+       [
+        "0520fde7",
+        121,
+        122
+       ],
+       [
+        "46442a0e",
+        122,
+        132
+       ],
+       [
+        "05269061",
+        123,
+        126
+       ],
+       [
+        "7ddcd7ec",
+        125,
+        148
+       ],
+       [
+        "253bf280",
+        126,
+        139
+       ],
+       [
+        "673ef223",
+        130,
+        134
+       ],
+       [
+        "0520fde7",
+        132,
+        133
+       ],
+       [
+        "868de0fa",
+        133,
+        136
+       ],
+       [
+        "7e0986d6",
+        134,
+        145
+       ],
+       [
+        "05269061",
+        136,
+        154
+       ],
+       [
+        "90f3ed37",
+        139,
+        142
+       ],
+       [
+        "56dc2b01",
+        142,
+        144
+       ],
+       [
+        "7837ac64",
+        144,
+        152
+       ],
+       [
+        "a699fb00",
+        145,
+        149
+       ],
+       [
+        "e73095fd",
+        148,
+        174
+       ],
+       [
+        "673ef223",
+        149,
+        157
+       ],
+       [
+        "46442a0e",
+        152,
+        155
+       ],
+       [
+        "e5062a87",
+        154,
+        161
+       ],
+       [
+        "5614dbcf",
+        155,
+        165
+       ],
+       [
+        "a699fb00",
+        157,
+        172
+       ],
+       [
+        "6773b310",
+        161,
+        163
+       ],
+       [
+        "90f3ed37",
+        163,
+        167
+       ],
+       [
+        "56dc2b01",
+        165,
+        169
+       ],
+       [
+        "7837ac64",
+        167,
+        176
+       ],
+       [
+        "05269061",
+        169,
+        173
+       ],
+       [
+        "7ddcd7ec",
+        172,
+        179
+       ],
+       [
+        "6773b310",
+        173,
+        178
+       ],
+       [
+        "a699fb00",
+        174,
+        181
+       ],
+       [
+        "90f3ed37",
+        176,
+        177
+       ],
+       [
+        "90f3ed37",
+        177,
+        185
+       ],
+       [
+        "5614dbcf",
+        178,
+        196
+       ],
+       [
+        "f76d97a5",
+        179,
+        188
+       ],
+       [
+        "46442a0e",
+        181,
+        189
+       ],
+       [
+        "4612dd53",
+        185,
+        186
+       ],
+       [
+        "0520fde7",
+        186,
+        199
+       ],
+       [
+        "f76d97a5",
+        188,
+        194
+       ],
+       [
+        "56dc2b01",
+        189,
+        190
+       ],
+       [
+        "4612dd53",
+        190,
+        191
+       ],
+       [
+        "c444b776",
+        191,
+        195
+       ],
+       [
+        "f76d97a5",
+        194,
+        200
+       ]
+      ]
+     },
+     {
+      "generator": "epilogue",
+      "n_tasks": 25,
+      "instances_per_task": 1,
+      "reset_each": false
+     }
+    ],
+    [
+     {
+      "generator": "stream",
+      "mode": "workstreams",
+      "length": 200,
+      "n_tasks": 25,
+      "params": {
+       "concurrency": 4,
+       "burst_mean": 3.0,
+       "burst_fixed": false,
+       "dormancy_median": 30.0,
+       "dormancy_sigma": 1.0,
+       "arrival_interval": 2.0
+      },
+      "instances_per_task": 8,
+      "n_tasks_introduced": 25,
+      "spells": [
+       [
+        "46442a0e",
+        0,
+        3
+       ],
+       [
+        "5614dbcf",
+        0,
+        6
+       ],
+       [
+        "7837ac64",
+        0,
+        2
+       ],
+       [
+        "e73095fd",
+        0,
+        4
+       ],
+       [
+        "7e0986d6",
+        2,
+        12
+       ],
+       [
+        "46442a0e",
+        3,
+        27
+       ],
+       [
+        "7837ac64",
+        4,
+        17
+       ],
+       [
+        "253bf280",
+        6,
+        20
+       ],
+       [
+        "7ddcd7ec",
+        12,
+        37
+       ],
+       [
+        "4612dd53",
+        17,
+        18
+       ],
+       [
+        "f76d97a5",
+        18,
+        21
+       ],
+       [
+        "88a10436",
+        20,
+        29
+       ],
+       [
+        "7e0986d6",
+        21,
+        23
+       ],
+       [
+        "7e0986d6",
+        23,
+        32
+       ],
+       [
+        "e5062a87",
+        27,
+        33
+       ],
+       [
+        "7837ac64",
+        29,
+        42
+       ],
+       [
+        "88a10436",
+        32,
+        60
+       ],
+       [
+        "e5062a87",
+        33,
+        40
+       ],
+       [
+        "c1d99e64",
+        37,
+        65
+       ],
+       [
+        "56dc2b01",
+        40,
+        41
+       ],
+       [
+        "673ef223",
+        41,
+        43
+       ],
+       [
+        "7837ac64",
+        42,
+        47
+       ],
+       [
+        "673ef223",
+        43,
+        53
+       ],
+       [
+        "25ff71a9",
+        47,
+        55
+       ],
+       [
+        "6773b310",
+        53,
+        64
+       ],
+       [
+        "0520fde7",
+        55,
+        70
+       ],
+       [
+        "05269061",
+        60,
+        69
+       ],
+       [
+        "a699fb00",
+        64,
+        66
+       ],
+       [
+        "88a10436",
+        65,
+        67
+       ],
+       [
+        "8d5021e8",
+        66,
+        86
+       ],
+       [
+        "e5062a87",
+        67,
+        75
+       ],
+       [
+        "05269061",
+        69,
+        94
+       ],
+       [
+        "6773b310",
+        70,
+        72
+       ],
+       [
+        "c1d99e64",
+        72,
+        80
+       ],
+       [
+        "c444b776",
+        75,
+        82
+       ],
+       [
+        "90f3ed37",
+        80,
+        85
+       ],
+       [
+        "25ff71a9",
+        82,
+        84
+       ],
+       [
+        "63613498",
+        84,
+        89
+       ],
+       [
+        "c1d99e64",
+        85,
+        91
+       ],
+       [
+        "673ef223",
+        86,
+        90
+       ],
+       [
+        "868de0fa",
+        89,
+        96
+       ],
+       [
+        "7e0986d6",
+        90,
+        93
+       ],
+       [
+        "25ff71a9",
+        91,
+        121
+       ],
+       [
+        "f2829549",
+        93,
+        110
+       ],
+       [
+        "0520fde7",
+        94,
+        95
+       ],
+       [
+        "90f3ed37",
+        95,
+        115
+       ],
+       [
+        "868de0fa",
+        96,
+        98
+       ],
+       [
+        "05269061",
+        98,
+        123
+       ],
+       [
+        "5614dbcf",
+        110,
+        125
+       ],
+       [
+        "253bf280",
+        115,
+        116
+       ],
+       [
+        "f2829549",
+        116,
+        117
+       ],
+       [
+        "868de0fa",
+        117,
+        128
+       ],
+       [
+        "8d5021e8",
+        121,
+        122
+       ],
+       [
+        "6773b310",
+        122,
+        130
+       ],
+       [
+        "e73095fd",
+        123,
+        138
+       ],
+       [
+        "f2829549",
+        125,
+        133
+       ],
+       [
+        "868de0fa",
+        128,
+        141
+       ],
+       [
+        "6773b310",
+        130,
+        142
+       ],
+       [
+        "f2829549",
+        133,
+        135
+       ],
+       [
+        "673ef223",
+        135,
+        151
+       ],
+       [
+        "e73095fd",
+        138,
+        140
+       ],
+       [
+        "c444b776",
+        140,
+        169
+       ],
+       [
+        "7ddcd7ec",
+        141,
+        162
+       ],
+       [
+        "0520fde7",
+        142,
+        156
+       ],
+       [
+        "e73095fd",
+        151,
+        153
+       ],
+       [
+        "a699fb00",
+        153,
+        163
+       ],
+       [
+        "0520fde7",
+        156,
+        157
+       ],
+       [
+        "63613498",
+        157,
+        161
+       ],
+       [
+        "63613498",
+        161,
+        168
+       ],
+       [
+        "253bf280",
+        162,
+        175
+       ],
+       [
+        "a699fb00",
+        163,
+        178
+       ],
+       [
+        "63613498",
+        168,
+        180
+       ],
+       [
+        "c444b776",
+        169,
+        172
+       ],
+       [
+        "f76d97a5",
+        172,
+        181
+       ],
+       [
+        "56dc2b01",
+        175,
+        196
+       ],
+       [
+        "4612dd53",
+        178,
+        183
+       ],
+       [
+        "63613498",
+        180,
+        190
+       ],
+       [
+        "f76d97a5",
+        181,
+        185
+       ],
+       [
+        "4612dd53",
+        183,
+        198
+       ],
+       [
+        "f76d97a5",
+        185,
+        191
+       ],
+       [
+        "56dc2b01",
+        196,
+        200
+       ]
+      ]
+     },
+     {
+      "generator": "epilogue",
+      "n_tasks": 25,
+      "instances_per_task": 1,
+      "reset_each": false
+     }
+    ]
+   ]
+  },
+  "cut_to_round": 200,
+  "full_rounds": 225
+ },
+ "slots": [
+  {
+   "task_id": "88a10436",
+   "instance_seed": 640850910401480138,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 3634113649930255007,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 9055727605163985726,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 6651654629652506404,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 20461995187549477,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 2098622777058130610,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 2923763388759150236,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 1076138129105601441,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 8378408730895119198,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 5919266987255146658,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 6222029033671887774,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 733785362217770014,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 1681373771486373257,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 59048893261293995,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 691610392295617716,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 4275308673714248541,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 7511706240881773302,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 3045484235280259150,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 4197852279965846470,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 4101101808037699343,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 5317700545162552822,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 693372606685926610,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 6465620846001375811,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 8981892032594063587,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 3918272823458663378,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 4879430507092173675,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 9113247272043611735,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 5667294120553841627,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 8777034992980020836,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 8038937218314976906,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 3852913283437208073,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 287570042208775405,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 4980282032894992707,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 2374872352996710125,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 2232828957981987757,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 6688757552156746662,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 2919034905976728463,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 3930592302137062676,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 4268218509884732147,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 7884065295752670305,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 8456595586543555251,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 7973574863980246798,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 8268442061373280158,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 2026257128448707882,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 4727333765575183805,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 352563402185103129,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 8128319334985530490,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 2629131776785404520,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 8563674776826247748,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 6664622344718483884,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 2072678003624144028,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 8735416176035608105,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 4798965232001335665,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 568681927427687970,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 6844949727044854932,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 2995112180156221722,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 9156463749617777317,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 130403355024934166,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 5606279899552938361,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 6917512346039941523,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 5422164788760099666,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 6185598644333446792,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 9006879076671783955,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 5200980744390207196,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 2575245094774195027,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 1444885902937416204,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 2977828345358189102,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 1518201603583147762,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 4612960680209078085,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 1588830672406395412,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 4933753539116643937,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 2489311115726485978,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 747979233782325613,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 1922941401826540106,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 2440331821167779677,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 4784544490196680329,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 9109403065930127936,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 259800033883021720,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 5340423911051062694,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 7482054912180060783,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 4716589006245541112,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 4947101878883323091,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 4261913423543543079,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 6776350915864642455,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 5975000435068496872,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 3008052513895742884,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 9135140517010841494,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 7186717578820524052,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 7554720141921605966,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 4831951476106177734,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 9208889316975088111,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 7187132384656479069,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 2835770290517432386,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 3896163167123009133,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 2138397740236295913,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 2938969453045970388,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3496250605305349135,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 49716511025471759,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 8526686531230895205,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 7533815045693518836,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 4912934959561441392,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 395087216158727976,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 3660700809775847945,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 8472429267398372372,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 1024074866372768668,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 6012522857375673744,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 5737534173548808994,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 6665333745659444239,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 617594832447781678,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 3638284952762063406,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 3205459487144232884,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 1185106244257314799,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 8157904538286846547,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3419247754549871601,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 2924517844845561867,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 4672915952198314746,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3203942881869614915,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 8355585606476958744,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 9084282323228374911,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 1183799784839124397,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 1577591094896378033,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 1938886238452058599,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 3188565548315534740,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 5023044400212677640,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 5179215797227911436,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 7706871677477589825,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 1063236816993700057,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 5381550781162185125,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 3309646197241362866,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 270616490215951687,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 276433140011391119,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 6728357820857162586,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 7429194541348050175,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "88a10436",
+   "instance_seed": 8145577325080664575,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 6262911642040107324,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 4810325731180750338,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 1843018313581159580,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 3701774682708086815,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 2838103934522930723,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 1334385319814544142,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 1643012730496828617,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 5970766652939583333,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 4898944510191677367,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 776600990029753760,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 7460924456497614390,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 7534398362453612871,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 5851005414208033481,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 5244916067333082232,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 3278676899802939283,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 8113750818473188258,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 6133101981279831187,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 6354192810632335704,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 5536355655105524603,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 6695645419701018071,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 7486573270059783277,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 4190854697275142104,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 8556776010667442396,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 7570564927177802479,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 1683184609981167153,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 8630731903282222832,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 6475538969815768244,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 2095759938155551836,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 8742289607801782146,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 5760513498571925682,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 8050580098433403882,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 6600660429201735025,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 1768030849703346024,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 1583382516200192105,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 277866754716789587,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 168248654644915507,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 6847673104847393008,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 1579726553260619071,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 8972947829577416072,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 7051959806660402960,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 6048688744797451468,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 2865241055346498349,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 8228842110267571213,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 5855844614982378984,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 7976548516628437251,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 5789113282701721168,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 2023470330367964581,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 2549873766601933510,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 3698260141007084465,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 7834732377321711292,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 6620977848272909872,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 2049059152380052289,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 6050286287121674416,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 8884303400660982449,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 58140546547478528,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 7151691728071479667,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 3464891617328294731,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 6459167429098141782,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 7062451438874137519,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 7692905603342807890,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 1114589973497063871,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 1183544888433353900,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 4060001548824121402,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 3759280045846272668,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 1431799917660725103,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 3272849552398132400,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 7935348081214019743,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 8098057918800778234,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 6177982260470922526,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 2964355389878539751,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 1808145543859538372,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 5305210841059538615,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 7103476677609843332,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 3816297957867577471,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 7514980779830601942,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 2970697479049792143,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 6348449637071410525,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 4474918434456517557,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 150873634284825223,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 5429706851776481739,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 7928552675397462874,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 1943448564093934369,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 7151743042475216037,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 1072294066895887512,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 2948430198404556834,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 5905672084458311278,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 542041412349954507,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 1189328928058398452,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 628200291415272896,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 991771028099526616,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 7828465174577505552,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 5297677158855733919,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 5442343843490035346,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 2180564452117374242,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 4192868847385209368,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 6297210605558244342,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 3719275653853449409,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 7790973050907556378,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 364356238803174163,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 3930493822965520009,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 8279861640450863545,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 1344660212807191072,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 8544399508190789655,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 3025269556503583430,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 5657263812689331773,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 5787825676057892026,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 5973904815833988810,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 4468092583173850430,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 5030066441683995889,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "8d5021e8",
+   "instance_seed": 2760503498929216111,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "25ff71a9",
+   "instance_seed": 8040152672987076710,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 2699481199457553757,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 3279189231673331315,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 2766777881057867604,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1d99e64",
+   "instance_seed": 8937318345555629926,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 7136104124003659708,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 7598552792872730733,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 4899912759659174676,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 8742684664176532901,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 2133771759676496702,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 6060924674500820895,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 4309236701117485817,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 2768358551836664675,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 3556832008067868137,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 4232866597986301725,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 3065538717508720094,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 1789556904585339187,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 2368627822800134576,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 102765498257631004,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 6716968851258864104,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 7472672190498476767,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 8595789880838654010,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 6928905332866748332,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 2966400413142526550,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 5490723321819870835,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f2829549",
+   "instance_seed": 5698486685465579468,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 8325950218600963371,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 9209130907481500676,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 3485875866257307659,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 8391287926460076628,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 7834736876780712201,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 2554854433776585103,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 344142715335956882,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 8517348686754994220,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 9035029498797411742,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 9135704721152526219,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 2730345205597337252,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 3772326661483602062,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 6202179357370784287,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 3344973936799656618,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 6180119450637706980,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 7376365479726848631,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 8630204924125635261,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 950282030052545571,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7e0986d6",
+   "instance_seed": 9073728099739509300,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 3280508984051412381,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 862737726679510459,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 6931619300089822418,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 6722795969901366995,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 3057045264261138553,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 6740385315239482880,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 2350799561347715935,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 6012876884802508320,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 5223453470288744161,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 5270189102474162385,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 2355567536688202385,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 959024750714110316,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 4606744320674875716,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 1733519806373390699,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 9188553903463746113,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 3140469382612148853,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 7935437643676356825,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 1658787723108172081,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 1693149158291605647,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 4242857746795139244,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 3889985301746315011,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 3837798032140769749,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3762985988030421166,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 7933116613482188136,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3944057000115591059,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 8943978071744544402,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 6312778755788772257,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 4281822387242532144,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 6765142629519894006,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 4086840982602731562,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 8758604056979891918,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e5062a87",
+   "instance_seed": 2429357425056671214,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 4742680901193182885,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 6989505875971329197,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 951054510212637239,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 1827752032064550402,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 3654975267949762768,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 8439078263051836235,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 3200681332636977976,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 154796596849980301,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 3885651177217246792,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 1838714123773004515,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 5299995552045488509,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 4966592485154955380,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 1865078250987190625,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 9011412834315325661,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 5569988075375058095,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 5158835412137622516,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 6436592805113818941,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 5502561167317921788,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 6469201631438827073,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 4964260793763857945,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 9085578730038379335,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 5091116227422567714,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 6111727081928352510,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "05269061",
+   "instance_seed": 4625654969800122147,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 7957705924610026321,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "e73095fd",
+   "instance_seed": 6552531558122407209,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 5718184132633264884,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 1878679006793718077,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "253bf280",
+   "instance_seed": 2754378046014506977,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7837ac64",
+   "instance_seed": 1325459121735851420,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 8165076596612822425,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 2862574617181412035,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 8866977946946753451,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "6773b310",
+   "instance_seed": 5546262162356009454,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 493695296112781708,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 5052137262615356010,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 2109064227341614359,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 5123257719068452167,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 9180093211392792353,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "a699fb00",
+   "instance_seed": 6230894658132052291,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 4492890840389419857,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 9024332107392209879,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 1968813229686650554,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 50023204693060803,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 4945250920742438314,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 6998562295276687015,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 502555129573067555,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 8778730029471956303,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 7845589526505453809,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 2392791593715210216,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 3116786270353878554,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3501093879684354071,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 843402483472153602,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 701135459159013455,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 1385505893518590649,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "46442a0e",
+   "instance_seed": 1106834927304097384,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 4893128997211565751,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 4872442779417542536,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "63613498",
+   "instance_seed": 1177560863206640741,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 3334615118934929303,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 2061590275691228728,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 3715965748678259408,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 5468897105737299540,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 1585945117553565815,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 8044423370414620055,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 8323132442132490153,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 2537183483918218260,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c444b776",
+   "instance_seed": 3156253534498152734,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 4387295710894822314,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "5614dbcf",
+   "instance_seed": 462714043669935577,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 8370185150627260622,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 6768459234839910211,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 7607493314547660797,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 5558828065363655586,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "4612dd53",
+   "instance_seed": 2967178383986932511,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "0520fde7",
+   "instance_seed": 1229045781256668162,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 3341908080664104036,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "f76d97a5",
+   "instance_seed": 8388482732661136138,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 2020335544048426058,
+   "phase": "stream",
+   "reset_before": false,
+   "user": 1
+  }
+ ]
+}

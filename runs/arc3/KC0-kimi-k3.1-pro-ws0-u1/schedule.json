@@ -1,0 +1,1065 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc3-small-workstreams",
+ "seed": 0,
+ "users": 1,
+ "sources": {
+  "ar25": "arc3",
+  "bp35": "arc3",
+  "cd82": "arc3",
+  "cn04": "arc3",
+  "ft09": "arc3",
+  "ka59": "arc3",
+  "lf52": "arc3",
+  "ls20": "arc3",
+  "m0r0": "arc3",
+  "re86": "arc3",
+  "sc25": "arc3",
+  "sk48": "arc3",
+  "sp80": "arc3",
+  "su15": "arc3",
+  "tn36": "arc3"
+ },
+ "meta": {
+  "config": {
+   "name": "arc3-small",
+   "n_tasks": 15,
+   "stream_length": 120,
+   "n_epilogue_tasks": 10,
+   "workstreams": {
+    "concurrency": 3,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 16.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "cap_multiplier": 5.0,
+    "max_actions": 1000,
+    "demo_cap": 3,
+    "demo_cost": 1.0
+   },
+   "dataset": "arc3",
+   "held_out_per_task": 4
+  },
+  "mode": "workstreams",
+  "seed": 0,
+  "dataset": "arc3",
+  "track": "arc3",
+  "epilogue": false,
+  "pools": {
+   "stream": 15,
+   "epilogue": 10
+  },
+  "parts": [
+   {
+    "generator": "stream",
+    "mode": "workstreams",
+    "length": 120,
+    "n_tasks": 15,
+    "params": {
+     "concurrency": 3,
+     "burst_mean": 3.0,
+     "burst_fixed": false,
+     "dormancy_median": 16.0,
+     "dormancy_sigma": 1.0,
+     "arrival_interval": 2.0
+    },
+    "instances_per_task": 8,
+    "n_tasks_introduced": 15,
+    "spells": [
+     [
+      "ft09",
+      0,
+      4
+     ],
+     [
+      "ls20",
+      0,
+      13
+     ],
+     [
+      "su15",
+      0,
+      26
+     ],
+     [
+      "sk48",
+      4,
+      8
+     ],
+     [
+      "sk48",
+      8,
+      11
+     ],
+     [
+      "sp80",
+      11,
+      17
+     ],
+     [
+      "ls20",
+      13,
+      24
+     ],
+     [
+      "sc25",
+      17,
+      28
+     ],
+     [
+      "m0r0",
+      24,
+      30
+     ],
+     [
+      "ka59",
+      26,
+      27
+     ],
+     [
+      "ka59",
+      27,
+      33
+     ],
+     [
+      "ls20",
+      28,
+      29
+     ],
+     [
+      "cn04",
+      29,
+      31
+     ],
+     [
+      "sk48",
+      30,
+      32
+     ],
+     [
+      "ft09",
+      31,
+      37
+     ],
+     [
+      "bp35",
+      32,
+      34
+     ],
+     [
+      "ka59",
+      33,
+      41
+     ],
+     [
+      "bp35",
+      34,
+      35
+     ],
+     [
+      "cd82",
+      35,
+      43
+     ],
+     [
+      "bp35",
+      37,
+      48
+     ],
+     [
+      "sk48",
+      41,
+      53
+     ],
+     [
+      "ar25",
+      43,
+      68
+     ],
+     [
+      "tn36",
+      48,
+      52
+     ],
+     [
+      "lf52",
+      52,
+      74
+     ],
+     [
+      "sp80",
+      53,
+      58
+     ],
+     [
+      "re86",
+      58,
+      79
+     ],
+     [
+      "tn36",
+      68,
+      73
+     ],
+     [
+      "sc25",
+      73,
+      87
+     ],
+     [
+      "ls20",
+      74,
+      75
+     ],
+     [
+      "sp80",
+      75,
+      76
+     ],
+     [
+      "tn36",
+      76,
+      78
+     ],
+     [
+      "cn04",
+      78,
+      81
+     ],
+     [
+      "ka59",
+      79,
+      88
+     ],
+     [
+      "lf52",
+      81,
+      85
+     ],
+     [
+      "cd82",
+      85,
+      89
+     ],
+     [
+      "ar25",
+      87,
+      96
+     ],
+     [
+      "cn04",
+      88,
+      98
+     ],
+     [
+      "cd82",
+      89,
+      90
+     ],
+     [
+      "m0r0",
+      90,
+      100
+     ],
+     [
+      "ls20",
+      96,
+      101
+     ],
+     [
+      "re86",
+      98,
+      104
+     ],
+     [
+      "m0r0",
+      100,
+      103
+     ],
+     [
+      "ft09",
+      101,
+      105
+     ],
+     [
+      "cd82",
+      103,
+      107
+     ],
+     [
+      "re86",
+      104,
+      106
+     ],
+     [
+      "ar25",
+      105,
+      108
+     ],
+     [
+      "cn04",
+      106,
+      115
+     ],
+     [
+      "tn36",
+      107,
+      113
+     ],
+     [
+      "ar25",
+      108,
+      110
+     ],
+     [
+      "ft09",
+      110,
+      120
+     ],
+     [
+      "tn36",
+      113,
+      118
+     ],
+     [
+      "cn04",
+      115,
+      116
+     ],
+     [
+      "cd82",
+      116,
+      119
+     ]
+    ]
+   }
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "ft09",
+   "instance_seed": 640850910401480138,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 9055727605163985726,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 20461995187549477,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 2923763388759150236,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 8378408730895119198,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 6222029033671887774,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 1681373771486373257,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 691610392295617716,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 7511706240881773302,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 4197852279965846470,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 5317700545162552822,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 6465620846001375811,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 3918272823458663378,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 9113247272043611735,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 8777034992980020836,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 3852913283437208073,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 4980282032894992707,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 2232828957981987757,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 2919034905976728463,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 4268218509884732147,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 8456595586543555251,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 8268442061373280158,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 4727333765575183805,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 8128319334985530490,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 8563674776826247748,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "su15",
+   "instance_seed": 2072678003624144028,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 4798965232001335665,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 6844949727044854932,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 9156463749617777317,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 5606279899552938361,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 5422164788760099666,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 9006879076671783955,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 2575245094774195027,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 2977828345358189102,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 4612960680209078085,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 4933753539116643937,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 747979233782325613,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 2440331821167779677,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 9109403065930127936,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 5340423911051062694,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 4716589006245541112,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 4261913423543543079,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 5975000435068496872,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 9135140517010841494,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 7554720141921605966,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 9208889316975088111,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 2835770290517432386,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "bp35",
+   "instance_seed": 2138397740236295913,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 3496250605305349135,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 8526686531230895205,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 4912934959561441392,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 3660700809775847945,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sk48",
+   "instance_seed": 1024074866372768668,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 5737534173548808994,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 617594832447781678,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 3205459487144232884,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 8157904538286846547,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 2924517844845561867,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 3203942881869614915,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 9084282323228374911,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 1577591094896378033,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 3188565548315534740,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 5179215797227911436,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 1063236816993700057,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 3309646197241362866,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 276433140011391119,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 7429194541348050175,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 6262911642040107324,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 1843018313581159580,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 2838103934522930723,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 1643012730496828617,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 4898944510191677367,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 7460924456497614390,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 5851005414208033481,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 3278676899802939283,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sp80",
+   "instance_seed": 6133101981279831187,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 5536355655105524603,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 7486573270059783277,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 8556776010667442396,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 1683184609981167153,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 6475538969815768244,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 8742289607801782146,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 8050580098433403882,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 1768030849703346024,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "lf52",
+   "instance_seed": 277866754716789587,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 6847673104847393008,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "sc25",
+   "instance_seed": 8972947829577416072,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ka59",
+   "instance_seed": 6048688744797451468,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 8228842110267571213,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 7976548516628437251,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 2023470330367964581,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 3698260141007084465,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 6620977848272909872,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 6050286287121674416,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 58140546547478528,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 3464891617328294731,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 7062451438874137519,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 1114589973497063871,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 4060001548824121402,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 1431799917660725103,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ls20",
+   "instance_seed": 7935348081214019743,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 6177982260470922526,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "m0r0",
+   "instance_seed": 1808145543859538372,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 7103476677609843332,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 7514980779830601942,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "re86",
+   "instance_seed": 6348449637071410525,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 150873634284825223,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 7928552675397462874,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 7151743042475216037,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ar25",
+   "instance_seed": 2948430198404556834,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 542041412349954507,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 628200291415272896,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 7828465174577505552,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 5442343843490035346,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 4192868847385209368,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cn04",
+   "instance_seed": 3719275653853449409,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 364356238803174163,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "tn36",
+   "instance_seed": 8279861640450863545,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "cd82",
+   "instance_seed": 8544399508190789655,
+   "phase": "stream",
+   "reset_before": false
+  },
+  {
+   "task_id": "ft09",
+   "instance_seed": 5657263812689331773,
+   "phase": "stream",
+   "reset_before": false
+  }
+ ]
+}

@@ -37,11 +37,9 @@ agent harness keeping notes and a model updating its weights on the same scale.
 This repository is the benchmark of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
 Lifetime*](https://arxiv.org/abs/2611.14505): the environment, the schedules, the tracks and the measures.
 The learners the paper evaluates, adapters for three agent harnesses among them, are in
-[`baselines/`](baselines), and the training of its trained rows is in [`training/`](training). The records of its
-GPT-6 Luna runs, with the trajectories behind them, are plain JSON in git at
-[continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the
-[v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and every task, figure, run and
-trajectory of the paper can be explored and replayed at [continual-arc.unify.ai](https://continual-arc.unify.ai).
+[`baselines/`](baselines), and the training of its trained rows is in [`training/`](training). The records of every
+run it reports, with the trajectories behind them, are plain JSON in git in [`runs/`](runs), and every task, figure,
+run and trajectory of the paper can be explored and replayed at [continual-arc.unify.ai](https://continual-arc.unify.ai).
 
 On GPT-6 Luna, a commercial model, the paper ran Prime Agent, Hermes Agent and OpenClaw through the stream
 with every learning mechanism they ship switched on, and again with everything they wrote deleted before every
@@ -476,6 +474,7 @@ src/continual_arc/
 docs/DESIGN.md   design rationale and decisions
 baselines/       the learners the paper evaluates, its harness adapters and the tracking proxy (baselines/README.md)
 training/        the training of the paper's trained rows on Qwen3.5-9B (training/README.md)
+runs/            the records and trajectories of every run the paper reports (runs/README.md)
 ```
 
 ## Submitting a result
@@ -604,12 +603,13 @@ test's cost, and the run stops if the GPU budget is spent. What it does not spen
 
 ## Run records and trajectories
 
-The [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0) carries the records of the 228
-runs of the paper's GPT-6 Luna grid and its open-model runs, each in the layout above, and the trajectories behind
-the GPT-6 Luna runs, `continual-arc-trajectories-v0.1.0.tar.gz`: every message the benchmark sent and every reply, the
-harnesses' reasoning summaries and tool calls, and what each learner kept, file by file. Both are under CC BY 4.0,
-and the runs the site replays can be stepped through instance by instance at
-[continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs). Every GPT-6 Luna run but the `fresh` ones played
+[`runs/`](runs) holds every run the paper reports, under CC BY 4.0: the records of the 228 runs of its GPT-6 Luna grid
+and of its open-model runs on all three tracks, each in the layout above, and the trajectories behind the GPT-6 Luna
+runs and the open-model runs the site replays: every message the benchmark sent and every reply, the harnesses'
+reasoning summaries and tool calls, and what each learner kept, file by file. Its [README](runs/README.md) gives the
+registries and the layout. The [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0) carries
+the same records and the GPT-6 Luna trajectories as two archives, and the runs the site replays can be stepped
+through instance by instance at [continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs). Every GPT-6 Luna run but the `fresh` ones played
 the two frozen tests after its stream, most workstreams runs after a learning-on epilogue on the held-out tasks, which
 no measure reads now. Each run rebuilds slot for slot from its own
 configuration, and every one of their streams is the one `arc1` builds today. They name it `arc1-small`, as every run

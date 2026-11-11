@@ -1,0 +1,53 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-held-out-test-replay",
+ "seed": 0,
+ "users": 1,
+ "sources": {
+  "df8cc377": "arc_eval"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "held-out",
+  "width": 100,
+  "replay_of": "frozen/held-out-reference-4/play",
+  "users_of": [
+   15
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "df8cc377",
+   "instance_seed": 5621436076393523507,
+   "phase": "held-out-test",
+   "reset_before": false
+  }
+ ]
+}

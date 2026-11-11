@@ -1,0 +1,161 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-held-out-test-replay",
+ "seed": 0,
+ "users": 13,
+ "sources": {
+  "f8be4b64": "arc_eval",
+  "0d87d2a6": "arc_eval",
+  "cf133acc": "arc_eval",
+  "1e97544e": "arc_eval",
+  "03560426": "arc_eval",
+  "f9a67cb5": "arc_eval",
+  "4acc7107": "arc_eval",
+  "93b4f4b3": "arc_eval",
+  "c1990cce": "arc_eval",
+  "626c0bcc": "arc_eval",
+  "5af49b42": "arc_eval",
+  "ac2e8ecf": "arc_eval",
+  "136b0064": "arc_eval"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "held-out",
+  "width": 100,
+  "replay_of": "frozen/held-out/play",
+  "users_of": [
+   13,
+   27,
+   29,
+   30,
+   54,
+   62,
+   63,
+   64,
+   65,
+   66,
+   82,
+   85,
+   97
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "f8be4b64",
+   "instance_seed": 4624512758121716708,
+   "phase": "held-out-test",
+   "reset_before": false
+  },
+  {
+   "task_id": "0d87d2a6",
+   "instance_seed": 5970028709184970137,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "cf133acc",
+   "instance_seed": 4224321978604482667,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 2
+  },
+  {
+   "task_id": "1e97544e",
+   "instance_seed": 8400498219468414655,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 3
+  },
+  {
+   "task_id": "03560426",
+   "instance_seed": 2955284840367085334,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 4
+  },
+  {
+   "task_id": "f9a67cb5",
+   "instance_seed": 3911073427179701913,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 5
+  },
+  {
+   "task_id": "4acc7107",
+   "instance_seed": 3005363904942495042,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 6
+  },
+  {
+   "task_id": "93b4f4b3",
+   "instance_seed": 3576242357255925142,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 7
+  },
+  {
+   "task_id": "c1990cce",
+   "instance_seed": 2871145865160612916,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 8
+  },
+  {
+   "task_id": "626c0bcc",
+   "instance_seed": 2159270150571489717,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 9
+  },
+  {
+   "task_id": "5af49b42",
+   "instance_seed": 8937247042282079410,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 10
+  },
+  {
+   "task_id": "ac2e8ecf",
+   "instance_seed": 2884632074494909493,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 11
+  },
+  {
+   "task_id": "136b0064",
+   "instance_seed": 7388836424473241494,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 12
+  }
+ ]
+}

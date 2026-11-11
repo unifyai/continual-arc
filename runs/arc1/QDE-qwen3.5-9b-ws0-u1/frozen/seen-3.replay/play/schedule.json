@@ -1,0 +1,71 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-seen-test-replay",
+ "seed": 0,
+ "users": 3,
+ "sources": {
+  "868de0fa": "rearc",
+  "56dc2b01": "rearc",
+  "673ef223": "rearc"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "seen",
+  "width": 100,
+  "replay_of": "frozen/seen-3/play",
+  "users_of": [
+   36,
+   80,
+   83
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "868de0fa",
+   "instance_seed": 1877469109732704355,
+   "phase": "seen-test",
+   "reset_before": false
+  },
+  {
+   "task_id": "56dc2b01",
+   "instance_seed": 3939737263898204950,
+   "phase": "seen-test",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "673ef223",
+   "instance_seed": 510851149963701568,
+   "phase": "seen-test",
+   "reset_before": false,
+   "user": 2
+  }
+ ]
+}

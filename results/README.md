@@ -7,5 +7,5 @@ method, the model that plays it (`student`) and any model that teaches it (`teac
 stream, and the directories of its two frozen tests, their resets and the bare model's runs. How to run, check and submit
 one is in the [README](../README.md#submitting-a-result).
 
-The paper's 228 runs on GPT-6 Luna are not repeated here: their records are attached to the
-[v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0), and the leaderboard opens with them.
+The paper's own runs are not repeated here: every run it reports is in [`runs/`](../runs), and the leaderboard opens
+with them.

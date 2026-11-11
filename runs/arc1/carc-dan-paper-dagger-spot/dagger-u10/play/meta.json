@@ -1,0 +1,38 @@
+{
+ "learner": "paper-dagger",
+ "protocol": {
+  "track": "arc1",
+  "config": "arc1-collective-u10",
+  "mode": "workstreams",
+  "regime": "collective",
+  "users": 10,
+  "seed": 0,
+  "epilogue": true,
+  "canonical": false,
+  "deviations": [
+   "configuration arc1-collective-u10 is not arc1-small",
+   "10 users is the collective regime, not the individual",
+   "stream cut at round 3"
+  ]
+ },
+ "learner_class": "continual_arc_baselines.collective.CollectiveHarnessLearner",
+ "started_at": "2026-10-18T03:46:17.310710+00:00",
+ "continual_arc_version": "0.1.0",
+ "max_actions_per_instance": 18,
+ "addon": null,
+ "plugins": [],
+ "resumed_at": [
+  {
+   "at": "2026-10-18T04:41:27.618238+00:00",
+   "records": 10
+  },
+  {
+   "at": "2026-10-18T05:21:49.309108+00:00",
+   "records": 20
+  },
+  {
+   "at": "2026-10-18T06:10:59.187010+00:00",
+   "records": 30
+  }
+ ]
+}

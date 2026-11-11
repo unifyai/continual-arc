@@ -1,0 +1,53 @@
+{
+ "learner": "OpenClawLearner",
+ "protocol": {
+  "track": "arc1",
+  "config": "arc1-small",
+  "mode": "sequential",
+  "regime": "individual",
+  "users": 1,
+  "seed": 0,
+  "epilogue": true,
+  "canonical": false,
+  "deviations": [
+   "mode sequential is not workstreams",
+   "stream cut at round 200"
+  ]
+ },
+ "learner_class": "continual_arc_baselines.tracking.TrackedLearner",
+ "started_at": "2026-10-21T01:01:06.894710+00:00",
+ "continual_arc_version": "0.1.0",
+ "max_actions_per_instance": 18,
+ "addon": null,
+ "plugins": [],
+ "alias_style": "hex",
+ "resumed_at": [
+  {
+   "at": "2026-10-21T03:03:05.247693+00:00",
+   "records": 25
+  },
+  {
+   "at": "2026-10-21T16:18:06.460047+00:00",
+   "records": 196
+  },
+  {
+   "at": "2026-10-21T16:33:11.861066+00:00",
+   "records": 197
+  },
+  {
+   "at": "2026-10-21T16:48:16.852492+00:00",
+   "records": 198
+  },
+  {
+   "at": "2026-10-21T17:48:12.196232+00:00",
+   "records": 199
+  }
+ ],
+ "summarized": {
+  "at": "2026-10-23T05:39:48.749899+00:00",
+  "why": "the run's process ended after its last record without writing summary.json",
+  "how": "continual_arc.metrics.summarize(records, config, checkpoints=...) and configs.protocol_of(schedule, config), as runner.run writes summary.json at a run's end",
+  "continual_arc": "a5c2677",
+  "records": 200
+ }
+}

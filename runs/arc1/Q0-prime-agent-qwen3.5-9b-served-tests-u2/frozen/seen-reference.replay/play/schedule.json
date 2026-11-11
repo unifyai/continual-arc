@@ -1,0 +1,120 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-seen-test-disjoint-u2-replay",
+ "seed": 0,
+ "users": 2,
+ "sources": {
+  "4258a5f9": "rearc",
+  "90f3ed37": "rearc"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "seen",
+  "width": 100,
+  "users_mode": "disjoint",
+  "stream_users": 2,
+  "tasks": [
+   [
+    "0520fde7",
+    "05269061",
+    "253bf280",
+    "25ff71a9",
+    "4612dd53",
+    "46442a0e",
+    "5614dbcf",
+    "56dc2b01",
+    "63613498",
+    "673ef223",
+    "6773b310",
+    "7837ac64",
+    "7ddcd7ec",
+    "7e0986d6",
+    "868de0fa",
+    "88a10436",
+    "8d5021e8",
+    "90f3ed37",
+    "a699fb00",
+    "c1d99e64",
+    "c444b776",
+    "e5062a87",
+    "e73095fd",
+    "f2829549",
+    "f76d97a5"
+   ],
+   [
+    "00d62c1b",
+    "025d127b",
+    "0ca9ddb6",
+    "1e0a9b12",
+    "1f642eb9",
+    "234bbc79",
+    "23581191",
+    "239be575",
+    "29623171",
+    "29ec7d0e",
+    "2dd70a9a",
+    "2dee498d",
+    "39a8645d",
+    "3ac3eb23",
+    "3e980e27",
+    "4258a5f9",
+    "47c1f68c",
+    "484b58aa",
+    "4938f0c2",
+    "496994bd",
+    "4c4377d9",
+    "508bd3b6",
+    "50cb2852",
+    "5117e062",
+    "539a4f51"
+   ]
+  ],
+  "replay_of": "frozen/seen-reference/play",
+  "users_of": [
+   29,
+   44
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "4258a5f9",
+   "instance_seed": 7254401433884874159,
+   "phase": "seen-test",
+   "reset_before": false
+  },
+  {
+   "task_id": "90f3ed37",
+   "instance_seed": 5081274618755211492,
+   "phase": "seen-test",
+   "reset_before": false,
+   "user": 1
+  }
+ ]
+}

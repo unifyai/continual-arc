@@ -1,0 +1,62 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-seen-test-replay",
+ "seed": 0,
+ "users": 2,
+ "sources": {
+  "f2829549": "rearc",
+  "7ddcd7ec": "rearc"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "seen",
+  "width": 100,
+  "replay_of": "frozen/seen-reference-3/play",
+  "users_of": [
+   47,
+   86
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "f2829549",
+   "instance_seed": 1429925796060365639,
+   "phase": "seen-test",
+   "reset_before": false
+  },
+  {
+   "task_id": "7ddcd7ec",
+   "instance_seed": 4452065385386160642,
+   "phase": "seen-test",
+   "reset_before": false,
+   "user": 1
+  }
+ ]
+}

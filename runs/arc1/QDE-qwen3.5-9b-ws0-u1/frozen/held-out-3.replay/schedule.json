@@ -1,0 +1,134 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-held-out-test-replay",
+ "seed": 0,
+ "users": 10,
+ "sources": {
+  "9bebae7a": "arc_eval",
+  "25094a63": "arc_eval",
+  "4c177718": "arc_eval",
+  "103eff5b": "arc_eval",
+  "a3f84088": "arc_eval",
+  "73c3b0d8": "arc_eval",
+  "c1990cce": "arc_eval",
+  "4aab4007": "arc_eval",
+  "5ffb2104": "arc_eval",
+  "136b0064": "arc_eval"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "held-out",
+  "width": 100,
+  "replay_of": "frozen/held-out-3/play",
+  "users_of": [
+   12,
+   19,
+   41,
+   53,
+   56,
+   60,
+   65,
+   79,
+   88,
+   97
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "9bebae7a",
+   "instance_seed": 7301510244407457999,
+   "phase": "held-out-test",
+   "reset_before": false
+  },
+  {
+   "task_id": "25094a63",
+   "instance_seed": 5029217706381503677,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "4c177718",
+   "instance_seed": 6788956577591626040,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 2
+  },
+  {
+   "task_id": "103eff5b",
+   "instance_seed": 5455808039448271690,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 3
+  },
+  {
+   "task_id": "a3f84088",
+   "instance_seed": 8465354231285017886,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 4
+  },
+  {
+   "task_id": "73c3b0d8",
+   "instance_seed": 2523724697272045835,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 5
+  },
+  {
+   "task_id": "c1990cce",
+   "instance_seed": 2871145865160612916,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 6
+  },
+  {
+   "task_id": "4aab4007",
+   "instance_seed": 8364001214049460804,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 7
+  },
+  {
+   "task_id": "5ffb2104",
+   "instance_seed": 7834719668100254258,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 8
+  },
+  {
+   "task_id": "136b0064",
+   "instance_seed": 7388836424473241494,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 9
+  }
+ ]
+}

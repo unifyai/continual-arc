@@ -9,6 +9,16 @@ build/
 .coverage
 htmlcov/
 runs/
+# runs/ at the root holds the paper's runs (runs/README.md); a run of your own written to runs/<name>/ stays untracked
+!/runs/
+/runs/*
+!/runs/arc1/
+!/runs/arc2/
+!/runs/arc3/
+!/runs/live/
+!/runs/*.json
+!/runs/README.md
+!/runs/LICENSE
 schedules/*.json
 *.png
 !assets/*.png

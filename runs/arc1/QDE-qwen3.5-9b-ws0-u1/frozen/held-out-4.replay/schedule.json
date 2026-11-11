@@ -1,0 +1,125 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc1-small-held-out-test-replay",
+ "seed": 0,
+ "users": 9,
+ "sources": {
+  "d5c634a2": "arc_eval",
+  "9c1e755f": "arc_eval",
+  "c1990cce": "arc_eval",
+  "626c0bcc": "arc_eval",
+  "992798f6": "arc_eval",
+  "3194b014": "arc_eval",
+  "a04b2602": "arc_eval",
+  "ac2e8ecf": "arc_eval",
+  "5ffb2104": "arc_eval"
+ },
+ "meta": {
+  "config": {
+   "name": "arc1-small",
+   "n_tasks": 25,
+   "stream_length": 200,
+   "n_epilogue_tasks": 100,
+   "workstreams": {
+    "concurrency": 4,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 30.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "attempt_cap": 8,
+    "demo_cap": 8,
+    "demo_cost": 1.0,
+    "demos_per_request": 1,
+    "diff_lb": 0.0,
+    "diff_ub": 1.0
+   },
+   "dataset": "arc1"
+  },
+  "seed": 0,
+  "dataset": "arc1",
+  "track": "arc1",
+  "test": "held-out",
+  "width": 100,
+  "replay_of": "frozen/held-out-4/play",
+  "users_of": [
+   26,
+   34,
+   65,
+   66,
+   70,
+   71,
+   72,
+   85,
+   88
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "d5c634a2",
+   "instance_seed": 8177114360383639805,
+   "phase": "held-out-test",
+   "reset_before": false
+  },
+  {
+   "task_id": "9c1e755f",
+   "instance_seed": 5896625765452105429,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 1
+  },
+  {
+   "task_id": "c1990cce",
+   "instance_seed": 2871145865160612916,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 2
+  },
+  {
+   "task_id": "626c0bcc",
+   "instance_seed": 2159270150571489717,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 3
+  },
+  {
+   "task_id": "992798f6",
+   "instance_seed": 8050365696881826181,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 4
+  },
+  {
+   "task_id": "3194b014",
+   "instance_seed": 423401748226393728,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 5
+  },
+  {
+   "task_id": "a04b2602",
+   "instance_seed": 8033624251933985513,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 6
+  },
+  {
+   "task_id": "ac2e8ecf",
+   "instance_seed": 2884632074494909493,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 7
+  },
+  {
+   "task_id": "5ffb2104",
+   "instance_seed": 7834719668100254258,
+   "phase": "held-out-test",
+   "reset_before": false,
+   "user": 8
+  }
+ ]
+}
