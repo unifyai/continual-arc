@@ -604,13 +604,14 @@ test's cost, and the run stops if the GPU budget is spent. What it does not spen
 
 ## Run records and trajectories
 
-The [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0) carries the records of the 198
-runs of the paper's GPT-6 Luna grid, each in the layout above, and the trajectories behind them,
-`continual-arc-trajectories-v0.1.0.tar.gz`: every message the benchmark sent and every reply, the harnesses'
-reasoning summaries and tool calls, and what each learner kept, file by file. Both are under CC BY 4.0, and any run
-can be replayed instance by instance at [continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs). They were
-played before the frozen tests, so each stream ends on a learning-on epilogue of 25 held-out tasks, as many as
-the configuration had until 20 October 2026, which no measure reads now. Each run rebuilds slot for slot from its own
+The [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0) carries the records of the 228
+runs of the paper's GPT-6 Luna grid and its open-model runs, each in the layout above, and the trajectories behind
+the GPT-6 Luna runs, `continual-arc-trajectories-v0.1.0.tar.gz`: every message the benchmark sent and every reply, the
+harnesses' reasoning summaries and tool calls, and what each learner kept, file by file. Both are under CC BY 4.0,
+and the runs the site replays can be stepped through instance by instance at
+[continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs). Every GPT-6 Luna run but the `fresh` ones played
+the two frozen tests after its stream, most workstreams runs after a learning-on epilogue on the held-out tasks, which
+no measure reads now. Each run rebuilds slot for slot from its own
 configuration, and every one of their streams is the one `arc1` builds today. They name it `arc1-small`, as every run
 played before v0.6.0 does, when the benchmark still named its configurations by size.
 
