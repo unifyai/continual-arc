@@ -6,9 +6,10 @@ Lifetime*](https://arxiv.org/abs/2611.14505) (Daniel Lenton, 2026;
 which 120 are the ablation rows of its Appendix F, each with the two frozen tests played after its stream, and its
 runs on the open models, Qwen3.5-9B and GLM-5.3 Flash (its Appendix H) and Kimi K3.1 Pro on the ARC-AGI-2 and
 ARC-AGI-3 tracks (its Appendix K). For each GPT-6 Luna run there are its
-records, from which the paper's tables and figures are computed, and its trajectories: every message the benchmark
-sent, what the learner did inside each exchange (its reasoning summaries, its messages and its tool calls with their
-output), its reply and the action read from it, and what the learner kept, file by file and version by version. The
+records, from which the paper's tables and figures are computed, and its trajectories, of its stream and of every
+play of its frozen tests: every message the benchmark sent, what the learner did inside each exchange (its reasoning
+summaries, its messages and its tool calls with their output), its reply and the action read from it, and what the
+learner kept, file by file and version by version. The
 open-model runs are here by their records and their trajectories: each in `runs/` once its stream and both its tests
 have finished, listed in `open-models.json`, and each still being played in `runs/live/`, with what it has played so
 far. The runs the
@@ -27,11 +28,11 @@ and are in these files alone.
 
 These are the files of the benchmark's [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0)
 assets, `continual-arc-runs-v0.1.0.tar.gz` and `continual-arc-trajectories-v0.1.0.tar.gz`, as plain JSON in git, with
-what neither asset holds: the trajectories of the open-model runs, the GPT-6 Luna runs' later plays of the frozen
-tests and DAgger's training records, which the paper's tables and figures read
-([`paper/README.md`](../paper/README.md#the-figures-and-tables)), the letters QETE `-letter` read with its teacher's
-state, and first sight's readings: about 75,200 files and 5.4 GB on disk. Until 11 November 2026 they were a
-repository of their own,
+what neither asset holds: the trajectories of the open-model runs and of every play of the GPT-6 Luna runs' frozen
+tests, the GPT-6 Luna runs' later plays of the frozen tests and DAgger's training records, which the paper's tables
+and figures read ([`paper/README.md`](../paper/README.md#the-figures-and-tables)), the letters QETE `-letter` read with
+its teacher's state, and first sight's readings: about 150,100 files and 10.1 GB on disk. Until 11 November 2026 they
+were a repository of their own,
 [continual-arc-runs](https://github.com/unifyai/continual-arc-runs), kept read-only with its history; its tag `v0.1.0`
 is that repository as the release went out. Every path in the registries below, such as
 `runs/arc1/H-prime-agent-luna6-low-ws0`, is read from this repository's root, and so are the commands under "Reading
@@ -98,10 +99,10 @@ git clone https://github.com/unifyai/continual-arc   # the runs are in runs/
     measures); and for each round, `rounds/r<round>/labels/split/split.json`, how many of the round's games and
     labelled calls went to training and how many to the held-out measure. The adapters and the labels are not here.
 
-  And, for the GPT-6 Luna runs and the open-model runs, its trajectories, one format for every learner, and for an
-  open-model run that plays the tests alone (`frozen tests` in `open-models.json`) those of each of its plays, beside
-  the play's records in `frozen/<play>/play/`, its id that path under `runs/<track>/`, every instance a user of its
-  own:
+  And, for the GPT-6 Luna runs and the open-model runs, its trajectories, one format for every learner, and for a
+  GPT-6 Luna run and an open-model run that plays the tests alone (`frozen tests` in `open-models.json`) those of each
+  of its plays, beside the play's records in `frozen/<play>/play/`, its id that path under `runs/<track>/`, every
+  instance a user of its own:
   - `run.json`: the run's instances in the order served, each with its task, phase, exposure index and gap, whether
     it was solved, its charge, the demonstrations it bought and its wrong attempts, the model calls, tokens and spend
     the tracking proxy counted, and `trajectory` and `steps` (whether the instance has a trajectory, and whether that
@@ -121,7 +122,8 @@ git clone https://github.com/unifyai/continual-arc   # the runs are in runs/
   - `memory.json`: what the learner kept, `{run, kind, note?, files}`, each file with its versions
     (`{step, phase, text, change?, final?}`): the text a write left, or the edit a call made, and the copy on disk at
     the end of the run. Prime Agent's one tool is a Python kernel, so each of its writes is read from the cell that
-    made it, and where the cell built the text as it ran, `change` holds the cell itself.
+    made it, and where the cell built the text as it ran, `change` holds the cell itself. A play kept nothing, since
+    nothing a test's user wrote reached another instance, and its `note` says what each user started from.
 
 A GPT-6 Luna run's name is `<row>-<system>-<preset>-<order><seed>`. The rows are F, the two floors
 (`BareModelLearner`, stateless, and `BareDemoCacheLearner`); M, the program library; H, a harness with every learning
@@ -169,16 +171,23 @@ are the benchmark's own; a learner saw them only under aliases drawn for its run
 
 Each learner's exchanges are the adapter's log of the protocol, and their outcomes the benchmark's. A harness's own
 steps come from its own store: Prime Agent's RPC event log, OpenClaw's transcript database and the sessions it
-archived, Hermes Agent's session database. Each step is placed in the exchange whose time window holds it.
+archived, Hermes Agent's session database. Each step is placed in the exchange whose time window holds it. In a
+GPT-6 Luna run's frozen test every user kept its own exchanges, Prime Agent's RPC log and a store of its own, which
+began as a copy of the stream's, or empty in a reference play: OpenClaw's and Hermes Agent's are read from the user's
+commit of the test round, their steps from the play's start on. The tests kept no record of the benchmark's events, so
+each action's answer is read from the benchmark's next message. The harnesses' steps are there for all but 107 of the
+59,377 instances of these plays they acted on, the wiped rows' included, and those 107 say so (`elided`); an instance a
+harness never acted on (a forced give-up after its restarts, 23 of them) or that the program library's kept program
+solved before the model was asked (1,548) has no trajectory.
 
 The rows that wipe the harness before every instance (H0, HPL0 and every `fresh` run) deleted OpenClaw's and Hermes
-Agent's stores with everything else, so in those runs their reasoning and tool calls survive for the last instance
-alone; the benchmark's messages and the harnesses' replies are complete. Prime Agent's RPC log sat outside its state,
-so its wiped runs are complete. The floors and the program library are the model alone behind the protocol, so their
-replies are the whole of what they did, and the program library's programs are in them. Tool outputs and messages
+Agent's stores with everything else, so in those runs' streams their reasoning and tool calls survive for the last
+instance alone; the benchmark's messages and the harnesses' replies are complete. Prime Agent's RPC log sat outside its
+state, so its wiped runs are complete. The floors and the program library are the model alone behind the protocol, so
+their replies are the whole of what they did, and the program library's programs are in them. Tool outputs and messages
 longer than 60,000 characters are cut, with a marker saying how much. One entry naming software of ours on the
-runners' `PATH` was taken out of the environments two harnesses printed. The frozen tests' plays have their records
-alone, but those of the runs that play the tests alone.
+runners' `PATH` was taken out of the environments two harnesses printed. The open-model runs' frozen tests' plays
+have their records alone, but those of the runs that play the tests alone.
 
 The plays of the served tests, the page alone, DAgger's fits from the base model and the library ceiling, which the
 trained rows' engine played, kept no adapter log and no RPC log, but for their replays: they kept every model call, its
@@ -189,7 +198,9 @@ so where both were kept, QETE `-letter`'s held-out test, GB's stream and three o
 the harness failed in, after which the adapter restarted it, is left out, as the adapter's log leaves it out. On
 ARC-AGI-3 each reply's action is read by the benchmark's own parser for games, and the program library's programs from
 its own copy of them after every round. In the trajectories of the 22 open-model runs the site does not replay, and in
-the letters and the teacher's state, the runners' home folder is written `/home/USER`.
+the letters and the teacher's state, the runners' home folder is written `/home/USER`; in those of the GPT-6 Luna runs'
+frozen tests the machines' home folder is written `/home/USER` and their names `HOST`, and the value of each key an
+environment printed is taken out.
 
 ## Licence
 
