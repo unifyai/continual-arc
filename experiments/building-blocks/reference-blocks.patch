@@ -1,0 +1,77 @@
+diff --git a/reference.py b/reference.py
+index fed66f2..268ba82 100644
+--- a/reference.py
++++ b/reference.py
+@@ -37,6 +37,16 @@ Rows ha and hpl0 are the paper's ablations HA and H-E0 at the player's settings
+ grid completed at one user): ha is row h asked after every verdict to save liberally what could help with the task's
+ later instances (baselines' ``ask_to_store``), and hpl0 is row hpl wiped before every instance (:data:`STATELESS_ROWS`).
+ 
++Rows hpb and hpb0 are row hpl and its reset given building-block guidance in place of the expert guidance (the author, 8 Nov
++2026: "a run which does encourage GLM to store compositional components ... if that does generalize at all"): c1, then
++baselines' ``block_library``, the expert guidance's procedure with the library kept as building blocks
++(``BLOCK_LIBRARY_RULES``: small, general grid functions in the folder's ``lib.py``, each task's program a short
++composition of them, lib.py's index read first on a task with no working program), then six such functions and two
++other tasks' programs composed from them, none of them used by any rule of the one-user stream (``BLOCK_LIBRARY_EXAMPLES``,
++blocks/examples.py), and every verdict followed by the ask to move what another task could reuse into lib.py and check
++every kept program again (``BLOCK_LIBRARY_ASK``). Whether a library of building blocks carries to tasks never met is read
++from hpb's held-out test against hpb0's, told the same, beside hpl's: the paper's GB and GB0 (the author, 8 Nov 2026).
++
+ Two players:
+ 
+   glm   GLM-5.3-flash, the trained rows' oracle, at the labeller's own settings (expert.py through realtime.sh's relay:
+@@ -113,9 +123,10 @@ PLAYERS: dict[str, dict[str, Any]] = {
+ # docstring)
+ REFERENCE_ROWS: dict[str, dict[str, Any]] = {"h": {}, "h0": {}, "hpl": {"program_library": True}, "hg": {},
+                                               "ha": {"ask_to_store": True}, "hpl0": {"program_library": True},
+-                                              "hplg": {"program_library": True}, "hgpl": {}}
++                                              "hplg": {"program_library": True}, "hgpl": {},
++                                              "hpb": {"block_library": True}, "hpb0": {"block_library": True}}
+ # the reference rows wiped before every instance: the trained rows' own, and hpl0
+-STATELESS_ROWS: tuple[str, ...] = (*paper.STATELESS_ROWS, "hpl0")
++STATELESS_ROWS: tuple[str, ...] = (*paper.STATELESS_ROWS, "hpl0", "hpb0")
+ # each player's bare-model rows (the module's docstring): baselines' learner and its settings beyond paper.FLOOR's
+ BARE_ROWS: dict[str, tuple[str, dict[str, Any]]] = {
+     "dc": ("BareSharedDemoCacheLearner", {}), "f": ("BareModelLearner", {}),
+@@ -128,7 +139,7 @@ TOLD_STORERS: tuple[str, ...] = ("hgpl", "hplg")
+ # the rows given expert guidance, each told a page of playing rules ahead of the procedure (paper.told_system): c1, the
+ # page the trained rows' labeller is told, so that telling the student and training it start from the same playing
+ # rules (the author, 27 Oct 2026)
+-TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1", "hplg": "c1"}
++TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1", "hplg": "c1", "hpb": "c1", "hpb0": "c1"}
+ 
+ 
+ def overrides_of(player: str) -> dict[str, Any]:
+diff --git a/test_reference.py b/test_reference.py
+index e1d424b..ed80a5e 100644
+--- a/test_reference.py
++++ b/test_reference.py
+@@ -21,7 +21,7 @@ import reference
+ 
+ ONE_USER = SimpleNamespace(users=1)
+ # the trained row whose harness settings each reference row adds to
+-PAPER_ROW = {"hpl": "h", "hg": "h", "ha": "h", "hpl0": "h0", "hplg": "h", "hgpl": "h"}
++PAPER_ROW = {"hpl": "h", "hg": "h", "ha": "h", "hpl0": "h0", "hplg": "h", "hgpl": "h", "hpb": "h", "hpb0": "h0"}
+ 
+ 
+ def test_players_play_at_the_trained_rows_settings():
+@@ -93,6 +93,20 @@ def test_row_hpl_is_given_c1_then_the_program_library_and_keeps_its_memory(tmp_p
+     assert json.loads((tmp_path / "ref" / "driver.json").read_text())["harness_budget"]["name"] == "turns"
+ 
+ 
++def test_rows_hpb_and_hpb0_are_given_c1_then_the_building_block_library_kept_and_wiped(tmp_path, monkeypatch):
++    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
++    hpb, _ = _played(monkeypatch, reference.play_round, "glm", "hpb", tmp_path / "hpb", ONE_USER, api_key="k")
++    hpb0, _ = _played(monkeypatch, reference.play_round, "glm", "hpb0", tmp_path / "hpb0", ONE_USER, api_key="k")
++    kept, wiped = PrimeAgentLearner(**hpb), PrimeAgentLearner(**hpb0)
++    for system in (kept, wiped):
++        assert system.block_library and not system.program_library and system.end == "finish"
++        assert system.rules_page == paper.rules_page("c1")
++        assert "built from reusable building blocks" in system.library_rules()
++    assert not kept.stateless and wiped.stateless
++    assert json.loads((tmp_path / "hpb" / "driver.json").read_text())["harness"]["block_library"] is True
++    assert json.loads((tmp_path / "hpb0" / "driver.json").read_text())["stateless"]
++
++
+ def test_rows_ha_and_hpl0_are_the_papers_ablations(tmp_path, monkeypatch):
+     from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
+     ha, _ = _played(monkeypatch, reference.play_round, "qwen", "ha", tmp_path / "ha", ONE_USER, api_key="k")

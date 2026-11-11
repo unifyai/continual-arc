@@ -1,0 +1,170 @@
+diff --git a/reference.py b/reference.py
+index fed66f2..2381c86 100644
+--- a/reference.py
++++ b/reference.py
+@@ -37,6 +37,24 @@ Rows ha and hpl0 are the paper's ablations HA and H-E0 at the player's settings
+ grid completed at one user): ha is row h asked after every verdict to save liberally what could help with the task's
+ later instances (baselines' ``ask_to_store``), and hpl0 is row hpl wiped before every instance (:data:`STATELESS_ROWS`).
+ 
++Rows hpb and hpb0 are row hpl and its reset given building-block guidance in place of the expert guidance (the author, 8 Nov
++2026: "a run which does encourage GLM to store compositional components ... if that does generalize at all"): c1, then
++baselines' ``block_library``, the expert guidance's procedure with the library kept as building blocks
++(``BLOCK_LIBRARY_RULES``: small, general grid functions in the folder's ``lib.py``, each task's program a short
++composition of them, lib.py's index read first on a task with no working program), then six such functions and two
++other tasks' programs composed from them, none of them used by any rule of the one-user stream (``BLOCK_LIBRARY_EXAMPLES``,
++blocks/examples.py), and every verdict followed by the ask to move what another task could reuse into lib.py and check
++every kept program again (``BLOCK_LIBRARY_ASK``). Whether a library of building blocks carries to tasks never met is read
++from hpb's held-out test against hpb0's, told the same, beside hpl's: the paper's GB and GB0 (the author, 8 Nov 2026).
++
++Rows hpl0d1 and hpl0d4 are the library ceiling (the author, 8 Nov 2026: "we only show it the functions that are involved in the
++creation of the tasks that were seen during the stream. And then it's more kind of like a maximum ceiling on what
++harness-based learning could deduce"): row hpl0, wiped before every instance, given baselines' ``primitives``, the Re-ARC
++DSL's primitives that the rules of the one-user stream's tasks (hpl0d1) or the four-user stream's (hpl0d4) use, shown
++whole and importable in the kernel, so that a share saved against hpl0 on a frozen test is what the library a perfect
++harness could have kept gives a player that keeps nothing (ceiling/README.md). They play the frozen tests alone, each
++from a run whose driver.json :func:`cmd_driver` writes, as play_round writes a stream's.
++
+ Two players:
+ 
+   glm   GLM-5.3-flash, the trained rows' oracle, at the labeller's own settings (expert.py through realtime.sh's relay:
+@@ -113,9 +131,12 @@ PLAYERS: dict[str, dict[str, Any]] = {
+ # docstring)
+ REFERENCE_ROWS: dict[str, dict[str, Any]] = {"h": {}, "h0": {}, "hpl": {"program_library": True}, "hg": {},
+                                               "ha": {"ask_to_store": True}, "hpl0": {"program_library": True},
+-                                              "hplg": {"program_library": True}, "hgpl": {}}
+-# the reference rows wiped before every instance: the trained rows' own, and hpl0
+-STATELESS_ROWS: tuple[str, ...] = (*paper.STATELESS_ROWS, "hpl0")
++                                              "hplg": {"program_library": True}, "hgpl": {},
++                                              "hpb": {"block_library": True}, "hpb0": {"block_library": True},
++                                              "hpl0d1": {"program_library": True, "primitives": "stream_u1"},
++                                              "hpl0d4": {"program_library": True, "primitives": "stream_u4"}}
++# the reference rows wiped before every instance: the trained rows' own, hpl0, hpb0 and the library ceiling's
++STATELESS_ROWS: tuple[str, ...] = (*paper.STATELESS_ROWS, "hpl0", "hpb0", "hpl0d1", "hpl0d4")
+ # each player's bare-model rows (the module's docstring): baselines' learner and its settings beyond paper.FLOOR's
+ BARE_ROWS: dict[str, tuple[str, dict[str, Any]]] = {
+     "dc": ("BareSharedDemoCacheLearner", {}), "f": ("BareModelLearner", {}),
+@@ -128,7 +149,8 @@ TOLD_STORERS: tuple[str, ...] = ("hgpl", "hplg")
+ # the rows given expert guidance, each told a page of playing rules ahead of the procedure (paper.told_system): c1, the
+ # page the trained rows' labeller is told, so that telling the student and training it start from the same playing
+ # rules (the author, 27 Oct 2026)
+-TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1", "hplg": "c1"}
++TOLD_ROWS: dict[str, str] = {"hpl": "c1", "hpl0": "c1", "hplg": "c1", "hpb": "c1", "hpb0": "c1",
++                             "hpl0d1": "c1", "hpl0d4": "c1"}
+ 
+ 
+ def overrides_of(player: str) -> dict[str, Any]:
+@@ -159,6 +181,18 @@ def hand_storage(user: Any, storer: dict[str, Any], *, told: bool = False) -> No
+     system._finish_instance = stored
+ 
+ 
++def driver_record(player: str, row: str, harness: dict[str, Any], budget_name: str) -> dict[str, Any]:
++    """What a reference row's driver.json records of how it plays: its player and model, its harness settings with the
++    row's additions, its budget, the request fields its calls carry, the page it is told and its storer."""
++    spec = PLAYERS[player]
++    storer = overrides_of(STORERS[row]) if row in STORERS else None
++    return {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "stateless": row in STATELESS_ROWS,
++            "model": spec["model"], "harness": {**harness, **REFERENCE_ROWS[row]},
++            "harness_budget": {"name": budget_name, **loop.HARNESS_BUDGETS[budget_name]}, "overrides": overrides_of(player),
++            **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {}),
++            **({"storer": {"player": STORERS[row], "overrides": storer, "told": row in TOLD_STORERS}} if storer else {})}
++
++
+ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key: str, registry: Any = None,
+                harness: dict[str, Any] | None = None) -> Any:
+     """:func:`paper.play_round` for a frozen ``row`` with ``player`` served by OpenRouter (the module's docstring): plays
+@@ -183,13 +217,7 @@ def play_round(player: str, row: str, run_dir: Path, schedule: Any, *, api_key:
+               "stateless": row in STATELESS_ROWS, **harness, **budget, **REFERENCE_ROWS[row]}
+     overrides = overrides_of(player)
+     storer = overrides_of(STORERS[row]) if row in STORERS else None
+-    (run_dir / "driver.json").write_text(json.dumps(
+-        {"row": row, "player": player, "served": f"openrouter:{spec['model']}", "stateless": row in STATELESS_ROWS,
+-         "model": spec["model"], "harness": {**harness, **REFERENCE_ROWS[row]},
+-         "harness_budget": {"name": budget_name, **budget}, "overrides": overrides,
+-         **({"told": TOLD_ROWS[row]} if row in TOLD_ROWS else {}),
+-         **({"storer": {"player": STORERS[row], "overrides": storer, "told": row in TOLD_STORERS}} if storer else {})},
+-        indent=1))
++    (run_dir / "driver.json").write_text(json.dumps(driver_record(player, row, harness, budget_name), indent=1))
+ 
+     def system(user: int) -> Any:
+         return paper.told_system(kwargs, TOLD_ROWS[row]) if row in TOLD_ROWS else PrimeAgentLearner(**kwargs)
+@@ -227,6 +255,15 @@ def cmd_play(a: argparse.Namespace) -> None:
+         print(json.dumps({"round": r, "records": len(result.records)}), flush=True)
+ 
+ 
++def cmd_driver(a: argparse.Namespace) -> None:
++    """A run of a row's frozen tests alone, with no stream (rows hpl0d1 and hpl0d4, the module's docstring): its
++    driver.json in ``--run-dir``, as play_round writes a stream's, which frozen.py reads the row from."""
++    run_dir = Path(a.run_dir).expanduser()
++    run_dir.mkdir(parents=True, exist_ok=True)
++    record = driver_record(a.player, a.row, loop.HARNESS, loop.run_budget(run_dir))
++    (run_dir / "driver.json").write_text(json.dumps({**record, "stream": "none: the frozen tests' plays alone"}, indent=1))
++
++
+ def keep_library(system: Any, path: Path) -> None:
+     """Row m's memory once a round is played (the module's docstring): the user's demo cache and kept programs, which
+     baselines' ``BareProgramLibraryLearner`` holds in memory, written to ``path``."""
+@@ -318,6 +355,11 @@ def main() -> None:
+     play.add_argument("--compact-keep", type=int, default=loop.HARNESS["compact_keep"], dest="compact_keep",
+                       help="what a compaction keeps word for word (0: its own default); the trained rows' by default")
+     play.set_defaults(fn=cmd_play)
++    driver = sub.add_parser("driver", help="the driver.json of a run that plays a row's frozen tests alone")
++    driver.add_argument("--player", required=True, choices=PLAYERS)
++    driver.add_argument("--row", required=True, choices=REFERENCE_ROWS)
++    driver.add_argument("--run-dir", required=True, dest="run_dir")
++    driver.set_defaults(fn=cmd_driver)
+     bare = sub.add_parser("bare", help="play a player's bare-model row on the rows' stream, resumable")
+     bare.add_argument("--player", required=True, choices=PLAYERS)
+     bare.add_argument("--row", required=True, choices=BARE_ROWS)
+diff --git a/test_reference.py b/test_reference.py
+index e1d424b..fa0e6c8 100644
+--- a/test_reference.py
++++ b/test_reference.py
+@@ -21,7 +21,8 @@ import reference
+ 
+ ONE_USER = SimpleNamespace(users=1)
+ # the trained row whose harness settings each reference row adds to
+-PAPER_ROW = {"hpl": "h", "hg": "h", "ha": "h", "hpl0": "h0", "hplg": "h", "hgpl": "h"}
++PAPER_ROW = {"hpl": "h", "hg": "h", "ha": "h", "hpl0": "h0", "hplg": "h", "hgpl": "h", "hpb": "h", "hpb0": "h0",
++             "hpl0d1": "h0", "hpl0d4": "h0"}
+ 
+ 
+ def test_players_play_at_the_trained_rows_settings():
+@@ -93,6 +94,38 @@ def test_row_hpl_is_given_c1_then_the_program_library_and_keeps_its_memory(tmp_p
+     assert json.loads((tmp_path / "ref" / "driver.json").read_text())["harness_budget"]["name"] == "turns"
+ 
+ 
++def test_rows_hpb_and_hpb0_are_given_c1_then_the_building_block_library_kept_and_wiped(tmp_path, monkeypatch):
++    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
++    hpb, _ = _played(monkeypatch, reference.play_round, "glm", "hpb", tmp_path / "hpb", ONE_USER, api_key="k")
++    hpb0, _ = _played(monkeypatch, reference.play_round, "glm", "hpb0", tmp_path / "hpb0", ONE_USER, api_key="k")
++    kept, wiped = PrimeAgentLearner(**hpb), PrimeAgentLearner(**hpb0)
++    for system in (kept, wiped):
++        assert system.block_library and not system.program_library and system.end == "finish"
++        assert system.rules_page == paper.rules_page("c1")
++        assert "built from reusable building blocks" in system.library_rules()
++    assert not kept.stateless and wiped.stateless
++    assert json.loads((tmp_path / "hpb" / "driver.json").read_text())["harness"]["block_library"] is True
++    assert json.loads((tmp_path / "hpb0" / "driver.json").read_text())["stateless"]
++
++
++def test_the_library_ceilings_rows_are_hpl0_given_the_streams_primitives_and_play_from_a_driver_alone(tmp_path,
++                                                                                                    monkeypatch):
++    from types import SimpleNamespace as Namespace
++
++    from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
++    for row, module in (("hpl0d1", "stream_u1"), ("hpl0d4", "stream_u4")):
++        harness, _ = _played(monkeypatch, reference.play_round, "glm", row, tmp_path / row, ONE_USER, api_key="k")
++        system = PrimeAgentLearner(**harness)
++        assert system.primitives == module and system.program_library and system.stateless
++        assert system.rules_page == paper.rules_page("c1") and "A library of grid primitives" in system.primitives_note()
++        played = json.loads((tmp_path / row / "driver.json").read_text())
++        reference.cmd_driver(Namespace(player="glm", row=row, run_dir=str(tmp_path / f"{row}-alone")))
++        alone = json.loads((tmp_path / f"{row}-alone" / "driver.json").read_text())
++        # the plays-only run records what a stream of the row would, but its users mode, and that it has no stream
++        assert {k: v for k, v in alone.items() if k != "stream"} == {k: v for k, v in played.items() if k in alone}
++        assert alone["harness"]["primitives"] == module and alone["stream"].startswith("none")
++
++
+ def test_rows_ha_and_hpl0_are_the_papers_ablations(tmp_path, monkeypatch):
+     from continual_arc_baselines.systems.prime_agent import PrimeAgentLearner
+     ha, _ = _played(monkeypatch, reference.play_round, "qwen", "ha", tmp_path / "ha", ONE_USER, api_key="k")

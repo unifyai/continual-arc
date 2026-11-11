@@ -11,7 +11,9 @@
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
   <a href="https://continual-arc.unify.ai/leaderboard">Leaderboard</a> ·
   <a href="baselines">Baselines</a> ·
-  <a href="training">Training</a>
+  <a href="training">Training</a> ·
+  <a href="experiments">Experiments</a> ·
+  <a href="runs">Runs</a>
 </p>
 
 # Continual-ARC
@@ -40,6 +42,8 @@ The learners the paper evaluates, adapters for three agent harnesses among them,
 [`baselines/`](baselines), and the training of its trained rows is in [`training/`](training). The records of every
 run it reports, with the trajectories behind them, are plain JSON in git in [`runs/`](runs), and every task, figure,
 run and trajectory of the paper can be explored and replayed at [continual-arc.unify.ai](https://continual-arc.unify.ai).
+Every experiment the paper reports is listed in [`experiments/`](experiments) with the code and the command that ran
+it and where its runs are, and the paper's own source is in [`paper/`](paper).
 
 On GPT-6 Luna, a commercial model, the paper ran Prime Agent, Hermes Agent and OpenClaw through the stream
 with every learning mechanism they ship switched on, and again with everything they wrote deleted before every
@@ -474,7 +478,9 @@ src/continual_arc/
 docs/DESIGN.md   design rationale and decisions
 baselines/       the learners the paper evaluates, its harness adapters and the tracking proxy (baselines/README.md)
 training/        the training of the paper's trained rows on Qwen3.5-9B (training/README.md)
+experiments/     every experiment the paper reports: the code and command that ran it, and its runs (experiments/README.md)
 runs/            the records and trajectories of every run the paper reports (runs/README.md)
+paper/           the paper's LaTeX source, as posted to arXiv (paper/README.md)
 ```
 
 ## Submitting a result
@@ -484,7 +490,7 @@ is a learning method on a student model and, if it has one, a teacher model, pla
 shares saved. A result on the public stream is a claim until we have rerun its code on the held-out rules,
 which nobody outside unify has seen, so nothing goes on the leaderboard until your learner is verified ([verified results](#verified-results)).
 
-1. Run your learner on the track's canonical protocol at seed 0 (`arc1`): its stream with
+1. Run your learner on the track's canonical protocol at seed 0 (`arc1`, `arc2` or `arc3`): its stream with
    `continual-arc run`, then the two frozen tests from where the stream left it, and your learner reset: on the same
    stream, wiped before every instance (`schedule make --reset-each`, [the share learned](#the-share-learned)), and
    before each instance of the tests ([the two frozen tests](#the-two-frozen-tests)). To drive an agent harness, start

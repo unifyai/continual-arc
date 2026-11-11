@@ -1,0 +1,197 @@
+diff --git a/src/continual_arc_baselines/systems/base.py b/src/continual_arc_baselines/systems/base.py
+index 1f2ba90..d240751 100644
+--- a/src/continual_arc_baselines/systems/base.py
++++ b/src/continual_arc_baselines/systems/base.py
+@@ -99,7 +99,7 @@ class SystemLearner(BaseLearner):
+                  max_cost: float = 16.0, max_restarts: int = 2, session_per_instance: bool = True, instance_gap_s: float = 0.0,
+                  stateless: bool = False, storage_turn: bool = False, end: str = "", empty_reply: str = "reprompt",
+                  archive_wipes: bool = False, ask_to_store: bool = False, program_library: bool = False,
+-                 rules_page: str = ""):
++                 block_library: bool = False, rules_page: str = ""):
+         self.max_reprompts = max_reprompts
+         self.refine_every = refine_every
+         # How an instance ends. Off: a closing turn with the verdict and "no action is needed" (the harness rows since 23
+@@ -127,10 +127,15 @@ class SystemLearner(BaseLearner):
+         # workspace, the program checked on the kept pairs and run first when the task returns, every program
+         # checked on every pair before a submission, and a memory naming the task's files), and the verdict is followed
+         # by the ask to save them (library_ask). A stateless row gets the same messages, so that H-E0 differs from H-E
+-        # only in what survives.
+-        if program_library and (self.end != "finish" or ask_to_store):
+-            raise ValueError("program_library is an addition to the finish protocol, and not beside ask_to_store")
++        # only in what survives. Building-block guidance (block_library) is the same procedure with the library kept as
++        # building blocks (protocol.BLOCK_LIBRARY_RULES: small, general functions in lib.py that every task's program
++        # composes, moved there after each verdict and every kept program checked again), in place of it.
++        if (program_library or block_library) and (self.end != "finish" or ask_to_store):
++            raise ValueError("a library procedure is an addition to the finish protocol, and not beside ask_to_store")
++        if program_library and block_library:
++            raise ValueError("program_library and block_library are two procedures for one library: a row has one")
+         self.program_library = program_library
++        self.block_library = block_library
+         # A page of playing rules the system is told, such as the trained rows' labeller's c1 for the rows given expert
+         # guidance: shown after the storage note and before the procedure at the start of every conversation, and in
+         # none of the asks that quote the storage note, so that a row is told it once an instance.
+@@ -256,7 +261,7 @@ class SystemLearner(BaseLearner):
+                 "session_per_instance": self.session_per_instance, "instance_gap_s": self.instance_gap_s, "stateless": self.stateless, "storage_turn": self.storage_turn,
+                 "end": self.end, "empty_reply": self.empty_reply, "archive_wipes": self.archive_wipes,
+                 "ask_to_store": self.ask_to_store, "program_library": self.program_library,
+-                "rules_page": bool(self.rules_page)}
++                "block_library": self.block_library, "rules_page": bool(self.rules_page)}
+ 
+     def system_usage(self) -> dict[str, float]:
+         """What the system itself reports about its usage (secondary to the proxy)."""
+@@ -424,7 +429,7 @@ class SystemLearner(BaseLearner):
+         self._begin_instance(obs)
+         pending = self.transcript.take()
+         finish = self.end == "finish"
+-        procedure = protocol.PROGRAM_LIBRARY_RULES.format(programs=self.programs_dir()) if self.program_library else ""
++        procedure = self.library_rules()
+         note = "\n\n".join(x for x in (self.storage_note, self.rules_page, procedure) if x)
+         extra = {"finish": True, "rules_note": note} if finish else {}
+ 
+@@ -495,11 +500,22 @@ class SystemLearner(BaseLearner):
+         return {"program": f"{self.programs_dir()}/{task_id}.py", "pairs": f"{self.programs_dir()}/{task_id}.json",
+                 "task": task_id}
+ 
++    def library_rules(self) -> str:
++        """The library procedure a row given guidance is told at the start of every conversation, with the library's
++        folder: the expert guidance's (protocol.PROGRAM_LIBRARY_RULES) or the building-block guidance's
++        (protocol.BLOCK_LIBRARY_RULES, then its examples, protocol.BLOCK_LIBRARY_EXAMPLES); empty for a row given
++        neither."""
++        if self.block_library:
++            return protocol.BLOCK_LIBRARY_RULES.format(programs=self.programs_dir()) + "\n\n" + protocol.BLOCK_LIBRARY_EXAMPLES
++        return protocol.PROGRAM_LIBRARY_RULES.format(programs=self.programs_dir()) if self.program_library else ""
++
+     def library_ask(self, task_id: str) -> str:
+-        """The ask after each verdict for a row given expert guidance (protocol.PROGRAM_LIBRARY_ASK): save this task's
+-        pairs, its program and its memory."""
+-        return protocol.PROGRAM_LIBRARY_ASK.format(note=f" {self.storage_note}" if self.storage_note else "",
+-                                                   **self.library_files(task_id))
++        """The ask after each verdict for a row given guidance: save this task's pairs, its program and its memory
++        (protocol.PROGRAM_LIBRARY_ASK), or with building-block guidance also move what another task could reuse into
++        lib.py and check every kept program again (protocol.BLOCK_LIBRARY_ASK)."""
++        ask = protocol.BLOCK_LIBRARY_ASK if self.block_library else protocol.PROGRAM_LIBRARY_ASK
++        return ask.format(note=f" {self.storage_note}" if self.storage_note else "", programs=self.programs_dir(),
++                          lib=f"{self.programs_dir()}/lib.py", **self.library_files(task_id))
+ 
+     def teacher_lesson(self, task_id: str) -> str:
+         """The teacher's page for ``task_id`` (protocol.TEACHER_LIBRARY_LESSON), for a teacher keeping this harness's
+@@ -561,7 +577,7 @@ class SystemLearner(BaseLearner):
+         if self.ask_to_store and not self.stateless:
+             message += "\n\n" + protocol.ASK_TO_STORE.format(note=f" {self.storage_note}" if self.storage_note else "")
+             self.stats["store_asks"] += 1
+-        if self.program_library:
++        if self.program_library or self.block_library:
+             message += "\n\n" + self.library_ask(obs.task_id)
+             self.stats["library_asks"] += 1
+         try:
+diff --git a/src/continual_arc_baselines/systems/protocol.py b/src/continual_arc_baselines/systems/protocol.py
+index 48ff955..a921ce0 100644
+--- a/src/continual_arc_baselines/systems/protocol.py
++++ b/src/continual_arc_baselines/systems/protocol.py
+@@ -742,6 +742,106 @@ PROGRAM_LIBRARY_ASK = (
+     '{{"action": "finish"}}.'
+ )
+ 
++# Building-block guidance, the rows given it (a system's block_library; the author, 8 Nov 2026: "a new type of expert that
++# encourages compositional storage of the functions"): the expert guidance with its library kept as building blocks, so
++# that a task never met might be solved by composing what earlier tasks taught. lib.py holds small, general functions
++# shared by every task's program, each program is a short composition of them, every verdict on a working program is
++# followed by moving what another task could reuse into lib.py and checking every kept program again with lib.py as
++# saved, and a task with no working program starts from lib.py's index. The rest is PROGRAM_LIBRARY_RULES' word for word:
++# the pairs kept and counted as demonstrations, the kept program run first when the task returns, every program checked
++# on every pair before a submission, and a memory naming the task's files. The kind of function lib.py keeps is shown by
++# BLOCK_LIBRARY_EXAMPLES, after the procedure. {programs}: the folder, which only a stateless row wipes.
++BLOCK_LIBRARY_RULES = (
++    "How to work, in every instance (follow this exactly): keep a library in the folder {programs}, built from reusable "
++    "building blocks. {programs}/lib.py holds small, general grid functions that the programs of many tasks can reuse, "
++    "including tasks not yet met, each with a one-line docstring saying what it does, and each built where it can from "
++    "lib.py's own lower-level functions; the examples at the end show the kind. Each task has two files, named for its "
++    "task id: {programs}/<task id>.py, which "
++    "imports from lib.py and defines transform(grid), which takes an input grid as a list of lists of integers and "
++    "returns the output grid, as a short composition of lib.py's functions; and {programs}/<task id>.json, every "
++    "demonstration pair received for the task, as a list of {{\"input\": grid, \"output\": grid}}. Kept pairs count as "
++    "demonstration pairs you have, and reading them is free.\n"
++    "1. When an instance starts, look for the task's memory (step 4) among those you are shown, and if there is none, for "
++    "its files in the folder. If the task has kept pairs, load them; if it has a program, run it on every kept pair, and "
++    "if it reproduces them all, run it on the test input and submit the result before anything else.\n"
++    "2. Otherwise, or if that answer was wrong, first print lib.py's index, the name and docstring of each of its "
++    "functions. Request demonstration pairs as you judge necessary, write or fix transform, trying compositions of "
++    "lib.py's functions before writing new code, and run it on every pair you have, kept and new, until it reproduces "
++    "all of them; then submit its output for the test input. Checking a program on the pairs is free.\n"
++    "3. Submit only grids that your program produced.\n"
++    "4. After the verdict, add every pair you received to the task's .json file. If your program reproduced all the "
++    "pairs, move every part of it that another task could reuse into lib.py, under a general name with its docstring, "
++    "reusing or extending a function lib.py already has (a new parameter with a default) rather than adding a "
++    "near-copy, and save the program, now a short composition of lib.py's functions, to the task's .py file, replacing "
++    "any older version; then run every kept program on its kept pairs with lib.py as saved, and fix whatever the change "
++    "broke. Keep one memory for the task that lasts between instances, named for its task id, saying where its two "
++    "files are and whether its program reproduces every kept pair. Then finish."
++)
++
++# What the building-block guidance shows of the kind of function lib.py keeps, after its procedure (the author, 8 Nov 2026: "if
++# we could actually find some primitives among the 160 in the rearc generators that are not used in any of those ...
++# tasks, then we could even include some examples in context of the kind of primitives that are worth storing"). Six of
++# the Re-ARC DSL's primitives that no rule of the one-user stream's 25 tasks uses (their verifiers in Re-ARC's
++# verifiers.py), written for grids as lists of rows, and the programs of two training tasks in no user's stream, 7468f01a
++# and b91ae062, each a composition of them that reproduces every pair ARC gives the task (continual-arc-training's
++# blocks/examples.py checks all of it). A row and its reset are shown the same examples, so a share saved against the
++# reset is what the stream added to them. Not a format string: shown as written.
++BLOCK_LIBRARY_EXAMPLES = '''Examples of the kind of functions lib.py keeps, and of two other tasks' programs composed from them:
++
++```python
++def compress(grid):
++    """The grid without its frontiers: every row and every column that is one color throughout."""
++    rows = {i for i, row in enumerate(grid) if len(set(row)) == 1}
++    cols = {j for j in range(len(grid[0])) if len({row[j] for row in grid}) == 1}
++    return [[v for j, v in enumerate(row) if j not in cols] for i, row in enumerate(grid) if i not in rows]
++
++def upscale(grid, factor):
++    """Each cell as a factor x factor block of its color."""
++    return [[v for v in row for _ in range(factor)] for row in grid for _ in range(factor)]
++
++def crop(grid, top, left, height, width):
++    """The height x width subgrid whose top-left cell is (top, left)."""
++    return [row[left:left + width] for row in grid[top:top + height]]
++
++def trim(grid):
++    """The grid without its outermost rows and columns."""
++    return [row[1:-1] for row in grid[1:-1]]
++
++def replace(grid, old, new):
++    """The grid with every cell of color old recolored new."""
++    return [[new if v == old else v for v in row] for row in grid]
++
++def hperiod(grid):
++    """The smallest p such that every row repeats itself every p cells: the grid's width if none is smaller."""
++    w = len(grid[0])
++    return next(p for p in range(1, w + 1) if all(row[j] == row[j - p] for row in grid for j in range(p, w)))
++
++# one task's program: the one shape, cut out by dropping every one-color row and column, mirrored left to right
++from lib import compress
++def transform(grid):
++    return [row[::-1] for row in compress(grid)]
++
++# another's: every cell as a block whose side is the number of colors other than the background
++from lib import upscale
++def transform(grid):
++    return upscale(grid, len({v for row in grid for v in row}) - 1)
++```'''
++
++# The ask after each verdict for a row given building-block guidance: the procedure's step 4 for this task's own files.
++# Unlike PROGRAM_LIBRARY_ASK it asks for no single Python call, since moving parts into lib.py is followed by checking
++# every kept program and fixing what broke. {lib}: lib.py's path, named in full once; the rest as PROGRAM_LIBRARY_ASK's.
++BLOCK_LIBRARY_ASK = (
++    "Now save this task's library.{note} Add every demonstration pair you received to {pairs}. If a program of yours "
++    "reproduced every pair, move every part of it that another task could reuse into {lib}, under a general name with a "
++    "one-line docstring, reusing or extending a function lib.py already has rather than adding a near-copy; save to "
++    "{program} the task's transform(grid), now a short composition of lib.py's functions, replacing any older version; "
++    "then run every kept program in the folder on its kept pairs with lib.py as saved, and fix whatever the change "
++    "broke. If no program of yours reproduced them all, leave the task's program and lib.py as they were. Keep the "
++    "task's memory, named {task}, saying where its two files are and whether its program reproduces every kept pair. "
++    "Then reply with "
++    '{{"action": "finish"}}.'
++)
++
+ # The teacher's page, for the rows whose teacher keeps the student's notes and is given expert guidance (H-T-E, H-E-T-E):
+ # the same method written for a teacher, who must leave what it keeps where the student is shown it when each instance
+ # starts, since a student never told of the folder never opens it (the author, 27 Oct 2026), and who may keep anything else it
