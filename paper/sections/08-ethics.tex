@@ -1,0 +1,10 @@
+\section*{Ethics statement}
+\label{sec:ethics}
+
+This work involves no human subjects and no personal data. Every public task of the benchmark comes from the public ARC-AGI tasks and games or from the Re-ARC and ARC-GEN generators, which the software fetches from their sources and does not redistribute. ARC-AGI-3 levels are charged against the human baselines that ARC Prize publishes. The rules of the private set are our own, and we do not release them (Appendix~\ref{app:heldout}).
+
+The harnesses we evaluate write and run their own code, and one reached the evaluation itself in an early run. Section~\ref{sec:baselines} and Appendix~\ref{app:harness} describe how we confine each one, and we recommend the same to anyone running agents on the benchmark.
+
+Our findings are negative for three publicly available harnesses, none of them from \leadauthor's employer, which builds agent systems. We run each as its authors ship it, with its persistence switched on, and we trace each shortfall to a specific step in its design (Appendix~\ref{app:persist}). Appendix~\ref{app:harness} gives each one's configuration and reports that prime-agent's Python skills, \texttt{refine} among them, did not load in our runs. The adapters are released with the code, so that the harnesses' authors can check how their systems were run.
+
+Continual learning in deployment also raises questions of privacy that this benchmark does not address. In the collective regime, one system learns from many users at once, and what it keeps from one user could reach another. Our streams are abstract puzzles with no user data, and the benchmark does not measure leakage between users.

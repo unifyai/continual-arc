@@ -1,0 +1,57 @@
+
+Every learner on the first two tracks is shown the grid protocol's rules below once per session, and each instance opens with a message like the one after them. Both are reproduced from the benchmark's repository, the same at tag \texttt{v0.3.0}, commit \texttt{b2fd5a9}, which GPT-6 Luna's methods read, and at tag \texttt{v0.5.0}, commit \texttt{fa4b33e}, which the rest read, with lines longer than the page wrapped at spaces; placeholders in braces are filled at run time with the values named in Section~\ref{sec:benchmark}. Every other text a learner is shown, from the replies to its actions to what each method adds to the rules and the third track's protocol, is in the code\ released with the paper, in the files of Table~\ref{tab:prompts}.
+
+\paragraph{Grid protocol: rules shown once per session (demo cost 1)}
+\begin{scriptsize}\begin{verbatim}
+You are being evaluated on Continual-ARC, a lifelong stream of ARC-style grid puzzles.
+Each puzzle instance has a task id and a test input grid. Tasks recur across the
+stream with fresh inputs. Each instance is a separate conversation: the next one
+starts without this one's messages.
+
+On every message you must choose exactly one action and put it as a JSON object
+on the last line of your reply:
+  {"action": "submit", "grid": [[0, 1, 2], [3, 4, 5]]}   submit an output grid
+  {"action": "request_demos"}                            ask for one more demonstration pair
+    for this task
+  {"action": "finish"}                                   end the instance, once it is over
+Grids are lists of rows; cells are integers 0-9; dimensions are 1-30.
+
+Each demo request returns one more input-output pair of the task, up to the demo cap shown
+with the input.
+
+Scoring: an instance you solve costs 1 for each wrong submission and 1 for
+each demo request. An instance is over when a submission is correct or when the attempt
+cap is reached, and one that ends unsolved costs the whole budget, {max_cost}, however
+many submissions and demo requests it used. Feedback on a submission is only
+correct/incorrect. There is no way to abandon an instance, and finish is refused until
+the instance is over. Each instance is scored on its own, and lower cost is better.
+\end{verbatim}\end{scriptsize}
+
+\paragraph{Grid protocol: an instance's first message, after the rules (an example)}
+\begin{scriptsize}\begin{verbatim}
+New instance. Task id: task-3f2a9c1e
+Test input (2x2):
+2 0
+0 2
+Wrong attempts used: 0/8. Demo requests used: 0/8.
+Reply with exactly one action JSON on the last line.
+\end{verbatim}\end{scriptsize}
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\begin{tabular}{@{}lp{0.6\linewidth}@{}}
+\toprule
+file & the texts it holds \\
+\midrule
+\texttt{systems/protocol.py} & the grid protocol's other messages: the replies to an answer or a request, the verdicts, the re-prompts and the budget notice; the ask after every verdict of methods QA, GA and \mbox{H-A}; the expert guidance of methods QE, GE, \mbox{H-E}, \mbox{H-E\textsubscript{0}} and QETE and its asks \\
+\texttt{systems/prime\_agent.py} & prime-agent's one addition to the rules, its fact about its store \\
+\texttt{systems/bare.py} & the demo-cache floor's cached pairs, and the program library's addition to the rules, its kept program, its checks and its re-prompt \\
+\texttt{systems/arc3\_protocol.py} & the third track's protocol: its rules, messages, feedback and re-prompt \\
+\texttt{references.py} & c1, the page of playing rules that DAgger's teacher reads \\
+\texttt{oracle.py} & the rules and the note with which DAgger's teacher labels the student's calls \\
+\bottomrule
+\end{tabular}
+\caption{Where the benchmark's code keeps every other text a learner is shown: the first four files under \texttt{baselines/src/continual\_arc\_baselines/} and the rest under \texttt{training/src/continual\_arc\_training/}, at tag \texttt{v0.3.0} for GPT-6 Luna's methods and \texttt{v0.5.0} for the rest, which alone has DAgger's teacher and the third track.}
+\label{tab:prompts}
+\end{table}

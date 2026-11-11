@@ -1,0 +1,49 @@
+\section{Schedule generator details}
+\label{app:schedules}
+
+We generate every schedule deterministically from the configuration name and the seed, and a track is the seed-0 stream of its configuration (Section~\ref{sec:stream}), whose process this appendix gives. The same process, set otherwise, also serves the stream's visits in two other orders, which only a side experiment plays (below); they are not part of the benchmark. Since we derive instance seeds by hashing the schedule seed, the phase and the slot index, slot $t$ carries the same instance seed in every order and always yields the same instance. We also ensure that the test input of a slot never appears among the demonstrations served for it.
+
+\paragraph{The stream process.}
+Algorithm~\ref{alg:stream} generates every stream, keeping up to $n_c$ tasks active and, at each step, sampling one active task uniformly and emitting a slot for it. A task becomes active for a spell of $\beta$ instances, and when the spell is spent it rests for $\rho$ instances before it is ready to be re-activated, unless $\rho = \infty$, in which case it is finished. Never-seen tasks arrive every $\alpha$ instances and take priority over waiting tasks for the next free place. When no task is ready and no arrival is due, we wake the soonest-waking dormant task early so that the stream never idles, and we pull unseen tasks ahead of schedule only when no other task exists. Every task has a supply of $s$ instances, and a spell never exceeds what the task has left. A task whose supply is spent is finished and does not rest. Every spell, rest and inter-arrival time is a fresh draw from the distribution that the order sets for it, and all draws come from one generator seeded by the schedule seed and the order's name.
+
+The stream and the side experiment's two orders are settings of $(n_c, \beta, \rho, \alpha)$, the parameters of Equation~\ref{eq:stream}:
+\begin{itemize}
+  \item \textbf{one task at a time} (sequential): $n_c = 1$, $\beta$ is the constant $L / n$ (the stream length over the number of tasks), $\rho = \infty$ and $\alpha$ is the constant 0, so the process reduces to the tasks in a shuffled order, each for $L/n$ consecutive instances.
+  \item \textbf{the stream} (workstreams): $n_c$ from Table~\ref{tab:configs}, $\beta = \max(1, \lfloor \mathrm{Exp}(b) + \tfrac12 \rfloor)$, $\rho = \max(1, \lfloor \mathrm{LogNormal}(\ln m, \sigma) + \tfrac12 \rfloor)$ and $\alpha \sim \mathrm{Exp}(a)$.
+  \item \textbf{fully shuffled} (random): $n_c = n$, $\beta = \infty$ and $\alpha = 0$ ($\rho$ is never drawn), so every task is introduced at $t = 0$ and stays until its supply is spent, and each step is a uniform draw over the tasks with instances left.
+\end{itemize}
+Figure~\ref{fig:modes} shows the stream of the ARC-AGI-1 track, and the code and the records name its order \texttt{workstreams}.
+
+\begin{algorithm}[h]
+\caption{The stream. Parameters: concurrency $n_c$; spell $\beta$, rest $\rho$ (possibly $\infty$) and inter-arrival time $\alpha$, each a fresh draw at every use; supply $s$ per task; length $L$.}
+\label{alg:stream}
+\begin{algorithmic}[1]
+\STATE $\mathcal{Q} \gets$ shuffled task list (never seen); $s_\tau \gets s$ for every task $\tau$; $\mathcal{A} \gets \varnothing$ (active, with remaining spell); $\mathcal{D} \gets \varnothing$ (dormant, with wake step); $\mathcal{W} \gets \varnothing$ (ready); $t_{\mathrm{next}} \gets 0$
+\FOR{$t = 0, \dots, L-1$}
+  \STATE move every task in $\mathcal{D}$ with wake step $\le t$ to $\mathcal{W}$
+  \WHILE{$|\mathcal{A}| < n_c$}
+    \IF{$\mathcal{Q} \ne \varnothing$ and $t \ge t_{\mathrm{next}}$} \STATE $\tau \gets \operatorname{pop}(\mathcal{Q})$; \ $t_{\mathrm{next}} \gets t + \alpha$
+    \ELSIF{$\mathcal{W} \ne \varnothing$} \STATE $\tau \gets$ uniform draw from $\mathcal{W}$, removed
+    \ELSIF{$\mathcal{D} \ne \varnothing$} \STATE $\tau \gets$ the task in $\mathcal{D}$ with the earliest wake step, removed
+    \ELSIF{$\mathcal{Q} \ne \varnothing$} \STATE $\tau \gets \operatorname{pop}(\mathcal{Q})$
+    \ELSE \STATE \textbf{break}
+    \ENDIF
+    \STATE $\mathcal{A}[\tau] \gets \min(\beta, s_\tau)$
+  \ENDWHILE
+  \STATE $\tau \gets$ uniform draw from $\mathcal{A}$; \ emit slot $(\tau, \text{seed}(t))$; \ $\mathcal{A}[\tau] \gets \mathcal{A}[\tau] - 1$; \ $s_\tau \gets s_\tau - 1$
+  \IF{$\mathcal{A}[\tau] = 0$} \STATE remove $\tau$ from $\mathcal{A}$; \ \textbf{if} $\rho < \infty$ and $s_\tau > 0$ \textbf{then} $\mathcal{D}[\tau] \gets t + 1 + \rho$
+  \ENDIF
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+On the ARC-AGI-1 track, a learner has met 14 tasks by step 50 and all 25 by step 100, and the gap before a re-exposure has a median of 5 instances, a 90th percentile of 49 and a maximum of 141.
+
+\paragraph{Users and rounds.}
+A run sets a number of users $n_u \in \{1, 2, 4\}$. With $n_u = 1$, the schedule is one stream and every slot forms a round. With $n_u > 1$, every user has a separate schedule, drawn by the same process with a separate seed over tasks of their own and the held-out tasks drawn at the configuration's seed. User $k$ plays block $k$ of 25 from a nested order of 100 tasks: the track's 25 sorted by id, then 75 more from a seeded draw of the rest, sorted. User 0, which keeps the configuration's seed and its tasks, meets exactly the individual stream at that seed. Round $r$ serves slot $r$ of every user at once, and the learner acts on every user's instance with the state that the round began with. That state is one for all users, a harness's store included: every instance of a round starts from it, and what each instance writes is merged into it in user order before the next round begins, by a rule for files and databases that two users changed alike which the benchmark's code gives. Each instance runs from its first action to its verdict at its user's pace, and the round ends when every user's instance has. We compute the exposure index and gap of a slot over rounds and over the whole team. Every record also carries the count for its user. At $n_u = 1$, both are the definitions of Appendix~\ref{app:bench}, unchanged.
+
+\paragraph{The two tests and their references.}
+After the stream, each test is one round whose every slot is a user of its own: the seen test serves four fresh instances of each stream task at one user, and at two and four users the same 100 spread evenly over every user's tasks (two of each of 50 at two users, one of each of 100 at four), at seeds the stream did not use, with instance $i$ a task of user $i \bmod n_u$. The held-out test serves one instance of each held-out task, the instances user 0 would meet, at any number of users. Every user starts from the learner's state at the end of the stream, so the round serves 100 users at once and nothing reaches one test instance from another. A learner that cannot serve them all at once plays the test narrower, with the reset flag on every slot restoring its end state before the instance. The learner reset before each instance, its reference, plays the same slots from an empty state, and so does the bare model (Appendix~\ref{app:heldout}).
+
+\paragraph{A side experiment on the order.}\label{app:orders}
+We were curious whether the order in which the stream serves its visits changes what the harnesses do, so, outside the benchmark, GPT-6 Luna's systems also played the same visits one task at a time and fully shuffled (above). The trends were the same in every order and at every effort: the demo-cache floor uses less of the budget than the stateless floor, each persistent harness uses about what it uses wiped, and the program library uses the least, 6.2 to 26.1\%. Since the three orders serve the same visits, a comparison in these appendices that needs more slots pools them.

@@ -1,0 +1,36 @@
+\begin{tabular}{lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}l}
+\toprule
+method & \multicolumn{6}{c}{share saved on the seen test} & \multicolumn{6}{c}{share saved on the held-out test} \\
+\cmidrule(lr){2-7}\cmidrule(lr){8-13}
+ GPT-6 Luna, effort & \multicolumn{2}{c}{low} & \multicolumn{2}{c}{medium} & \multicolumn{2}{c}{high} & \multicolumn{2}{c}{low} & \multicolumn{2}{c}{medium} & \multicolumn{2}{c}{high} \\
+\midrule
+\multicolumn{13}{l}{\emph{floors}} \\
+stateless & 0.00 & {\scriptsize [-0.07, +0.06]} & +0.12 & {\scriptsize [+0.01, +0.24]} & -0.04 & {\scriptsize [-0.14, +0.05]} & +0.02 & {\scriptsize [-0.03, +0.07]} & -0.04 & {\scriptsize [-0.15, +0.08]} & -0.12 & {\scriptsize [-0.23, -0.02]} \\
+demo-cache & +0.21 & {\scriptsize [+0.08, +0.36]} & +0.34 & {\scriptsize [+0.22, +0.48]} & +0.51 & {\scriptsize [+0.38, +0.67]} & +0.03 & {\scriptsize [0.00, +0.07]} & 0.00 & {\scriptsize [-0.07, +0.07]} & -0.01 & {\scriptsize [-0.10, +0.07]} \\
+\midrule
+\multicolumn{13}{l}{\emph{program library}} \\
+PL\textsubscript{0} & +0.02 & {\scriptsize [-0.06, +0.09]} & -0.04 & {\scriptsize [-0.14, +0.05]} & +0.05 & {\scriptsize [-0.05, +0.13]} & +0.07 & {\scriptsize [-0.03, +0.15]} & +0.05 & {\scriptsize [-0.08, +0.16]} & -0.02 & {\scriptsize [-0.11, +0.05]} \\
+PL & \textbf{+0.54} & {\scriptsize [+0.35, +0.78]} & \textbf{+0.77} & {\scriptsize [+0.54, +0.97]} & \textbf{+0.73} & {\scriptsize [+0.47, +0.98]} & -0.06 & {\scriptsize [-0.12, 0.00]} & -0.06 & {\scriptsize [-0.15, +0.04]} & -0.02 & {\scriptsize [-0.08, +0.05]} \\
+\midrule
+\multicolumn{13}{l}{\emph{hermes-agent}} \\
+H\textsubscript{0} & +0.04 & {\scriptsize [-0.05, +0.14]} & +0.01 & {\scriptsize [-0.07, +0.09]} & +0.01 & {\scriptsize [-0.12, +0.12]} & 0.00 & {\scriptsize [-0.08, +0.08]} & -0.17 & {\scriptsize [-0.35, -0.03]} & -0.07 & {\scriptsize [-0.20, +0.06]} \\
+H-E\textsubscript{0} & +0.03 & {\scriptsize [-0.08, +0.13]} & -0.03 & {\scriptsize [-0.12, +0.06]} & +0.03 & {\scriptsize [-0.09, +0.13]} & +0.03 & {\scriptsize [-0.06, +0.12]} & +0.02 & {\scriptsize [-0.10, +0.13]} & 0.00 & {\scriptsize [-0.16, +0.13]} \\
+H & +0.03 & {\scriptsize [-0.09, +0.15]} & -0.07 & {\scriptsize [-0.22, +0.05]} & +0.03 & {\scriptsize [-0.05, +0.10]} & -0.02 & {\scriptsize [-0.09, +0.04]} & -0.21 & {\scriptsize [-0.32, -0.10]} & -0.01 & {\scriptsize [-0.09, +0.06]} \\
+H-A & -0.04 & {\scriptsize [-0.22, +0.13]} & +0.18 & {\scriptsize [+0.05, +0.35]} & +0.18 & {\scriptsize [-0.01, +0.39]} & -0.25 & {\scriptsize [-0.34, -0.17]} & -0.09 & {\scriptsize [-0.18, 0.00]} & -0.01 & {\scriptsize [-0.11, +0.07]} \\
+H-E & +0.30 & {\scriptsize [+0.14, +0.49]} & +0.52 & {\scriptsize [+0.36, +0.71]} & +0.62 & {\scriptsize [+0.45, +0.81]} & -0.09 & {\scriptsize [-0.16, -0.03]} & \textbf{+0.11} & {\scriptsize [+0.01, +0.19]} & \textbf{+0.13} & {\scriptsize [+0.04, +0.21]} \\
+\midrule
+\multicolumn{13}{l}{\emph{openclaw}} \\
+H\textsubscript{0} & +0.01 & {\scriptsize [-0.08, +0.09]} & -0.06 & {\scriptsize [-0.15, +0.01]} & 0.00 & {\scriptsize [-0.10, +0.10]} & -0.04 & {\scriptsize [-0.12, +0.04]} & -0.11 & {\scriptsize [-0.27, +0.02]} & +0.02 & {\scriptsize [-0.11, +0.14]} \\
+H-E\textsubscript{0} & +0.06 & {\scriptsize [-0.02, +0.14]} & +0.01 & {\scriptsize [-0.12, +0.13]} & 0.00 & {\scriptsize [-0.08, +0.08]} & -0.02 & {\scriptsize [-0.11, +0.07]} & -0.02 & {\scriptsize [-0.14, +0.08]} & +0.06 & {\scriptsize [-0.05, +0.15]} \\
+H & -0.04 & {\scriptsize [-0.13, +0.03]} & +0.02 & {\scriptsize [-0.09, +0.12]} & -0.04 & {\scriptsize [-0.12, +0.03]} & +0.01 & {\scriptsize [-0.05, +0.07]} & -0.06 & {\scriptsize [-0.17, +0.04]} & -0.05 & {\scriptsize [-0.13, +0.03]} \\
+H-A & -0.11 & {\scriptsize [-0.21, -0.02]} & +0.04 & {\scriptsize [-0.08, +0.18]} & +0.07 & {\scriptsize [-0.02, +0.17]} & -0.07 & {\scriptsize [-0.14, 0.00]} & 0.00 & {\scriptsize [-0.10, +0.10]} & -0.14 & {\scriptsize [-0.23, -0.04]} \\
+H-E & +0.28 & {\scriptsize [+0.12, +0.48]} & +0.58 & {\scriptsize [+0.38, +0.78]} & +0.64 & {\scriptsize [+0.44, +0.82]} & -0.06 & {\scriptsize [-0.14, 0.00]} & +0.02 & {\scriptsize [-0.07, +0.11]} & -0.02 & {\scriptsize [-0.11, +0.06]} \\
+\midrule
+\multicolumn{13}{l}{\emph{prime-agent}} \\
+H\textsubscript{0} & -0.05 & {\scriptsize [-0.17, +0.05]} & +0.02 & {\scriptsize [-0.11, +0.14]} & +0.02 & {\scriptsize [-0.14, +0.14]} & +0.03 & {\scriptsize [-0.07, +0.12]} & -0.05 & {\scriptsize [-0.22, +0.09]} & -0.08 & {\scriptsize [-0.21, +0.05]} \\
+H-E\textsubscript{0} & -0.03 & {\scriptsize [-0.13, +0.06]} & +0.13 & {\scriptsize [0.00, +0.24]} & +0.07 & {\scriptsize [-0.01, +0.15]} & +0.04 & {\scriptsize [-0.04, +0.12]} & -0.01 & {\scriptsize [-0.15, +0.11]} & -0.05 & {\scriptsize [-0.23, +0.10]} \\
+H & -0.02 & {\scriptsize [-0.09, +0.05]} & +0.06 & {\scriptsize [-0.03, +0.14]} & -0.05 & {\scriptsize [-0.17, +0.04]} & 0.00 & {\scriptsize [-0.05, +0.06]} & -0.03 & {\scriptsize [-0.15, +0.07]} & +0.06 & {\scriptsize [-0.05, +0.14]} \\
+H-A & +0.19 & {\scriptsize [+0.08, +0.35]} & +0.37 & {\scriptsize [+0.27, +0.49]} & +0.42 & {\scriptsize [+0.29, +0.55]} & +0.01 & {\scriptsize [-0.05, +0.07]} & +0.05 & {\scriptsize [-0.06, +0.15]} & +0.12 & {\scriptsize [+0.03, +0.21]} \\
+H-E & +0.35 & {\scriptsize [+0.17, +0.58]} & +0.57 & {\scriptsize [+0.34, +0.80]} & +0.72 & {\scriptsize [+0.63, +0.82]} & +0.02 & {\scriptsize [-0.05, +0.08]} & 0.00 & {\scriptsize [-0.10, +0.08]} & +0.05 & {\scriptsize [-0.03, +0.12]} \\
+\bottomrule
+\end{tabular}

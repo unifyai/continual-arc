@@ -1,0 +1,75 @@
+\section{Related work: extended table}
+\label{app:related}
+
+In Table~\ref{tab:related-full}, we place the benchmarks and methods closest to this one, out of those we screened, against the properties that this benchmark combines.  Other benchmarks cover aspects that ours does not, such as drift in real domains \citep{lomonaco2017core50,lin2022clear}, natural-language feedback \citep{ai2025memorybench} and side effects on general ability \citep{wang2023trace}.
+
+\begin{sidewaystable}[p]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\textheight}
+\begin{tabular}{llllllll}
+\toprule
+benchmark & domain & instances & recurrence & growth & feedback & learners & score \\
+\midrule
+\multicolumn{8}{l}{\emph{Supervised continual learning}} \\
+Permuted/Split MNIST \citep{goodfellow2013empirical,zenke2017continual} & image classes & fixed & none & no & labels & W & accuracy \\
+GEM \citep{lopezpaz2017gradient} & image classes & fixed & none & no & labels & W & ACC, BWT, FWT \\
+A-GEM \citep{chaudhry2019efficient} & image classes & fixed & none & no & labels & W & accuracy, forgetting, LCA \\
+CTrL \citep{veniat2021efficient} & image streams & fixed & one revisit at end & no & labels & W & accuracy, transfer \\
+OSAKA \citep{caccia2020online} & few-shot classes & fixed pools & hidden revisits & new tasks & labels after & W & cumulative online acc. \\
+CIR \citep{hemati2023class,hemati2025repetition} & image classes & generated streams & class repetition & classes & labels & W & average accuracy \\
+CORe50 \citep{lomonaco2017core50} & objects (video) & fixed & sessions & classes & labels & W & accuracy curve \\
+CLEAR \citep{lin2022clear} & temporal images & fixed & none & no & labels & W & in/next-domain acc. \\
+NEVIS'22 \citep{bornschein2022nevis} & 106 vision tasks & fixed & none & yes (chronological) & labels & any & accuracy vs compute \\
+Loss of plasticity \citep{dohare2024loss} & thousands of tasks & fixed & none & unbounded & labels, reward & W & online accuracy \\
+\midrule
+\multicolumn{8}{l}{\emph{Continual RL and generated environments}} \\
+Continual World \citep{wolczyk2021continual} & manipulation & random init & second pass (CW20) & no & dense reward & W & perf., forgetting, transfer \\
+CORA \citep{powers2022cora} & Atari, Procgen, MiniHack & levels & fixed cycles & no & reward & W & continual eval, forgetting \\
+COOM \citep{tomilin2023coom} & 3D ViZDoom & fixed & none & no & reward & W & perf., forgetting, transfer \\
+MEAL \citep{tomilin2026meal} & Overcooked & generated layouts & none & no & reward & W & perf., forgetting, plasticity \\
+L2M metrics \citep{new2022lifelong} & any & scenario & learning blocks & no & reward & any & PM, FT, BT, RP, SE \\
+LIBERO \citep{liu2023libero} & manipulation & fixed & none & no & 50 demos, free & W & FWT, NBT, AUC \\
+Jelly Bean World \citep{platanios2020jelly} & never-ending grid & generated & no tasks & no & reward & W & reward over time \\
+Procgen \citep{cobbe2020procgen} & 16 games & generated levels & not continual & no & reward & W & sample eff., generalization \\
+XLand \citep{oel2021xland,ada2023humantimescale} & 3D task space & generated & trials & no & reward & W & held-out task success \\
+BabyAI \citep{chevalierboisvert2019babyai} & grounded language & generated & curriculum & no & reward, demos & W & demos per level \\
+Reasoning Gym \citep{stojanovski2025reasoninggym} & 100+ reasoning tasks & generated & train/test & no & verifier & W & accuracy \\
+Enigmata \citep{chen2025enigmata} & 36 puzzles & generated & train/test & no & verifier & W & accuracy \\
+RLVE \citep{zeng2026rlve} & 400 verifiable envs & generated, adaptive & training curriculum & no & verifier & W & accuracy \\
+\midrule
+\multicolumn{8}{l}{\emph{Language agents}} \\
+StreamBench \citep{wu2024streambench} & SQL, code, tools, QA & fixed, one pass & none & no & binary & P, M & final accuracy \\
+LifelongAgentBench \citep{zheng2025lifelongagentbench} & DB, OS, KG & fixed & skills recur & no & success & P, M & success rate \\
+SWE-Bench-CL \citep{joshi2025swebenchcl} & GitHub issues & fixed & none & no & tests & M & ACC, forgetting, BWT \\
+MemoryBench \citep{ai2025memorybench} & QA, legal, academic & fixed & none & no & simulated user & M & normalized effectiveness \\
+CL-Bench \citep{asawa2026clbench} & six real domains & fixed & poker stages & no & reward, tests & P, M & gain over stateless \\
+SkillLearnBench \citep{zhong2026skilllearnbench} & real skill tasks & fixed, 2--6 each & none & no & verifier, self & P, M & skill quality, accuracy \\
+AgentStream \citep{yan2026agentstream} & six agent benchmarks & fixed, one pass & none & no & execution, self-evaluation & P, M & task accuracy \\
+AgentCL \citep{shu2026agentcl} & code, research, BabyAI & fixed & one second pass & no & none & M & plasticity, stability, generalization gains \\
+PATH-Bench \citep{yang2026pathbench} & code, tools & fixed & probe every 6--12 & no & none & M & AP, FWT, BWT \\
+Evo-Memory \citep{wei2025evomemory} & QA, math, embodied & fixed & similar tasks & no & correctness & M & accuracy, ordering \\
+ContinualSkillBench \citep{guan2026continualskillbench} & five domains & fixed & none & no & evaluator & P, M & reward delta \\
+SEA-Eval \citep{jiang2026seaeval} & web, OS & variable slots & repeats, variants & no & outcome & P, M & success, efficiency \\
+EvoArena \citep{xu2026evoarena} & terminal, SWE & fixed chains & evolved versions & no & execution & M & chain accuracy \\
+StuLife \citep{cai2025ell} & simulated college & fixed & exams revisit & no & scores, text & P, M & GPA, retention \\
+TRACE \citep{wang2023trace} & 8 NLP tasks & fixed & none & no & labels & W & OP, BWT, side effects \\
+CITB \citep{zhang2023citb} & dialogue tasks & fixed & none & no & labels & W & ROUGE, FWT, BWT \\
+\midrule
+\multicolumn{8}{l}{\emph{ARC}} \\
+ARC-AGI-1 \citep{chollet2019measure} & grids & fixed & none & no & none (2 tries) & any & accuracy \\
+ARC-AGI-2 \citep{chollet2025arcagi2} & grids & fixed & none & no & none (2 tries) & any & accuracy, cost/task \\
+ARCLE \citep{lee2024arcle} & grid editing MDP & fixed & none & no & step reward & W & per-task success \\
+ArcMemo \citep{ho2025arcmemo} & ARC-AGI-1 (100) & original & none & no & train pairs & M & accuracy \\
+SOAR \citep{pourcel2025soar} & ARC-AGI-1 eval & original & every task, 2 test-time rounds & no & train pairs & W & accuracy \\
+PoE \citep{franzen2025poe} & ARC-AGI-1 eval & original & none (per task) & no & train pairs & W & accuracy \\
+ARC-AGI-3 \citep{arcprize2026arcagi3} & grid games & fixed games & none scored & no & observations & any & RHAE \\
+\midrule
+\bench{} & ARC-AGI-1 to 3 & generated & bursts, variable gaps & yes & binary, paid demos & P, M, W & share learned, share saved; budget used, solved \\
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Extended comparison. Instances: whether each exposure draws a fresh instance. Recurrence: whether and how tasks come back. Growth: whether the task set grows through the stream. Learners: which families the protocol admits, P prompting, M external memory, W weight updates; LCA is learning-curve area, RHAE is ARC-AGI-3's human-relative action efficiency.}
+\label{tab:related-full}
+\end{sidewaystable}

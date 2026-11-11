@@ -1,0 +1,22 @@
+\begin{tabular}{lrr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}l}
+\toprule
+method & users & \multicolumn{2}{c}{$L$} & \multicolumn{2}{c}{$S_{\mathrm{seen}}$} & \multicolumn{2}{c}{$S_{\mathrm{held}}$} \\
+\midrule
+\multicolumn{8}{l}{\emph{Qwen3.5-9B, weights}} \\
+QDE & 1 & +0.43 & {\scriptsize [0.33, 0.54]} & +0.57 & {\scriptsize [0.48, 0.67]} & +0.29 & {\scriptsize [0.23, 0.35]} \\
+QDE & 2 & +0.47 & {\scriptsize [0.38, 0.56]} & +0.55 & {\scriptsize [0.46, 0.64]} & \textbf{+0.40} & {\scriptsize [0.34, 0.47]} \\
+QDE & 4 & \textbf{+0.53} & {\scriptsize [0.46, 0.60]} & +0.51 & {\scriptsize [0.45, 0.57]} & +0.39 & {\scriptsize [0.33, 0.46]} \\
+\midrule
+\multicolumn{8}{l}{\emph{Qwen3.5-9B, baselines}} \\
+QP & 1 & +0.43 & {\scriptsize [0.25, 0.64]} & \textbf{+0.65} & {\scriptsize [0.46, 0.86]} & +0.03 & {\scriptsize [-0.02, 0.09]} \\
+QP & 2 & +0.41 & {\scriptsize [0.28, 0.55]} & +0.58 & {\scriptsize [0.43, 0.75]} & +0.03 & {\scriptsize [-0.05, 0.11]} \\
+QP & 4 & +0.43 & {\scriptsize [0.33, 0.53]} & +0.50 & {\scriptsize [0.38, 0.62]} & -0.03 & {\scriptsize [-0.11, 0.04]} \\
+QC\textsubscript{0} & 1 & 0 & & +0.06 & {\scriptsize [-0.03, 0.15]} & -0.02 & {\scriptsize [-0.10, 0.05]} \\
+QC & 1 & +0.31 & {\scriptsize [0.19, 0.45]} & +0.37 & {\scriptsize [0.26, 0.51]} & -0.01 & {\scriptsize [-0.05, 0.03]} \\
+QC & 2 & +0.27 & {\scriptsize [0.19, 0.36]} & +0.30 & {\scriptsize [0.19, 0.41]} & 0.00 & {\scriptsize [-0.08, 0.07]} \\
+QC & 4 & +0.28 & {\scriptsize [0.22, 0.35]} & +0.31 & {\scriptsize [0.19, 0.43]} & -0.02 & {\scriptsize [-0.09, 0.05]} \\
+Q\textsubscript{0} & 1 & 0 & & 0.00 & {\scriptsize [-0.05, 0.07]} & +0.03 & {\scriptsize [-0.03, 0.08]} \\
+QE\textsubscript{0} & 1 & 0 & & -0.06 & {\scriptsize [-0.14, 0.01]} & 0.00 & {\scriptsize [-0.05, 0.06]} \\
+QP\textsubscript{0} & 1 & 0 & & +0.03 & {\scriptsize [-0.07, 0.12]} & +0.01 & {\scriptsize [-0.06, 0.07]} \\
+\bottomrule
+\end{tabular}

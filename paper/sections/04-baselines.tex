@@ -1,0 +1,36 @@
+\section{Learners}
+\label{sec:baselines}
+
+Most experiments use Qwen3.5-9B (Q) or GLM-5.3 Flash (G) as learners, from floors and a program library to an off-the-shelf harness, with or without expert guidance, and GLM teaching Qwen by notes or weights (Table~\ref{tab:tests}). We present each learner below, and Figure~\ref{fig:plane} labels them underneath.
+
+\begin{table}[t]
+\centering
+\footnotesize\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
+\input{\hoped{sections/tables/tests}}
+\end{adjustbox}
+\caption{Qwen3.5-9B and GLM-5.3 Flash driving prime-agent: the share learned on the stream, $L$, and the share saved on each test, $S$, against the method's reset (Section~\ref{sec:metrics}; higher is better), with 95\% intervals in small type. Bold marks each model's best where its interval lies above zero.}
+\label{tab:tests}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{\hoped{figures/tests}.pdf}
+\caption{At one user, with DAgger also at two and four. Left: lines join each reset (hollow dot) to its learner, on complementary log-log axes. Up and right are better; bars show simultaneous 95\% intervals (Appendix~\ref{app:bench}), hidden where narrower than their point.}
+\label{fig:plane}
+\end{figure}
+
+\paragraph{Prompting floors (C\textsubscript{0} and C).}
+\emph{Stateless} (C\textsubscript{0}) uses a basic interaction loop with no coding tools or memory between instances. It can request demonstrations and revise wrong answers. \emph{Demo-cache} (C) also stores requested demonstrations by task and automatically replays them for free on later instances. This controls for remembering the demonstrations alone, without learning the rule.
+
+\paragraph{Engineered reference (P).}
+The \emph{program library} adds program induction to the demo-cache. It asks the model for a Python program and automatically stores it if it reproduces the demonstrations. On a return, it automatically runs the program first and asks for a repair after a wrong answer. This reference assumes that a task's rule is a grid transformation the demonstrations can verify.
+
+\paragraph{Agent harnesses (Q and G).}
+We run prime-agent \citep{karten2026primeagent} with its tools and automatic refinement, opening a fresh conversation per instance. It may store learnings after the final verdict, in hindsight, and only its written state carries over. Rows Q\textsubscript{0} and G\textsubscript{0} wipe that state before every instance, isolating the value of persistence. Rows QA and GA ask it to save liberally after every verdict, and QE and GE add expert guidance, the program library procedure and guided playing rules (Appendix~\ref{app:prompts}), to check, save and reuse a program per task. Appendix~\ref{app:harness} gives the details.
+
+\paragraph{Notes the teacher writes (T).}
+In QT, QTE and QETE, GLM plays the full stream in prime-agent and also writes the notes. Qwen then plays each instance from the teacher's state prior to said instance. QT has no expert guidance, QTE gives it to the teacher, and QETE to both. The teacher's play receives uncharged feedback, so these are upper-bound experiments for what GLM can teach Qwen through the harness. Table~\ref{tab:design} in Appendix~\ref{app:bench} sets out the comparison.
+
+\paragraph{Weights (DE).}
+DAgger \citep{ross2011dagger} (QDE) updates a LoRA adapter \citep{hu2022lora} of Qwen between rounds, in the same harness as Q (prime-agent). It imitates GLM's replies at states the student encountered, with GLM reading expert guidance withheld from the student. All prior learners run at one user, but DAgger also runs at two and four. Appendix~\ref{app:trained} gives the training schedule and compute, and the unsuccessful policy-gradient and self-distillation variants we tested.

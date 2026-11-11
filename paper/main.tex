@@ -1,0 +1,82 @@
+\documentclass{article}
+\usepackage[T1]{fontenc}  %
+\usepackage{preprint,times}
+\input{math_commands.tex}
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{wrapfig}
+\usepackage{needspace}
+\usepackage{placeins}
+\usepackage{adjustbox}
+\usepackage{rotating}
+\usepackage{multirow}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{etoolbox}
+
+
+\newcommand{\bench}{Continual-ARC}
+\newcommand{\todo}[1]{{\color{red}[TODO: #1]}}
+\newcommand{\draft}[1]{{\color{red}#1}}  %
+\ifdefined\speculativebuild
+  \newcommand{\hope}[2]{{\color{violet}#2\textsuperscript{\dag}}}
+  \newcommand{\hoped}[1]{#1-speculative}
+\else
+  \newcommand{\hope}[2]{#1}
+  \newcommand{\hoped}[1]{#1}
+\fi
+\input{sections/tables/status}  %
+\input{sections/tables/solved-numbers}  %
+\input{sections/tables/chance-numbers}  %
+
+\title{Continual-ARC: Measuring Skill Acquisition over a Working Lifetime}
+
+
+\uprefinalcopy\input{notes/authors}
+
+\newcommand{\leadauthor}{the author}\newcommand{\Leadauthor}{The author}
+
+\begin{document}
+\maketitle
+\lhead{Preprint. Under review.}
+
+\input{sections/00-abstract}
+\input{sections/01-introduction}
+\input{sections/03-benchmark}
+\input{sections/04-baselines}
+\input{sections/05-results}
+\input{sections/02-related-work}  %
+\input{sections/06-discussion}
+  %
+\input{sections/07-ai-use}
+\input{sections/08-ethics}
+\input{sections/09-reproducibility}
+\input{notes/acknowledgments}  %
+
+\bibliography{references}
+\bibliographystyle{preprint}
+
+\appendix
+\AtBeginEnvironment{table}{\setlength{\belowcaptionskip}{6pt}}
+\renewcommand{\topfraction}{0.95}\renewcommand{\bottomfraction}{0.95}
+\renewcommand{\textfraction}{0.05}\renewcommand{\floatpagefraction}{0.85}
+\setcounter{topnumber}{3}\setcounter{bottomnumber}{2}\setcounter{totalnumber}{4}
+\input{sections/A4-benchmark-details}
+\input{sections/A1-schedules}
+\input{sections/A2-prompts}
+\input{sections/A6-harness-details}
+\input{sections/A7-what-persists}
+\input{sections/A8-ablations}
+\input{sections/A3-related-work-table}
+\input{sections/A10-trained}
+\input{sections/A5-results}
+\input{sections/A9-held-out}
+\input{sections/A11-tracks}
+\input{sections/A12-costs}
+
+\end{document}

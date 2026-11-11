@@ -1,0 +1,9 @@
+\section{Prompts}
+\label{app:prompts}
+
+The texts below describe the prompts used for the reported experiments, preserved at the repository versions listed below. Appendix~\ref{app:harness} describes how we run each harness, and Appendix~\ref{sec:models} gives the model presets. The rules below state the charge of Equation~\ref{eq:score}, in place of the earlier charge they were first written for (Appendix~\ref{sec:charge}).
+
+\paragraph{Expert guidance in the current code.}
+The code now uses \href{https://github.com/unifyai/continual-arc/blob/main/baselines/src/continual_arc_baselines/systems/guidance.py}{one expert-guidance prompt}{} for every harness and DAgger teacher, a deduplicated superset of the playing rules and the program-library procedure. The historical prompts are preserved in commits \href{https://github.com/unifyai/continual-arc/tree/b2fd5a94572fa83cde9ecd20b38d41d1548d64b9}{\texttt{b2fd5a9}} (GPT-6 Luna) and \href{https://github.com/unifyai/continual-arc/tree/9616cbd2c1d5741142ca7f2590ecb3535028daf9}{\texttt{9616cbd}} (the open models).  QDE's teacher read the playing rules alone, QE and GE read both texts, and GPT-6 Luna's guided harnesses read an earlier version of the library procedure. The results reported here use those earlier prompts, and the consolidated prompt has not been evaluated.
+
+\input{sections/A2-generated}
