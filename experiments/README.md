@@ -179,7 +179,8 @@ playing rules its teacher reads.
   ```
 
   `SRC` is GLM-5.3 Flash's `hpl` stream (`glm-hpl-u1`) with its `state.git`.
-- **Runs**: `runs/arc1/QETE-prime-agent-qwen3.5-9b-ws0-u1-letter`.
+- **Runs**: `runs/arc1/QETE-prime-agent-qwen3.5-9b-ws0-u1-letter`, with the letters it read in its `letters/` and
+  GLM-5.3 Flash's state, round by round, in its `teacher-state.json`.
 
 ### Expert guidance as building blocks (GB, GB0, Appendix F)
 
@@ -268,7 +269,7 @@ under `runs/arc1/`, those laid under rows' names listed in its entry's `rows`.
   uv run --with modal python arc3_first_sight.py OUT medium 25 moonshotai/kimi-k3.1-pro moonshotai/kimi-k3
   ```
 
-- **Runs**: not in `runs/`; see [What is not here](#what-is-not-here).
+- **Runs**: [`runs/first-sight/`](../runs/first-sight), as [`runs/README.md`](../runs/README.md#layout) says.
 
 ## Tables and figures
 
@@ -287,11 +288,6 @@ there). The paper's source, with every table as it sets it, is in [`paper/`](../
   the patches in `building-blocks/` and `library-ceiling/`, run on the private training engine of each run's day,
   which `training/` consolidated; its revisions are not published.
 - **The code of Table 13 (Appendix J).** It reads the calibration reports of the private set, kept with its rules.
-- **First sight's records.** The answers behind Table `tab:first-sight` are kept with the private set's calibration
-  and are not under `runs/`.
-- **The letters and the teacher's state.** The letters QETE `-letter` read, and the `state.git` of GLM-5.3 Flash's
-  stream they were written from, are not under `runs/`, which holds that stream's records, trajectories and
-  `memory.json`.
 
 ## Placeholders
 

@@ -1,0 +1,69 @@
+{
+ "format": "continual-arc/schedule/v1",
+ "name": "arc3-small-fresh-reset-step32",
+ "seed": 0,
+ "users": 1,
+ "sources": {
+  "dc22": "arc3",
+  "g50t": "arc3",
+  "lp85": "arc3",
+  "r11l": "arc3",
+  "s5i5": "arc3",
+  "sb26": "arc3",
+  "tr87": "arc3",
+  "tu93": "arc3",
+  "vc33": "arc3",
+  "wa30": "arc3"
+ },
+ "meta": {
+  "config": {
+   "name": "arc3-small",
+   "n_tasks": 15,
+   "stream_length": 120,
+   "n_epilogue_tasks": 10,
+   "workstreams": {
+    "concurrency": 3,
+    "burst_mean": 3.0,
+    "burst_fixed": false,
+    "dormancy_median": 16.0,
+    "dormancy_sigma": 1.0,
+    "arrival_interval": 2.0
+   },
+   "users": 1,
+   "checkpoints": [],
+   "env": {
+    "cap_multiplier": 5.0,
+    "max_actions": 1000,
+    "demo_cap": 3,
+    "demo_cost": 1.0
+   },
+   "dataset": "arc3",
+   "held_out_per_task": 4
+  },
+  "mode": "fresh",
+  "seed": 0,
+  "dataset": "arc3",
+  "track": "arc3",
+  "epilogue": true,
+  "pools": {
+   "stream": 15,
+   "epilogue": 10
+  },
+  "parts": [
+   {
+    "generator": "epilogue",
+    "n_tasks": 10,
+    "instances_per_task": 4,
+    "reset_each": true
+   }
+  ]
+ },
+ "slots": [
+  {
+   "task_id": "lp85",
+   "instance_seed": 2965534949550150878,
+   "phase": "epilogue",
+   "reset_before": true
+  }
+ ]
+}
