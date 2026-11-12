@@ -21,9 +21,9 @@ adapters that drive three agent harnesses through the benchmark's protocol, the 
 once, the sandbox the harnesses run in, the local proxy through which every model call passes, the frozen tests after a
 stream, and the scripts that launch the paper's runs. This folder is the package `continual-arc-baselines` inside the
 benchmark's repository, whose root is the benchmark; the training of the trained rows is beside it in
-[`training/`](../training), which drives the learners here. The records of the paper's GPT-6 Luna runs are plain JSON
-in git at [continual-arc-runs](https://github.com/unifyai/continual-arc-runs) and attached to the benchmark's
-[v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0).
+[`training/`](../training), which drives the learners here. The records of the paper's runs are plain JSON in git in
+[`runs/`](../runs) ([where everything is](../README.md#where-everything-is)), and those of its GPT-6 Luna and
+open-model runs are attached to the benchmark's [v0.1.0 release](https://github.com/unifyai/continual-arc/releases/tag/v0.1.0).
 
 ## What is here
 
