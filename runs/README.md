@@ -1,7 +1,7 @@
 # Continual-ARC: runs
 
 The runs of the paper [*Continual-ARC: Measuring Skill Acquisition over a Working
-Lifetime*](https://arxiv.org/abs/2611.14505) (Daniel Lenton, 2026;
+Lifetime*](https://arxiv.org/abs/2611.14505) (Daniel Lenton, Yusha Arif and Haris Mahmood, 2026;
 [the post](https://unify.ai/blog/why-we-built-continual-arc)): its 228 runs on GPT-6 Luna on the ARC-AGI-1 track, of
 which 120 are the ablation rows of its Appendix F, each with the two frozen tests played after its stream, and its
 runs on the open models, Qwen3.5-9B and GLM-5.3 Flash (its Appendix H) and Kimi K3.1 Pro on the ARC-AGI-2 and
