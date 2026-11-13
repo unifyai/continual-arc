@@ -646,7 +646,7 @@ ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, is in [`data/`](data), with t
 ```bibtex
 @article{lenton2026continualarc,
   title   = {Continual-ARC: Measuring Skill Acquisition over a Working Lifetime},
-  author  = {Lenton, Daniel},
+  author  = {Lenton, Daniel and Arif, Yusha and Mahmood, Haris},
   journal = {arXiv preprint arXiv:2611.14505},
   year    = {2026}
 }
