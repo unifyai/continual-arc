@@ -1,9 +1,9 @@
 # The paper
 
 The LaTeX source of [*Continual-ARC: Measuring Skill Acquisition over a Working
-Lifetime*](https://arxiv.org/abs/2611.14505) (Daniel Lenton, 2026), arXiv:2611.14505v1, as it was posted to arXiv on
-10 November 2026. Every file here is the file arXiv serves for that version at
-`https://arxiv.org/e-print/2611.14505v1`, byte for byte, but for this README, the code that computes the figures and
+Lifetime*](https://arxiv.org/abs/2611.14505) (Daniel Lenton, Yusha Arif and Haris Mahmood, 2026), arXiv:2611.14505v2, as
+it was posted to arXiv on 11 November 2026. Every file here is the file arXiv serves for that version at
+`https://arxiv.org/e-print/2611.14505v2`, byte for byte, but for this README, the code that computes the figures and
 tables with what it reads besides the runs (`Makefile`, `scripts/`, `data/` and `fonts/`, below), and `references.bib`
 and `preprint.bst`, the bibliography's database and its style, which the upload replaced with the `main.bbl` they make.
 
