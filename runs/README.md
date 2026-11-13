@@ -209,6 +209,10 @@ runs the site does not replay, and in the letters and the teacher's state, the r
 machines' home folder is written `/home/USER` and their names `HOST`, and the value of each key, token or secret an
 environment printed is taken out.
 
+## Citation
+
+If you use the runs, please cite the paper; its BibTeX is in the [README](../README.md#citation).
+
 ## Licence
 
 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (see `LICENSE`).

@@ -8,6 +8,7 @@
 <p align="center">
   <a href="https://continual-arc.unify.ai">Explore every run</a> ·
   <a href="https://arxiv.org/abs/2611.14505">Paper</a> ·
+  <a href="#citation">Cite</a> ·
   <a href="https://unify.ai/blog/why-we-built-continual-arc">Blog post</a> ·
   <a href="https://continual-arc.unify.ai/leaderboard">Leaderboard</a> ·
   <a href="baselines">Baselines</a> ·
@@ -642,6 +643,8 @@ played before v0.6.0 does, when the benchmark still named its configurations by 
 ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, is in [`data/`](data), with the schedules that served them.
 
 ## Citation
+
+If you use Continual-ARC, its code, its runs or its website, please cite the paper:
 
 ```bibtex
 @article{lenton2026continualarc,

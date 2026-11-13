@@ -346,6 +346,10 @@ redirected, and they now get the 404.
 
 The open-model rows are driven from [`training/`](../training), which builds each row's `CollectiveHarnessLearner`.
 
+## Citation
+
+If you use the baselines, please cite the paper; its BibTeX is in the [README](../README.md#citation).
+
 ## Licence
 
 Apache-2.0, like the benchmark. The baselines are part of [Continual-ARC](https://github.com/unifyai/continual-arc),

@@ -125,3 +125,7 @@ without `liger_kernel`. The scripts' tests run them in a fake home with every no
 - [Settings](docs/settings.md): every method setting and why it is what it is, and the software stack.
 - [The code](docs/code.md): what each module and script does.
 - [Glossary](docs/glossary.md): every term.
+
+## Citation
+
+If you use the training, please cite the paper; its BibTeX is in the [README](../README.md#citation).

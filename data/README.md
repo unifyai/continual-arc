@@ -41,3 +41,7 @@ the benchmark downloads them from ARC Prize at a pinned version.
 
 The grids come from ARC-AGI-1 and ARC-AGI-2 (Apache-2.0) and from the generators that draw their fresh instances,
 Re-ARC's (MIT) and ARC-GEN's (Apache-2.0); each keeps its source's license.
+
+## Citation
+
+If you use the data, please cite the paper; its BibTeX is in the [README](../README.md#citation).

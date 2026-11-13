@@ -316,3 +316,7 @@ What was taken out of the files here, and what stands in its place:
 | `~/benchmark-turns` | the private benchmark tree the reference rows, the building blocks and the ceiling played on, `continual-arc-internal` `060ba32`, whose `src/continual_arc/` and `tests/` are this repository's at `69b4e19` |
 | `R` | the researcher whose offline DAgger recipe the search compares against |
 | "the author" | the paper's author, where a comment quotes a decision |
+
+## Citation
+
+If you use the experiments, please cite the paper; its BibTeX is in the [README](../README.md#citation).

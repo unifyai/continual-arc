@@ -9,3 +9,7 @@ one is in the [README](../README.md#submitting-a-result).
 
 The paper's own runs are not repeated here: every run it reports is in [`runs/`](../runs), and the leaderboard opens
 with them.
+
+## Citation
+
+If you report results on Continual-ARC, please cite the paper; its BibTeX is in the [README](../README.md#citation).

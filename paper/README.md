@@ -128,3 +128,7 @@ Not computed here:
 - The scripts the text cites for the numbers it quotes beside the figures and tables, `scripts/read_blocks.py`,
   `scripts/ablations_open.py` and the others it names, all but `scripts/forgetting.py`, which is here.
 - The working notes, drafts and reviews behind the paper, which are not part of it.
+
+## Citation
+
+To cite the paper, use the BibTeX in the [README](../README.md#citation).
