@@ -18,6 +18,7 @@ import types
 from pathlib import Path
 
 import pytest
+from fakes import ForkedUsers, checkout
 
 from continual_arc_training import frozen, play, references
 
@@ -343,6 +344,8 @@ def _node(tmp_path: Path) -> tuple[Path, Path, dict[str, str]]:
     tools.mkdir(parents=True)
     scripts = tmp_path / "training" / "scripts"
     shutil.copytree(SCRIPTS, scripts)
+    (scripts.parent / "src").symlink_to(SCRIPTS.parent / "src")
+    checkout(tmp_path)
     (home / "prime-rl").mkdir()
     (home / "runs").mkdir()
     schedules = tmp_path / "schedules"
@@ -381,7 +384,8 @@ case $cmd in
         for i in $(seq "$n"); do echo "{{\\"solved\\": $([ "$i" = 1 ] && echo true || echo false), \\"cost\\": $i}}"; done > "$p/records.jsonl"
         echo "{{\\"test\\": \\"$t\\", \\"records\\": $n}}" ;;
 esac''')
-    env = {"PATH": f"{tools}:{os.environ['PATH']}", "HOME": str(home), "POLL": "1", "SCHEDULES": str(schedules)}
+    env = {"PATH": f"{tools}:{os.environ['PATH']}", "HOME": str(home), "POLL": "1", "SCHEDULES": str(schedules),
+           "PURPOSE": "frozen.sh's tests, its plays stand-ins on a fake node"}
     return home, scripts, env
 
 
@@ -482,6 +486,77 @@ def test_frozen_sh_plays_a_reference_from_nothing_and_a_runs_weights_alone(tmp_p
     assert refused.returncode == 1
     assert "a reference from nothing has no memory to leave out" in \
         (home / "runs" / "paper" / "qwen-h0" / "weights" / "progress").read_text()
+
+
+@pytest.mark.parametrize("state", ["copied", "committed"])
+def test_a_test_cut_short_keeps_its_ended_users_and_plays_the_others_from_the_end_of_stream_state(tmp_path,
+                                                                                                    monkeypatch, state):
+    """A frozen test the node's stop cuts short keeps every user whose instance ended, as the benchmark's runner keeps
+    them (round.jsonl), what each wrote in its state with it; the next play starts only the others again, each from the
+    run's end-of-stream state, copied or forked from its commit (what a stopped instance wrote gone), and the runner plays
+    only theirs; a forked user's play is then committed as its instance left it, kept or not. The test's records are
+    those of a play never stopped, record for record but the clock."""
+    from continual_arc.env import EnvConfig
+    from continual_arc.runner import run as run_stream
+    from continual_arc.schedule import PHASE_HELD_OUT_TEST, Schedule, Slot
+    from continual_arc.tasks import TaskRegistry
+    from continual_arc.testing import FakeSource
+
+    if state == "committed":
+        _forks(monkeypatch)
+        run = _commit(_stream(tmp_path))
+    else:
+        run = _stream(tmp_path)
+    test = Schedule(name="held-out-test", seed=0, users=4, meta={"test": "held-out"},
+                    slots=[Slot(f"fake{i:03d}", 100 + i, PHASE_HELD_OUT_TEST, user=i) for i in range(4)],
+                    sources={f"fake{i:03d}": "fake" for i in range(4)})
+    path = tmp_path / "held-out.json"
+    test.save(path)
+    learners, fail = [], [{2, 3}]
+
+    def play_round(row, play_dir, schedule, *, base_url, served_name):   # the runner, on the data-free tasks
+        learners.append(ForkedUsers(play_dir, schedule.users, fail.pop() if fail else ()))
+        return run_stream(learners[-1], schedule, EnvConfig(), out_dir=play_dir, resume=True,
+                          registry=TaskRegistry({"fake": FakeSource(n_tasks=120)}), learner_name=f"paper-{row}")
+
+    monkeypatch.setattr(play, "play_round", play_round)
+    monkeypatch.setattr(frozen, "check_served", lambda *a: None)
+
+    def play_test(name):
+        monkeypatch.setattr(sys, "argv", ["frozen", "play", "--test", "held-out", "--run", str(run), "--schedule",
+                                          str(path), "--base-url", "http://127.0.0.1:8120/v1", "--served", "pg-p2",
+                                          "--adapter", "/a", "--name", name])
+        frozen.main()
+
+    with pytest.raises(RuntimeError, match="the node stopped"):
+        play_test("held-out")
+    out = run / "frozen" / "held-out" / "play"
+    users = out / "users"
+    assert [(users / f"u{u:03d}" / "system" / "state" / "played").exists() for u in range(4)] == [True, True, False,
+                                                                                                    False]
+    for u in (2, 3):   # what a stopped instance wrote, which its user's next play must not start from
+        (users / f"u{u:03d}" / "system" / "state" / "stopped").write_text("x")
+    play_test("held-out")
+    assert learners[-1].acted == {2, 3}   # the ended users kept, not played again
+
+    def kept(user, name):   # what the user's play left: its working tree's, or once it is committed, its commit's
+        system = users / f"u{user:03d}" / "system"
+        if state == "copied":
+            return (system / "state" / name).exists()
+        assert not (system / "state").exists()   # every forked user's play committed, its working tree gone
+        return bool(_git(system, "log", "--format=%s")) and subprocess.run(
+            ["git", f"--git-dir={system / 'state.git'}", "cat-file", "-e", f"HEAD:{name}"]).returncode == 0
+
+    assert all(kept(u, "played") for u in range(4)) and not any(kept(u, "stopped") for u in (2, 3))
+    play_test("whole")
+
+    def records(play_dir):
+        rows = [json.loads(line) for line in (play_dir / "records.jsonl").read_text().splitlines()]
+        return [{**r, "resources": {k: v for k, v in r["resources"].items() if not k.endswith("seconds")}}
+                for r in rows]
+
+    assert records(out) == records(run / "frozen" / "whole" / "play") and len(records(out)) == 4
+    assert play.round_recorded(out, test)
 
 
 def test_a_run_that_kept_its_demo_cache_apart_has_no_memory_to_test_from(tmp_path):

@@ -4,16 +4,19 @@
 # MAX_RESTARTS times, a minute apart. The run is RUNS/paper/$PLAYER-$ROW-u$USERS (play/ the benchmark run, progress and
 # play.log beside it). ROW=dc, f, m or m0 plays one of the player's bare-model rows; MAX_TOKENS sets a bare-model row's
 # reply cap (65,536 unless set; the demo-cache floors play at 128,000).
+# A new row says why in PURPOSE; RESUME=1 goes on with one that stopped, with its own settings (MAX_RESTARTS may change)
+# and code, as lib.sh's begin keeps a run, and any other launch into its folder is refused; a row whose stream is done
+# is not played again.
 # A reference machine needs no GPU: the model is served by OpenRouter. It needs prime-agent 0.9.6, Node 22, bubblewrap,
-# and an environment with this package, the benchmark and the baselines installed: the repository's own uv environment,
-# run from BASELINES (default the repository's baselines/), whose .env holds OPENROUTER_API_KEY.
-# Usage (on the machine): PLAYER=glm ROW=h USERS=1 setsid nohup bash ~/continual-arc/training/scripts/reference.sh \
-#     > /dev/null 2>&1 < /dev/null &
+# and an environment with this package's dependencies, the benchmark's and the baselines': the repository's own uv
+# environment, run from BASELINES (default the repository's baselines/), whose .env holds OPENROUTER_API_KEY.
+# Usage (on the machine): PURPOSE="..." PLAYER=glm ROW=h USERS=1 setsid nohup bash \
+#     ~/continual-arc/training/scripts/reference.sh > /dev/null 2>&1 < /dev/null &
 #   stop: this script's process group (kill -- -<its pid>)
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 PLAYER=${PLAYER:?set PLAYER: glm or qwen}; ROW=${ROW:?set ROW: h, h0, hpl, ha, hpl0, dc, f, m or m0}
-USERS=${USERS:-1}; ROUNDS=${ROUNDS:-200}
+USERS=${USERS:-1}; ROUNDS=${ROUNDS:-200}; MAX_TOKENS=${MAX_TOKENS:-}
 MAX_RESTARTS=${MAX_RESTARTS:-20}
 L=$RUNS/paper/$PLAYER-$ROW-u$USERS
 case $ROW in
@@ -23,6 +26,8 @@ esac
 mkdir -p "$L"
 say() { echo "$(date -u +%m-%d\ %H:%M) reference.sh: $*" >> "$L/progress"; }
 {   # read whole before it runs: bash reads a script as it goes, and the code may be pulled again while this runs
+    [ -f "$L/play.done" ] && { echo "$L is done: nothing to go on with" >&2; exit 0; }
+    begin "$L" "paper/$PLAYER-$ROW-u$USERS" "MAX_RESTARTS" PLAYER ROW USERS ROUNDS MAX_TOKENS MAX_RESTARTS || exit 1
     say "started: $PLAYER plays row $ROW, $USERS users, $ROUNDS rounds${MAX_TOKENS:+, reply cap $MAX_TOKENS}, baselines $BASELINES"
     for i in $(seq 1 "$MAX_RESTARTS"); do
         if (cd "$BASELINES" && uv run --no-sync --env-file .env python -m continual_arc_training.references "${PLAY[@]}") \

@@ -9,10 +9,13 @@
 # to the next, so one play of users 0-3 serves every trained run at 1, 2 and 4 users as transfer's reference. The run is
 # RUNS/paper/ROW (ROW-uUSERS for fewer than 100 users), its play under play/ or, with EPILOGUE=1, under
 # epilogue-uUSERS[-wWIDTH]/. The server is shared with any other run on the node: the last to finish stops it.
+# The play is a run of its own in its folder (play/ or epilogue-.../), as lib.sh's begin keeps one: a new one says why in
+# PURPOSE, RESUME=1 goes on with it, or plays more of its rounds (FIRST_ROUND and ROUNDS, its GPUs and GRACE may
+# change), with its own settings and code, and any other launch into a folder that holds it is refused.
 # Usage (on the node), the trained runs' references over the held-out instances:
-#   ROW=h0 USERS=4 EPILOGUE=1 EPILOGUE_USERS=4 WIDTH=100 ROUNDS=4 bash ~/continual-arc/training/scripts/paper.sh
-#   ROW=bare USERS=4 EPILOGUE=1 EPILOGUE_USERS=4 WIDTH=100 ROUNDS=4 bash ~/continual-arc/training/scripts/paper.sh
-# and a smoke test of the node's stack, H0 on a 4-user cut of the stream: ROW=h0 USERS=4 ROUNDS=3 bash .../paper.sh
+#   PURPOSE="..." ROW=h0 USERS=4 EPILOGUE=1 EPILOGUE_USERS=4 WIDTH=100 ROUNDS=4 bash ~/continual-arc/training/scripts/paper.sh
+#   PURPOSE="..." ROW=bare USERS=4 EPILOGUE=1 EPILOGUE_USERS=4 WIDTH=100 ROUNDS=4 bash ~/continual-arc/training/scripts/paper.sh
+# and a smoke test of the node's stack, H0 on a 4-user cut of the stream: PURPOSE="..." ROW=h0 USERS=4 ROUNDS=3 bash .../paper.sh
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 export RUNS
@@ -23,7 +26,7 @@ ROUNDS=${ROUNDS:?set ROUNDS: how many rounds this call plays, from FIRST_ROUND}
 USERS=${USERS:-100}
 EPILOGUE=${EPILOGUE:-0}
 EPILOGUE_USERS=${EPILOGUE_USERS:-$USERS}
-WIDTH=${WIDTH:-}
+WIDTH=${WIDTH:-}; GRACE=${GRACE:-60}
 SERVE_GPUS=${SERVE_GPUS:-0,1,2,3,4,5,6,7}; SERVE_DP=${SERVE_DP:-8}
 # the epilogue is served to some of the configuration's users: fail here, not partway into a play
 if [ "$EPILOGUE" = 1 ] && [ "$EPILOGUE_USERS" -gt "$USERS" ]; then
@@ -54,7 +57,7 @@ play_round() {   # play_round R: round R played on the base model, a crashed or 
             (cd "$PRIME_RL" && setsid nohup uv run --no-sync python -m continual_arc_training.play --row "$ROW" \
                 --run-dir "$PLAY_DIR" --base-url http://localhost:8101/v1 --served "$MODEL" --round "$r" \
                 "${SCHED_FLAGS[@]}" >> "$L/play-round$r.log" 2>&1 < /dev/null &)
-            sleep "${GRACE:-60}"   # the play's start, before pgrep can see it
+            sleep "$GRACE"   # the play's start, before pgrep can see it
         fi
         while pgrep -f "$pattern" >/dev/null; do sleep 15; done
         # the runner writes schedule.json for its cut before playing an instance: without it the launch died first
@@ -78,6 +81,8 @@ play_round() {   # play_round R: round R played on the base model, a crashed or 
 {   # read whole before it runs: bash reads a script as it goes, and the code may be pulled again while this runs
     LAST=$((FIRST_ROUND + ROUNDS - 1))
     [ -f "$PLAY_DIR/paper-$FIRST_ROUND-$LAST.done" ] && { say "already done"; exit 0; }
+    LOG=$L/progress begin "$PLAY_DIR" "paper/$ROW$SUFFIX/${PLAY_DIR##*/}" "FIRST_ROUND ROUNDS SERVE_GPUS SERVE_DP GRACE" \
+        ROW USERS EPILOGUE EPILOGUE_USERS WIDTH FIRST_ROUND ROUNDS SERVE_GPUS SERVE_DP GRACE || exit 1
     for ((r = FIRST_ROUND; r <= LAST; r++)); do
         say "round $r"
         play_round "$r" || exit 1

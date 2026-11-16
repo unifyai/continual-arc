@@ -18,8 +18,10 @@ first + u, each forked from its own commit (:func:`seed`, the baselines' ``froze
 ``RUN/frozen/stream-FFF/play``. The schedule says so (``meta["forked"]``), so the learner keeps the users apart rather than
 giving them one state. The two frozen tests play as every run's do, ``RUN/frozen/TEST[-K]/play``, every user forked from
 the commit of the teacher's last round. Each play is a benchmark run of its own, with ``frozen.json``, what each user was
-forked from. Plays started together meet the providers' rate limits, and a game whose calls fail plays differently, so
-``teacher-rows.sh`` starts them minutes apart.
+forked from. A test's play cut short keeps the users whose instances ended, as the benchmark's runner keeps a frozen
+test's (``round.jsonl``), and forks only the others again; a part of the stream cut short, which the runner keeps
+whole or not at all, is forked and played again whole. Plays started together meet the providers' rate limits, and a
+game whose calls fail plays differently, so ``teacher-rows.sh`` starts them minutes apart.
 
 ``RUN/play`` is the stream as a row's is read (:func:`cmd_view`): the teacher's schedule, and each stream slot's record from
 the part that played it, its play as recorded and its place in the stream the slot's.
@@ -79,23 +81,29 @@ def part_schedule(stream: Any, first: int) -> Any:
                     meta={**stream.meta, "forked": True, "first_round": first, "rounds": PART})
 
 
-def seed(play_dir: Path, teacher: Path, starts: list[int | None]) -> list[dict[str, Any]]:
+def seed(play_dir: Path, teacher: Path, starts: list[int | None],
+         users: list[int] | None = None) -> list[dict[str, Any]]:
     """``play_dir`` as its round begins, from nothing: the teacher's task names, and user u's ``system/`` a fork of the
     teacher's state at the end of round ``starts[u]``, from nothing for None, as the baselines' ``frozen.fork_user`` forks
-    a test user, its every absolute path naming the teacher's folder renamed to the user's. Returns what each was forked
-    from."""
+    a test user, its every absolute path naming the teacher's folder renamed to the user's; or, with ``users``, those
+    users alone forked anew, whatever ``system/`` each had gone. Returns what each was forked from."""
     from continual_arc_baselines import frozen as forks
-    from continual_arc_baselines.statelog import commit_of, restore
+    from continual_arc_baselines.statelog import commit_of, delete, restore
 
     system = teacher_system(teacher)
-    shutil.rmtree(play_dir, ignore_errors=True)
-    play_dir.mkdir(parents=True)
-    shutil.copy2(teacher / "play" / frozen.SALT_FILE, play_dir / frozen.SALT_FILE)
+    if users is None:
+        shutil.rmtree(play_dir, ignore_errors=True)
+        play_dir.mkdir(parents=True)
+        shutil.copy2(teacher / "play" / frozen.SALT_FILE, play_dir / frozen.SALT_FILE)
     objects = forks.object_store(play_dir / "objects.git", system)
     scratch = play_dir / "naming"
+    if scratch.exists():   # left by a seeding a stop cut short
+        delete(scratch)
 
     def fork(user: int) -> dict[str, Any]:
         target, start = forks.user_system(play_dir, user), starts[user]
+        if target.exists():
+            delete(target)
         if start is None:
             forks.fork_user(target, objects, None, None)
             return {"user": user, "round": None, "commit": None}
@@ -108,12 +116,31 @@ def seed(play_dir: Path, teacher: Path, starts: list[int | None]) -> list[dict[s
                 "databases": len(found[2])}
 
     with ThreadPoolExecutor(forks.FORKS) as pool:
-        forked = list(pool.map(fork, range(len(starts))))
+        forked = list(pool.map(fork, range(len(starts)) if users is None else users))
     shutil.rmtree(scratch, ignore_errors=True)
     return forked
 
 
+def settle(play_dir: Path, starts: list[int | None]) -> None:
+    """A recorded play's users settled, as the baselines' ``settle_forks`` settles a test's, each from its own start:
+    the state of every user the round's end did not commit (one whose instance ended before a stop and was kept)
+    committed as its instance left it, and every user's working tree gone, since every one is in its repository."""
+    from continual_arc_baselines import frozen as forks
+    from continual_arc_baselines.statelog import StateLog, delete
+
+    for user, start in enumerate(starts):
+        system = forks.user_system(play_dir, user)
+        if (system / "state").exists():
+            log = StateLog(system / "state", system / "state.git", system / "state-log.jsonl")
+            if log.rounds == (0 if start is None else start + 1):   # the rounds its log lists before the play's own
+                log.commit()
+            delete(system / "state")
+        if (system / "kernel-venv").exists():
+            delete(system / "kernel-venv")
+
+
 def cmd_play(a: argparse.Namespace) -> None:
+    from continual_arc.runner import holds_run, saved_point
     from continual_arc.schedule import Schedule
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -130,13 +157,18 @@ def cmd_play(a: argparse.Namespace) -> None:
     if play.round_recorded(play_dir, schedule):
         print(json.dumps({"play": a.name, "played": True}), flush=True)
         return
-    forked = seed(play_dir, teacher, starts)
-    (play_dir / "frozen.json").write_text(json.dumps(
-        {"run": str(run), "row": a.row, "player": STUDENT, "teacher": str(teacher), "test": a.test or "stream",
-         "schedule": schedule.name, "users": schedule.users, "from_users": forked,
-         "started": datetime.now(UTC).isoformat()}, indent=1))
+    if holds_run(play_dir):   # cut short: a test's ended users kept (the runner's round.jsonl), the others again
+        ended = {record.user for record in saved_point(play_dir, schedule).finished}
+        seed(play_dir, teacher, starts, [user for user in range(schedule.users) if user not in ended])
+    else:
+        forked = seed(play_dir, teacher, starts)
+        (play_dir / "frozen.json").write_text(json.dumps(
+            {"run": str(run), "row": a.row, "player": STUDENT, "teacher": str(teacher), "test": a.test or "stream",
+             "schedule": schedule.name, "users": schedule.users, "from_users": forked,
+             "started": datetime.now(UTC).isoformat()}, indent=1))
     result = references.play_round(STUDENT, ROWS[a.row][1], play_dir, schedule,
                                    api_key=os.environ["OPENROUTER_API_KEY"])
+    settle(play_dir, starts)
     print(json.dumps({"play": a.name, "records": len(result.records), "solved": sum(r.solved for r in result.records)}),
           flush=True)
 

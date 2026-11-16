@@ -46,14 +46,19 @@ def trainer_args(run: Path, gpus: int) -> argparse.Namespace:
 
 def cmd_train(o: argparse.Namespace) -> None:
     """Phase ``--phase`` of the run in ``--run`` from the base model into ``--out`` (OUT/adapter, OUT/DONE), as the
-    real-time driver trains a phase, from no adapter."""
-    from continual_arc_training import phase, realtime
+    real-time driver trains a phase, from no adapter: going on from its last step checkpoint in OUT when a stop cut it
+    short (one on SIGTERM, and one every ``checkpoints.EVERY`` steps), and done already once OUT/DONE is written."""
+    from continual_arc_training import checkpoints, phase, realtime
     run, out = Path(o.run), Path(o.out)
-    a = trainer_args(run, o.gpus)
-    targs = realtime.train_args(a)
-    trainer = phase.make_trainer(targs)
-    out.mkdir(parents=True, exist_ok=True)
-    done = realtime.train_phase(a, run, targs, trainer, o.phase, out, None)
+    if (out / "DONE").exists():
+        done = json.loads((out / "DONE").read_text())
+    else:
+        checkpoints.catch_sigterm()
+        a = trainer_args(run, o.gpus)
+        targs = realtime.train_args(a)
+        trainer = phase.make_trainer(targs)
+        out.mkdir(parents=True, exist_ok=True)
+        done = realtime.train_phase(a, run, targs, trainer, o.phase, out, None)
     print(json.dumps({k: done.get(k) for k in ("steps", "minutes", "best_step")}), flush=True)
 
 

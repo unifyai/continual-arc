@@ -15,8 +15,14 @@
 # trains on as the stream, and which no measure reads.
 # Inputs: a node set up as the README says, and for DAgger and OPSD an OpenRouter key, OPENROUTER_API_KEY in the
 # environment or in BASELINES/.env, which the relay reads. Paths: lib.sh's.
-# Usage (on the node): ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 TRAIN_GPUS=4,5,6,7 \
-#     setsid nohup bash ~/continual-arc/training/scripts/realtime.sh > /dev/null 2>&1 < /dev/null &
+# A new run says why in PURPOSE and starts in a folder of its own, RUNS/rt/NAME, which keeps its settings and code
+# (settings.json), its record (manifest.json), its resumes (resumes.jsonl) and this script's console (console.log), as
+# lib.sh's begin keeps them, and runs from a checkout of its own commit, which no pull changes, the loops it restarts
+# included. RESUME=1 goes on with a stopped run from where each loop stopped, with its own settings (those in FREE below
+# may change) and its own code; any other launch in the run's folder is refused.
+# Usage (on the node): PURPOSE="..." ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 \
+#     TRAIN_GPUS=4,5,6,7 setsid nohup bash ~/continual-arc/training/scripts/realtime.sh > /dev/null 2>&1 < /dev/null &
+#   and to go on with it once stopped, the same command with RESUME=1 in place of PURPOSE.
 #   progress: $RUNS/rt/$NAME/progress ($ROW-u$USERS-lag$LAG). To stop it, stop this script, then its loops' process
 #   groups: a trainer given SIGTERM finishes its step, writes a step checkpoint and exits, and its phase goes on from
 #   there when it starts again; SIGKILL stops it at once, its phase going on from its checkpoint before.
@@ -67,6 +73,11 @@ START_AFTER=${START_AFTER:-0}; DOSE=${DOSE:-aggregate}; REPLAY_RATIO=${REPLAY_RA
 BATCH=${BATCH:-64}
 MAX_RESTARTS=${MAX_RESTARTS:-5}
 case $ROW in pg) LOOPS="player trainer" ;; *) LOOPS="player labeller trainer" ;; esac
+# what the run computes with, which a resume gives as it was (settings.json), and what a launch may change: where the run
+# is served and trained, its relay's port, its restarts and its spend caps, which bind only by stopping the run
+SETTINGS="ROW USERS ROUNDS LR LAG NAME MODEL LABEL_MODEL LABEL_EFFORT RELAY_PROVIDERS NEED_THINKING MIN_LABELLED_PCT
+    HOLD_EVERY GUIDANCE EVAL_STEPS PATIENCE MAX_STEPS VAL_MAX_ITEMS SKIP_FIRST START_AFTER DOSE REPLAY_RATIO BATCH"
+FREE="SERVE_GPUS SERVE_DP TRAIN_GPUS RELAY_PORT MAX_RESTARTS LABEL_ROUND_BUDGET_USD LABEL_RUN_BUDGET_USD"
 
 L=$RUNS/rt/$NAME
 mkdir -p "$L"
@@ -124,7 +135,11 @@ labels() { [ "$ROW" != pg ]; }
     for g in ${TRAIN_GPUS//,/ }; do   # OPSD draws its fresh replies from the server while it trains
         case ",$SERVE_GPUS," in *",$g,"*) say "TRAIN_GPUS ($TRAIN_GPUS) must be none of SERVE_GPUS ($SERVE_GPUS)"; exit 1 ;; esac
     done
-    # every value the run was started with, so that it can be started again with the same ones
+    finished=1
+    for loop in $LOOPS; do [ -f "$L/$loop.done" ] || finished=0; done
+    [ "$finished" = 1 ] && { echo "$NAME is done: nothing to go on with" >&2; exit 0; }
+    begin "$L" "rt/$NAME" "$FREE" $SETTINGS $FREE || exit 1
+    # the diary's line for this launch, its main values (settings.json holds every one, and manifest.json each launch)
     say "started: $ROW, $USERS users, $ROUNDS rounds, lag $LAG, LR $LR, serving on $SERVE_GPUS, training on $TRAIN_GPUS, batch $BATCH, start after $START_AFTER games, dose $DOSE (replay $REPLAY_RATIO)$(labels && echo ", expert guidance ${GUIDANCE:-shared}"), patience $PATIENCE"
     if labels; then start_relay || exit 1; fi
     bash "$HERE/serve.sh" "$SERVE_GPUS" "$SERVE_DP" || { say "the server did not start"; exit 1; }

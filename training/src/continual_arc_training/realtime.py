@@ -37,9 +37,11 @@ files in the run's folder; realtime.sh starts them, restarts one that dies, and 
             the phase's ``rounds.json`` and ``train/latest.json``.
 
 Every stage resumes from its files: a round whose play was cut short is played again whole (the runner's own resume),
-labels already written are kept, and a phase cut short goes on from its last step checkpoint
-(continual_arc_training.checkpoints: one on SIGTERM, a preemptible machine's notice, and one every
-``checkpoints.EVERY`` steps), on the same batches in the same order, or trains again from its start when it had none.
+the games of the play the runner never recorded set aside in the round's ``unrecorded/`` first, labels already written
+are kept, and a phase cut short goes on from its last step checkpoint (continual_arc_training.checkpoints: one on
+SIGTERM, a preemptible machine's notice, and one every ``checkpoints.EVERY`` steps), on the same batches in the same
+order, or trains again from its start when it had none. Each loop that goes on from where the run stopped says so in
+the run's ``resumes.jsonl`` (continual_arc_training.launch), as realtime.sh's own resume does.
 
 Subcommands (``python -m continual_arc_training.realtime ...``, from the node's environment): player, labeller,
 trainer; realtime.sh passes each its settings, and the trainer runs ``train`` processes on its GPUs.
@@ -62,7 +64,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from continual_arc_training import checkpoints, gpupool, labeller, oracle, play
+from continual_arc_training import checkpoints, gpupool, labeller, launch, oracle, play
 from continual_arc_training.calls import Call, by_game, load_calls
 
 ROWS = ("dagger", "opsd", "pg")
@@ -209,6 +211,9 @@ def cmd_player(a: argparse.Namespace) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     run = Path(a.run).expanduser()
     current = ""
+    first = next((r for r in range(a.rounds) if not (round_dir(run, r) / "play.done").exists()), a.rounds)
+    if first < a.rounds and (first or round_dir(run, first).exists()):
+        launch.resumed(run, loop="player", round=first)
     for r in range(a.rounds):
         rd = round_dir(run, r)
         if (rd / "play.done").exists():
@@ -231,6 +236,8 @@ def cmd_player(a: argparse.Namespace) -> None:
         want = len(schedule.slots)
         have = 0
         for attempt in range(1, 4):
+            if not play.round_recorded(play_dir(run), schedule):
+                play.set_aside(rd)
             say(run, f"play round {r} started ({current}, attempt {attempt})")
             try:
                 play.play_round(a.row, play_dir(run), schedule, base_url=SERVER, served_name=current)
@@ -303,6 +310,8 @@ def cmd_labeller(a: argparse.Namespace) -> None:
                  "Resume with the original guidance or use a new run directory.")
         raise SystemExit(1)
     r, asked = ready_rounds(run, a.rounds, a.row), set()
+    if r < a.rounds and (r or labels_dir(run, r).exists()):
+        launch.resumed(run, loop="labeller", round=r)
     while r < a.rounds:
         rd = round_dir(run, r)
         played = (rd / "play.done").exists()
@@ -641,6 +650,7 @@ def cmd_train(a: argparse.Namespace) -> None:
                 out.mkdir()
             else:
                 say(run, f"phase {k} goes on from its checkpoint at step {step} on GPUs {','.join(map(str, mine))}")
+                launch.resumed(run, loop="train", phase=k, step=step)
             newest = latest(run)
             init = newest["adapter"] if newest else None
             done = train_phase(a, run, targs, trainer, k, out, Path(init) if init else None)
@@ -672,6 +682,8 @@ def cmd_trainer(a: argparse.Namespace) -> None:
     process that ends any other way than asked or REGROW ends this one with its code, for realtime.sh to restart."""
     run = Path(a.run).expanduser()
     (run / "train").mkdir(parents=True, exist_ok=True)
+    if 0 < next_phase(run) < a.rounds:
+        launch.resumed(run, loop="trainer", phase=next_phase(run))
     pool = gpupool.Pool(gpupool.parse(a.train_gpus), run.name)
     stopping: list[int] = []
     signal.signal(signal.SIGTERM, lambda signum, frame: stopping.append(signum))

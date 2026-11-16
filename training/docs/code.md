@@ -13,7 +13,7 @@ command line; [how a run works](how-a-run-works.md) says how they fit together.
 | `references` | The reference rows with the model on OpenRouter: the two players, the harness rows (H, H0, HPL, HA, HPL0) and the bare-model rows (DC, F, M, M0, whose cache and programs are their users' one memory, as every row's is). Command line: every round not yet played (`reference.sh`). |
 | `teacher_rows` | The teacher's rows hg, hgpl and hplg: Qwen3.5-9B playing the stream and both tests from GLM-5.3 Flash's own harness, each stream instance from the teacher's commit of the round before, 100 rounds per play as forks of their own. Command line: a play, and the stream's view (`teacher-rows.sh`). |
 | `memory` | A round's memory-use counters: what each user wrote in the harness's memory against the round before, by area (programs, skills, the harness's store, notes, scratch), from the round's merge at several users and from snapshots at one, the reads of each area in the student's own calls in play (a program read only when its source, as the round before left it in the memory's `state.git`, or for a frozen test as the commit its `frozen.json` names held it, came back in a tool result, not when a call names its path), and whether a game had its task's program come back by its first submission (`reused_program`) or solved without a demo; written to the round's `memory.json`. Command line: a round's summary line (`paper.sh`), and `recount`, which counts a played run's reads again into its rounds' `memory.json`, on a whole copy of the run: it refuses one without its games, and `--state-git` is the `state.git` a stored play was forked from. |
-| `frozen` | The two frozen tests: every test user seeded from the run's one end-of-stream memory (forked from a state log by the baselines' seeding, or copied with every path renamed, SQLite rows included), a trained run's test played on its server, a reference row's through its own player, a reference from nothing, a run's weights alone; the summary. Command line: `model`, `play`, `summary` (`frozen.sh`, `ref-tests.sh`). |
+| `frozen` | The two frozen tests: every test user seeded from the run's one end-of-stream memory (forked from a state log by the baselines' seeding, or copied with every path renamed, SQLite rows included), a trained run's test played on its server, a reference row's through its own player, a reference from nothing, a run's weights alone; the summary. A test cut short goes on with the users whose instances had not ended, each started again from what the test starts from (`start_again`), the others kept as the benchmark's runner kept them (`round.jsonl`). Command line: `model`, `play`, `summary` (`frozen.sh`, `ref-tests.sh`). |
 
 ### The model calls and the server
 
@@ -45,14 +45,15 @@ command line; [how a run works](how-a-run-works.md) says how they fit together.
 | `checkpoints` | A phase's step checkpoints: written on SIGTERM and every 25 steps, committed on a thread of their own, the best and the newest kept; a phase resumes only from its own (`fingerprint`) and on batches that replay as recorded. |
 | `gpupool` | The trainer GPUs real-time runs on one node share: an even split among the runs with a phase to train, agreed through one state file under an flock. |
 | `stack` | The kernels Qwen3.5's linear-attention layers train through on a machine, written to a run's `train/kernels.json`, and a stop before training on a stack known to compute wrong gradients. Command line: this machine's stack. |
-| `scratch` | Training once at the end: a DAgger run's phase K trained again from the base model, and the summary comparing both adapters' held-out loss and frozen tests. Command line: `train`, `summary` (`scratch.sh`). |
+| `scratch` | Training once at the end: a DAgger run's phase K trained again from the base model, going on from its last step checkpoint when a stop cut it short, and the summary comparing both adapters' held-out loss and frozen tests. Command line: `train`, `summary` (`scratch.sh`). |
+| `launch` | Every run's own record and resume, which each script keeps through `lib.sh`'s `begin` with the machine's own Python: the run's settings and code (`settings.json`, `code.diff`), its record (`manifest.json`, a launch each), its resumes (`resumes.jsonl`), and the rules a launch keeps: a new run refused in a folder that holds one or without a purpose, a resume refused other settings, and a resume from other code started again from a checkout of the run's own commit. Command line: `begin`, `end` (`lib.sh`). |
 | `schedules/` | The two frozen tests' schedules for `arc1` at seed 0, the benchmark's own. |
 
 ## The scripts (`scripts/`)
 
 | Script | What it does |
 | --- | --- |
-| `lib.sh` | What the node scripts share: the folders (`PRIME_RL`, `VLLM_VENV`, `RUNS`, `BASELINES`), the model and its server's arguments, the server's health check and stop, the adapter folder vLLM loads. |
+| `lib.sh` | What the node scripts share: the folders (`PRIME_RL`, `VLLM_VENV`, `RUNS`, `BASELINES`), the code every process runs (the script's own checkout's, on `PYTHONPATH`), each run's launch (`begin`: its record, its console, `RESUME=1`), the model and its server's arguments, the server's health check and stop, the adapter folder vLLM loads. |
 | `realtime.sh` | One trained row on one node: the relay and the server kept up, the driver's loops run side by side and restarted when they die. |
 | `serve.sh` | The stream's model server on :8101, started as asked unless it already serves so, and adapters loaded into it. |
 | `vllm-serve.sh` | A vLLM server from its own environment (installed on first use), up when it answers `/health`. |
@@ -69,5 +70,7 @@ command line; [how a run works](how-a-run-works.md) says how they fit together.
 One test module per module, each on hand-made data with play, the oracle, the server and training faked where they
 would need a network or a GPU. `test_trainer.py` and `test_parallel.py` run the real trainer on a tiny random Qwen3.5
 on the CPU and compare every pass over a chain with the same quantities computed directly, call by call;
-`test_frozen.py` and `test_scripts.py` run the node scripts in a fake home with every node tool stubbed; `fakes.py`
-holds the tokenizers and games the tests share.
+`test_frozen.py` and `test_scripts.py` run the node scripts in a fake home with every node tool stubbed;
+`test_resume.py` runs a tiny trained run whole, the driver's own loops side by side, stopped partway and resumed, and
+checks it against the same run never stopped, record for record and weight for weight; `fakes.py` holds the tokenizers,
+games and clone the tests share.

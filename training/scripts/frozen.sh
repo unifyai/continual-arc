@@ -4,10 +4,13 @@
 # model server if no other run there still uses it. Each test has a model server of its own on half of GPUS, one copy
 # tensor-parallel over them as the stream's was, launched as serve.sh launches it but on a port of its own, 8120 plus
 # its first GPU, so that no other run's server on the node is ever touched; the run's last phase's adapter is loaded into
-# both, and the two tests are played side by side, each started again from its seeding, up to three times, should it stop
-# before its round is recorded, each into OUT/TEST/play. Then OUT/summary.json, the test users' copies of the memory
-# deleted (the stream's own is the run's, and every call, turn and game of the test stays), the two servers stopped, and
-# OUT/done. Detached and resumable: run again, it takes up where it stopped.
+# both, and the two tests are played side by side, each into OUT/TEST/play, and started again up to three times should it
+# stop before its round is recorded, keeping the test users that finished and playing only the others. Then
+# OUT/summary.json, the test users' copies of the memory deleted (the stream's own is the run's, and every call, turn
+# and game of the test stays), the two servers stopped, and OUT/done. The tests are a run of their own in OUT, inside
+# the run they test, as lib.sh's begin keeps one: RESUME=1 goes on with them where they stopped, with their own settings
+# (the GPUs may change) and code; any other launch into an OUT that holds them is refused, and one whose tests are done
+# does nothing. A new one takes the purpose of the run it tests, or PURPOSE for a reference from nothing.
 # ADAPTER and SERVED (both or neither) play another adapter, served under that name, instead of the run's last phase
 # (scratch.sh's retrain), with OUT another folder; OUT defaults to RUNS/rt/RUN/frozen. ROW (h0, h0e or bare) plays that
 # reference from nothing on the base model instead, into OUT/TEST-reference/play, with no run to wait for: RUN then
@@ -18,13 +21,13 @@
 # play/schedule.json, and a reference played from nothing (ROW) plays the one for USERS (1 unless set), the users of
 # the runs it is read against.
 # POLL is how often it looks, in seconds (60). Paths: lib.sh's.
-# Usage (on the node):
+# Usage (on the node), RESUME=1 in front to go on with tests that stopped:
 #   cd ~ && (setsid -f nohup bash ~/continual-arc/training/scripts/frozen.sh pg-u2-lag1 0,1,2,3,4,5,6,7 > /dev/null 2>&1 < /dev/null)
-#   cd ~ && (ROW=bare setsid -f nohup bash ~/continual-arc/training/scripts/frozen.sh qwen-f 0,1,2,3,4,5,6,7 > /dev/null 2>&1 < /dev/null)
+#   cd ~ && (ROW=bare PURPOSE="..." setsid -f nohup bash ~/continual-arc/training/scripts/frozen.sh qwen-f 0,1,2,3,4,5,6,7 > /dev/null 2>&1 < /dev/null)
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
-RUN=$1 GPUS=$2 ROW=${ROW:-} MEMORY=${MEMORY:-}
-SCHEDULES=${SCHEDULES:-$SRC/continual_arc_training/schedules}
+RUN=$1 GPUS=$2 ROW=${ROW:-} MEMORY=${MEMORY:-} SCHEDULES=${SCHEDULES:-}
+SCHED_DIR=${SCHEDULES:-$SRC/continual_arc_training/schedules}
 R=$RUNS/rt/$RUN
 [ -n "$ROW" ] && R=$RUNS/paper/$RUN
 FOLDER=frozen; [ "$MEMORY" = none ] && FOLDER=weights
@@ -83,6 +86,7 @@ py() { (cd "$PRIME_RL" && uv run --no-sync python -m continual_arc_training.froz
     [ -z "$MEMORY" ] || [ "$MEMORY" = none ] || { say "MEMORY is none or unset, not $MEMORY"; exit 1; }
     [ -z "$ROW" ] || [ -z "$MEMORY" ] || { say "a reference from nothing has no memory to leave out"; exit 1; }
     [ -f "$OUT/done" ] && exit 0
+    begin "$OUT" "${OUT#"$RUNS"/}" "GPUS POLL" RUN ROW MEMORY ADAPTER SERVED USERS SCHEDULES GPUS POLL || exit 1
     say "started: the frozen tests of $RUN on GPUs $GPUS${ADAPTER:+, $SERVED from $ADAPTER}${ROW:+, row $ROW from nothing}${MEMORY:+, its weights alone from an empty memory}, into $OUT"
     if [ -n "$ROW" ]; then
         SERVED=$MODEL who=(--row "$ROW") model=(--served "$MODEL")
@@ -109,8 +113,8 @@ py() { (cd "$PRIME_RL" && uv run --no-sync python -m continual_arc_training.froz
     say "serving $SERVED on GPUs ${shares[0]} (:${ports[0]}, ${NAMES[0]}) and ${shares[1]} (:${ports[1]}, ${NAMES[1]})"
     scheds=() wants=() tries=(0 0)
     for t in "${TESTS[@]}"; do
-        sched=$SCHEDULES/arc1-$t-test-seed0.json
-        [ "$t" = seen ] && [ "$USERS" != 1 ] && sched=$SCHEDULES/arc1-seen-test-seed0-u$USERS.json
+        sched=$SCHED_DIR/arc1-$t-test-seed0.json
+        [ "$t" = seen ] && [ "$USERS" != 1 ] && sched=$SCHED_DIR/arc1-seen-test-seed0-u$USERS.json
         scheds+=("$sched")
         wants+=("$(python3 -c "import json, sys; print(len(json.load(open(sys.argv[1]))['slots']))" "$sched")")
     done

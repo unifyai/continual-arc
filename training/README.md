@@ -53,14 +53,49 @@ end-of-stream memory. The settings and the reason for each are in [settings](doc
 A trained run is started on its node with:
 
 ```bash
-ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 TRAIN_GPUS=4,5,6,7 \
-    setsid nohup bash ~/continual-arc/training/scripts/realtime.sh > /dev/null 2>&1 < /dev/null &
+PURPOSE="why the run is made, who started it" ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 \
+    SERVE_DP=1 TRAIN_GPUS=4,5,6,7 setsid nohup bash ~/continual-arc/training/scripts/realtime.sh \
+    > /dev/null 2>&1 < /dev/null &
 # once its stream has ended, on the same node:
 (setsid -f nohup bash ~/continual-arc/training/scripts/frozen.sh dagger-u1-lag1 0,1,2,3,4,5,6,7 \
     > /dev/null 2>&1 < /dev/null)
 ```
 
-with `ROW` one of `dagger`, `opsd` and `pg` and `USERS` 1, 2 or 4. The training settings match the paper's; expert guidance has since been consolidated as described below.
+with `ROW` one of `dagger`, `opsd` and `pg` and `USERS` 1, 2 or 4, and once stopped it goes on with the same command,
+`RESUME=1` in place of `PURPOSE` (below). The training settings match the paper's; expert guidance has since been
+consolidated as described below.
+
+## Every run resumes
+
+Every script's run keeps its own record in its folder and goes on from where it stopped with one flag, whatever
+stopped it, as unify's rule "Experiments keep everything" asks (`lib.sh`'s `begin`, the module
+[`launch`](src/continual_arc_training/launch.py)):
+
+- **A new run** says why in `PURPOSE` (a run inside another, such as a run's frozen tests, takes that one's) and starts
+  in a folder of its own: a launch into a folder that holds a run is refused.
+- **Its folder keeps** `settings.json` (every setting that decides what the run computes, and the commit of its code,
+  with any changes the checkout held in `code.diff`), `manifest.json` (each launch: the script, the code it ran, the
+  machine and its GPUs, the settings a launch may change, when it started and ended and how), `resumes.jsonl` (each
+  launch or loop that went on from where the run stopped) and `console.log`.
+- **Its own code:** every launch starts its script again from a checkout of the run's commit and changes, made once
+  beside the repository (`CODE_HOME`, default `~/continual-arc-code`, the code alone), so that neither a pull in the
+  clone nor a relaunch from a clone at other code changes what a run runs, the loops `realtime.sh` restarts included.
+- **`RESUME=1`** in front of the same command goes on with the run, refused where the folder holds none, while a launch
+  of it is still going, and where a setting differs from the run's own, but for where it runs (its GPUs and ports),
+  how often a loop is restarted and its spend caps, which bind only by stopping it. Whoever relaunches a run needs only
+  `RESUME=1`, and a run that is done does nothing when launched again.
+- **What it goes on from:** a trained run's phase from its last step checkpoint (one every 25 steps, about 11 minutes,
+  and one on SIGTERM), its round played again whole, the games of the play the runner never recorded set aside in the
+  round's `unrecorded/`, and its labels kept; a frozen test keeping its users whose instances ended, as the benchmark's
+  runner keeps them, and playing only the others, forked again; a reference row's or a frozen row's round of the
+  stream played again whole, its learner's state put back as the round before left it, and a teacher row's part of the
+  stream forked and played again whole; training once at the end from its last step checkpoint.
+- **As though it had never stopped:** whatever the code computes deterministically goes on exactly as it would have:
+  the batches each phase steps through, its generator's draws, the weights and the optimizer's moments, the labels,
+  label sets and splits. `tests/test_resume.py` checks it on a tiny whole run, the driver's three loops stopped partway
+  and resumed, against the same run never stopped, record for record and weight for weight, and `test_trainer.py` on
+  the real trainer. What samples cannot replay: a round's games come from vLLM, the oracle's labels from OpenRouter
+  and OPSD's replies from vLLM, so a round played again is a new play of it, from the same state.
 
 ## Expert guidance
 
@@ -99,9 +134,11 @@ checkout, vLLM must sit apart from it, and none of it is needed to play, read or
 on the benchmark, the baselines and httpx alone, and imports torch, transformers, peft and safetensors only inside
 the functions that need them (the trainer, the label set's tokenizer, an adapter's files).
 
-Every script finds the package, the benchmark and the baselines from where it sits; the node's folders are parameters:
+Every script runs the package, the benchmark and the baselines of the checkout it sits in, ahead of any installed copy
+(`PYTHONPATH`), so that a run resumed from its own commit runs that commit's code; the node's folders are parameters:
 `PRIME_RL`, `VLLM_VENV`, `RUNS` (default `~/runs`, where every run writes) and `BASELINES` (default the repository's
-`baselines/`). The examples assume the repository is cloned at `~/continual-arc`.
+`baselines/`: its `.env` holds the OpenRouter key, and a reference machine's plays run in its uv environment). A run is
+launched from a git clone, whose commit it keeps. The examples assume the repository is cloned at `~/continual-arc`.
 
 ## Tests
 

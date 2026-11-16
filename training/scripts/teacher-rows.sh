@@ -4,10 +4,13 @@
 # two plays of 100 users, then both frozen tests PLAYS times (four), each play up to three times, started GAP seconds apart
 # (120), since plays started together meet the model's providers' rate limits and a game whose calls fail plays differently.
 # The row is RUNS/paper/qwen-$ROW-u1: frozen/NAME/play each play, play/ the stream as a row's is read, progress and play.log
-# beside them, play.done and frozen/done once all are recorded. Resumable: a play whose round is recorded is not played
-# again. The row's reset is reference.sh's PLAYER=qwen ROW=h0, or hpl0 for hplg, best at the same hours as this stream.
-# It runs from BASELINES's environment, with its .env (OPENROUTER_API_KEY), as reference.sh does.
-# Usage (on the machine): ROW=hplg setsid nohup bash ~/continual-arc/training/scripts/teacher-rows.sh \
+# beside them, play.done and frozen/done once all are recorded. It is a run of its own, as lib.sh's begin keeps one: a
+# new row says why in PURPOSE, and RESUME=1 goes on with one that stopped, a play whose round is recorded not played
+# again and one cut short keeping its users that finished, with its own settings (GAP may change) and code; any other
+# launch into its folder is refused. The row's reset is reference.sh's PLAYER=qwen ROW=h0, or hpl0 for hplg, best at
+# the same hours as this stream. It runs from BASELINES's environment, with its .env (OPENROUTER_API_KEY), as
+# reference.sh does.
+# Usage (on the machine): PURPOSE="..." ROW=hplg setsid nohup bash ~/continual-arc/training/scripts/teacher-rows.sh \
 #     > /dev/null 2>&1 < /dev/null &
 #   stop: this script's process group (kill -- -<its pid>)
 set -uo pipefail
@@ -20,7 +23,7 @@ case $ROW in
 esac
 GAP=${GAP:-120}; PLAYS=${PLAYS:-4}
 L=$RUNS/paper/qwen-$ROW-u1
-mkdir -p "$L/frozen"
+mkdir -p "$L"
 say() { echo "$(date -u +%m-%d\ %H:%M) teacher-rows.sh: $*" >> "$L/progress"; }
 py() { (cd "$BASELINES" && uv run --no-sync --env-file .env python -m continual_arc_training.teacher_rows "$@") >> "$L/play.log" 2>&1; }
 take() {   # take NAME --first F | --test TEST
@@ -32,7 +35,10 @@ take() {   # take NAME --first F | --test TEST
     say "$name not played in three tries"; return 1
 }
 {   # read whole before it runs: bash reads a script as it goes, and the code may be pulled again while this runs
+    [ -f "$L/frozen/done" ] && { echo "$L is done: nothing to go on with" >&2; exit 0; }
     [ -f "$TEACHER/play.done" ] || { say "its teacher $TEACHER has not played its stream"; exit 1; }
+    begin "$L" "paper/qwen-$ROW-u1" "GAP" ROW PLAYS GAP || exit 1
+    mkdir -p "$L/frozen"
     say "started: $ROW from $TEACHER, $PLAYS plays of each test, $GAP s apart, baselines $BASELINES"
     pids=()
     for first in 000 100; do take "stream-$first" --first "$((10#$first))" & pids+=($!); sleep "$GAP"; done

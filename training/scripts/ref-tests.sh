@@ -8,8 +8,11 @@
 #         second, independent play whose spread from the first is the noise of playing a test twice
 #   then  ROW/frozen/summary.json, the test users' copies of the memory deleted (every call, turn and game of the tests
 #         stays), and ROW/frozen/done
-# A row whose tests fail two passes in a row is left for a person, said so in the log. Resumable: a play whose round is
-# recorded is not played again. Stop it with its whole process group (kill -- -PGID). The plays run from BASELINES's
+# A row's tests are a run of their own in ROW/frozen, inside the row's, as lib.sh's begin keeps one: with RESUME=1 a
+# row's tests that began go on where they stopped, a play whose round is recorded not played again and one cut short
+# keeping its test users that finished, from the code they began on; without it, such a row is refused and counted, as
+# is one that began on other code than this checkout's. A row whose tests fail two passes in a row is left for a
+# person, said so in the log. Stop it with its whole process group (kill -- -PGID). The plays run from BASELINES's
 # environment, with its .env (OPENROUTER_API_KEY), as reference.sh's do; its log is RUNS/paper/ref-tests.log.
 # Usage (on the machine): (setsid nohup bash ~/continual-arc/training/scripts/ref-tests.sh > /dev/null 2>&1 < /dev/null &)
 set -uo pipefail
@@ -40,11 +43,17 @@ play() {   # play ROW TEST NAME OPTIONS...: one play into P/ROW/frozen/NAME/play
     done
     return 1
 }
-take() {   # take ROW: play its tests, then its summary and done
+failed() {   # failed ROW WHY: a pass of ROW's tests that failed, counted
+    echo $(( $(cat "$P/.ref-tests-failed/$1" 2>/dev/null || echo 0) + 1 )) > "$P/.ref-tests-failed/$1"
+    say "$1: not done ($(cat "$P/.ref-tests-failed/$1") of 2 passes): $2"
+}
+take() {   # take ROW: play its tests, then its summary and done, in a process of its own
     local row=$1 player kind users t name options ok=1 plays=() spec
     read -r player kind users < <(python3 -c "import json, sys; d = json.load(open(sys.argv[1]))
 print(d['player'], d['row'], json.load(open(sys.argv[2]))['users'])" "$P/$row/play/driver.json" \
         "$P/$row/play/schedule.json") || { say "$row: no driver.json"; return; }
+    RESUME=$(again "$P/$row/frozen") STAY=1 begin "$P/$row/frozen" "paper/$row/frozen" "" row player kind users \
+        || { failed "$row" "its tests' launch was refused ($P/$row/frozen/progress)"; return; }
     for t in held-out seen; do
         plays+=("$t|$t|--player $player")
         case $kind:$users in h0:1 | hpl0:1 | m0:1 | f:1) plays+=("$t|$t-reference|--player $player --reference") ;; esac
@@ -62,8 +71,8 @@ print(d['player'], d['row'], json.load(open(sys.argv[2]))['users'])" "$P/$row/pl
         touch "$P/$row/frozen/done"
         say "$row: done"
     else
-        echo $(( $(cat "$P/.ref-tests-failed/$row" 2>/dev/null || echo 0) + 1 )) > "$P/.ref-tests-failed/$row"
-        say "$row: not done ($(cat "$P/.ref-tests-failed/$row") of 2 passes)"
+        failed "$row" "a play stopped short"
+        exit 1
     fi
 }
 {   # read whole before it runs: bash reads a script as it goes

@@ -464,6 +464,13 @@ def _fake_play(monkeypatch, served: list, during: dict | None = None):
     monkeypatch.setattr(realtime, "serve", serve)
     monkeypatch.setattr(play, "play_round", play_round)
     monkeypatch.setattr(play, "schedule_cut", lambda r, users: types.SimpleNamespace(round=r, slots=[0] * 2 * (r + 1)))
+    monkeypatch.setattr(play, "round_recorded", _recorded)
+
+
+def _recorded(played: Path, schedule) -> bool:
+    """play.round_recorded for the fakes' schedules: the records hold every slot of the cut."""
+    records = played / "records.jsonl"
+    return records.exists() and len(records.read_text().splitlines()) >= len(schedule.slots)
 
 
 def test_the_player_plays_round_r_on_the_phase_trained_on_rounds_up_to_r_minus_2_never_a_newer_one(tmp_path,
@@ -480,6 +487,25 @@ def test_the_player_plays_round_r_on_the_phase_trained_on_rounds_up_to_r_minus_2
     assert s1["phase"] is None and s1["trained_rounds"] == 0
     assert all((realtime.round_dir(tmp_path, r) / "play.done").exists() for r in range(4))
     assert (tmp_path / "player.done").exists()
+
+
+def test_a_round_the_runner_never_recorded_is_played_again_with_its_games_set_aside(tmp_path, monkeypatch):
+    """A round a stop cut short leaves games in its captured/ that the runner never recorded: the player moves them to
+    the round's unrecorded/1/ before it plays the round again, so that captured/ holds only the play that counts, and
+    says it went on from there in resumes.jsonl; a round the runner recorded whole before the stop keeps its games."""
+    _fake_play(monkeypatch, [])
+    cut, recorded = tmp_path / "cut", tmp_path / "recorded"
+    for run in (cut, recorded):
+        (realtime.round_dir(run, 0) / "captured").mkdir(parents=True)
+        (realtime.round_dir(run, 0) / "captured" / "u000.json.gz").write_text("the unrecorded play's game")
+    (recorded / "play" / "records.jsonl").write_text("{}\n{}\n")   # round 0's two games, recorded whole
+    for run in (cut, recorded):
+        realtime.cmd_player(_player_args(run, 1))
+    kept = realtime.round_dir(cut, 0) / "unrecorded" / "1" / "captured" / "u000.json.gz"
+    assert kept.read_text() == "the unrecorded play's game" and not (realtime.round_dir(cut, 0) / "captured").exists()
+    assert (realtime.round_dir(recorded, 0) / "captured" / "u000.json.gz").exists()
+    assert not (realtime.round_dir(recorded, 0) / "unrecorded").exists()
+    assert [json.loads(line)["round"] for line in (cut / "resumes.jsonl").read_text().splitlines()] == [0]
 
 
 def test_the_player_waits_for_its_phase_when_training_is_behind(tmp_path, monkeypatch):
@@ -507,6 +533,7 @@ def test_the_player_fails_after_three_short_plays(tmp_path, monkeypatch):
     monkeypatch.setattr(realtime, "serve", lambda a, run, phase_, current: "base")
     monkeypatch.setattr(play, "play_round", lambda *args, **kw: None)   # never records anything
     monkeypatch.setattr(play, "schedule_cut", lambda r, users: types.SimpleNamespace(slots=[0, 0]))
+    monkeypatch.setattr(play, "round_recorded", _recorded)
     with pytest.raises(SystemExit):
         realtime.cmd_player(_player_args(tmp_path, 1))
     assert "failed after 3 attempts" in (tmp_path / "progress").read_text()
@@ -692,6 +719,31 @@ def test_realtime_sh_records_shared_or_custom_guidance_only_for_labelled_rows():
     assert _realtime_sh({**SETTINGS, "ROW": "opsd", "GUIDANCE": "/tmp/custom.md"}, "started").stdout.endswith(
         f"{tail}, expert guidance /tmp/custom.md, patience 6\n")
     assert _realtime_sh({**SETTINGS, "ROW": "pg"}, "started").stdout.endswith(f"{tail}, patience 6\n")
+
+
+def test_realtime_sh_keeps_its_runs_settings_and_goes_on_only_with_them(tmp_path):
+    """realtime.sh's settings as its launch keeps them (lib.sh's begin): what the run computes with in settings.json,
+    where it is served and trained in each launch's record; a second launch is refused unless it resumes, and a resume
+    is refused another learning rate but may train on other GPUs."""
+    # MOVED: the lifted lines run in place, as realtime.sh does once started again from the run's own code
+    env = {**SETTINGS, "ROW": "dagger", "RUNS": str(tmp_path / "runs"), "CODE_HOME": str(tmp_path / "code"),
+           "MOVED": "1", "PURPOSE": "realtime.sh's test of the settings its runs keep and go on with"}
+    then = 'begin "$L" "rt/$NAME" "$FREE" $SETTINGS $FREE && echo "launched on $TRAIN_GPUS"'
+    assert _realtime_sh(env, then, tmp_path).returncode == 0
+    run = tmp_path / "run"
+    kept = json.loads((run / "settings.json").read_text())["settings"]
+    assert (kept["ROW"], kept["USERS"], kept["LR"], kept["START_AFTER"], kept["PATIENCE"]) == ("dagger", "4", "1e-4",
+                                                                                                 "24", "6")
+    assert "TRAIN_GPUS" not in kept and "SERVE_GPUS" not in kept
+    refused = _realtime_sh(env, then, tmp_path)
+    assert refused.returncode == 1 and "RESUME=1 goes on with it" in refused.stderr
+    refused = _realtime_sh({**env, "RESUME": "1", "LR": "2e-4"}, then, tmp_path)
+    assert refused.returncode == 1 and "LR '1e-4', not '2e-4'" in refused.stderr
+    assert _realtime_sh({**env, "RESUME": "1", "TRAIN_GPUS": "4,5,6,7"}, then, tmp_path).returncode == 0
+    assert (run / "console.log").read_text().splitlines() == ["launched on 2,3,4,5,6,7", "launched on 4,5,6,7"]
+    launches = json.loads((run / "manifest.json").read_text())["launches"]
+    assert [(x["resume"], x["settings"]["TRAIN_GPUS"], x["status"]) for x in launches] == [
+        (False, "2,3,4,5,6,7", "done"), (True, "4,5,6,7", "done")]
 
 
 @pytest.mark.parametrize("retired", ["ORACLE_RULES", "C1"])

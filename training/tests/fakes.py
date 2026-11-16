@@ -1,9 +1,11 @@
-"""Stand-ins the tests share: a tokenizer whose chat template shows everything it is given, and a played game as a
-learner hands it to the instance hook, with its run's records."""
+"""Stand-ins the tests share: a tokenizer whose chat template shows everything it is given, a played game as a
+learner hands it to the instance hook, with its run's records, a frozen test's users as the benchmark's runner serves
+them, and a node's clone of the scripts."""
 from __future__ import annotations
 
 import gzip
 import json
+import subprocess
 import types
 from pathlib import Path
 
@@ -117,3 +119,68 @@ class TurnTokenizer(CharTokenizer):
         if add_generation_prompt:
             text += "<assistant>\n<think>\n"
         return text
+
+
+def checkout(root: Path) -> None:
+    """``root``, which holds the package's scripts and source (``training/``) as a node's clone does, a git checkout of
+    them: every run a script launches keeps its code's commit."""
+    git = ["git", "-C", str(root), "-c", "user.email=t@t", "-c", "user.name=t"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "training"], check=True)
+    subprocess.run([*git, "commit", "-qm", "the node's code"], check=True)
+
+
+class ForkedUsers:
+    """A frozen test's users as the runner serves them at once: each instance a demonstration, then the answer it
+    shows, and as it ends a note in the user's state of what it played; users in ``fail`` raise at their first action
+    once every other user's instance has ended, as a play the node's stop cuts short."""
+
+    concurrent_users = True
+
+    def __init__(self, play_dir: Path, users: int, fail=()) -> None:
+        import threading
+        self.play_dir, self.fail, self.users = play_dir, set(fail), users
+        self.demos, self.calls, self.ended, self.acted = {}, {}, 0, set()
+        self.lock, self.others = threading.Lock(), threading.Event()
+
+    def begin_round(self, n):
+        pass
+
+    def end_round(self):
+        pass
+
+    def reset(self):
+        pass
+
+    def act(self, obs):
+        from continual_arc.env import RequestDemos, Submit
+        with self.lock:
+            self.calls[obs.user] = self.calls.get(obs.user, 0) + 1
+            self.acted.add(obs.user)
+        if obs.user in self.fail:
+            self.others.wait(30)
+            raise RuntimeError("the node stopped")
+        d = self.demos.get(obs.user)
+        if d is None:
+            return RequestDemos()
+        shift = (d.output[0][0] - d.input[0][0]) % 10
+        return Submit([[(c + shift) % 10 for c in row] for row in obs.input])
+
+    def observe(self, obs, action, feedback):
+        from continual_arc.env import DemosFeedback
+        from continual_arc_baselines.tracking import instance_ended
+        if isinstance(feedback, DemosFeedback):
+            self.demos[obs.user] = feedback.pairs[0]
+        if instance_ended(feedback):
+            state = self.play_dir / "users" / f"u{obs.user:03d}" / "system" / "state"
+            (state / "played").write_text(obs.task_id)
+            with self.lock:
+                self.ended += 1
+                if self.ended == self.users - len(self.fail):
+                    self.others.set()
+
+    def user_resources(self, user):
+        return {"calls": float(self.calls.get(user, 0))}
+
+    def resources(self):
+        return {"calls": float(sum(self.calls.values()))}

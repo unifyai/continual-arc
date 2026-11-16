@@ -13,8 +13,12 @@
 #            test, and the continual student's with its memory and without, compared instance by instance
 # The continual student's phase K is the run's own train/pK (scratch/continual links to it), which must still hold its
 # adapter: the run's last phase always does. Paths: lib.sh's.
+# scratch/ is a run of its own inside the run, as lib.sh's begin keeps one, made for the run's purpose: RESUME=1 goes on
+# with it where it stopped, the training from its last step checkpoint and each test as frozen.sh resumes one, with its
+# own settings and code; any other launch into a scratch/ that holds it is refused, and one whose summary is done does
+# nothing.
 # Usage (on the node): cd ~ && (setsid -f nohup bash ~/continual-arc/training/scripts/scratch.sh dagger-u1-lag1 \
-#     > /dev/null 2>&1 < /dev/null)
+#     > /dev/null 2>&1 < /dev/null), RESUME=1 in front to go on with it once stopped
 set -uo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 RUN=$1 K=${2:-199}
@@ -26,7 +30,7 @@ say() { echo "$(date -u +%m-%d\ %H:%M) scratch: $*" >> "$O/progress"; }
 done_() { touch "$O/$1.done"; say "$1 done"; }
 stage() { [ -f "$O/$1.done" ]; }
 {   # read whole before it runs: bash reads a script as it goes
-    say "started: $RUN's phase $K, its weights alone and then trained from the base model"
+    stage summary && { echo "$O is done: nothing to go on with" >&2; exit 0; }
     if pgrep -f "[c]ontinual_arc_training.realtime|[r]ealtime\.sh" > /dev/null; then
         say "a real-time run still plays or trains here: not started"; exit 1
     fi
@@ -37,16 +41,19 @@ stage() { [ -f "$O/$1.done" ]; }
     if [ ! -f "$continual/DONE" ] || [ ! -d "$continual/adapter" ]; then
         say "$continual holds no adapter: phase $K's was pruned"; exit 1
     fi
+    begin "$O" "rt/$RUN/scratch" "" RUN K || exit 1
+    say "started: $RUN's phase $K, its weights alone and then trained from the base model"
     ln -sfn "$continual" "$O/continual"
     if ! stage weights; then
-        ADAPTER=$O/continual/adapter SERVED=$P-continual MEMORY=none OUT=$O/weights bash "$HERE/frozen.sh" "$RUN" \
-            0,1,2,3,4,5,6,7 && [ -f "$O/weights/done" ] || { say "the weights-alone tests failed ($O/weights/progress)"; exit 1; }
+        ADAPTER=$O/continual/adapter SERVED=$P-continual MEMORY=none OUT=$O/weights RESUME=$(again "$O/weights") \
+            bash "$HERE/frozen.sh" "$RUN" 0,1,2,3,4,5,6,7 && [ -f "$O/weights/done" ] \
+            || { say "the weights-alone tests failed ($O/weights/progress)"; exit 1; }
         done_ weights
     fi
     if ! stage train; then
         pkill -f "[v]llm serve"; sleep 20
         mkdir -p "$O/view" && ln -sfn "$R/play" "$O/view/play"
-        rm -rf "$O/model"
+        # the training goes on from its last step checkpoint in scratch/model, if a stop cut it short
         # expandable segments for training alone: vLLM's custom all-reduce cannot open their memory over CUDA IPC, so
         # a server started under them fails as it captures its graphs
         (cd "$PRIME_RL" && PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True uv run --no-sync python \
@@ -57,8 +64,8 @@ stage() { [ -f "$O/$1.done" ]; }
         done_ train
     fi
     if ! stage test; then
-        ADAPTER=$O/model/adapter SERVED=$P OUT=$O/frozen bash "$HERE/frozen.sh" "$RUN" 0,1,2,3,4,5,6,7 \
-            && [ -f "$O/frozen/done" ] || { say "the frozen tests failed ($O/frozen/progress)"; exit 1; }
+        ADAPTER=$O/model/adapter SERVED=$P OUT=$O/frozen RESUME=$(again "$O/frozen") bash "$HERE/frozen.sh" "$RUN" \
+            0,1,2,3,4,5,6,7 && [ -f "$O/frozen/done" ] || { say "the frozen tests failed ($O/frozen/progress)"; exit 1; }
         done_ test
     fi
     if ! stage summary; then

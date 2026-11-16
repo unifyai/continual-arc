@@ -28,10 +28,13 @@ spelling. The test's own users never share a state: nothing after the test reads
 
 Each test is a benchmark run of its own, ``OUT/TEST/play`` (OUT the run's ``frozen/`` unless given): records.jsonl,
 schedule.json, summary.json, every user's harness and every model call, played by the run's own driver as its stream
-played a round, and ``frozen.json``, what it was played from. The runner records the round only whole, so a test cut
-short is played again from the end-of-stream state, its users seeded afresh. A reference play is the same test from an
-empty state, into ``TEST-reference``: a wiped row's or a floor's second, independent play (``--reference``), whose
-spread from its own test is the noise of playing a test twice, or a trained run's references from nothing (``--row``).
+played a round, and ``frozen.json``, what it was played from. Its users never share a state, so a test cut short keeps
+the users whose instances ended, as the benchmark's runner keeps each instance of a frozen test as it ends
+(``round.jsonl``), and plays only the others, each started again from what the test starts from (:func:`start_again`);
+once the round is recorded, a user kept from the play before is committed as its instance left it, as the round's end
+commits the others (the baselines' ``settle_forks``). A reference play is the same test from an empty state, into
+``TEST-reference``: a wiped row's or a floor's second, independent play (``--reference``), whose spread from its own
+test is the noise of playing a test twice, or a trained run's references from nothing (``--row``).
 A trained run's weights-alone play (``--no-memory``) is its test from an empty state too, but on the run's own adapter
 and under its own task names, into ``TEST-weights``: what the weights carry without anything the harness kept.
 
@@ -52,6 +55,7 @@ import re
 import shutil
 import sqlite3
 import subprocess
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
@@ -165,27 +169,24 @@ def committed(run: Path) -> bool:
     return (run / "play" / "users" / "u000" / "system" / "state-log.jsonl").is_file()
 
 
-def copy_states(run: Path, test_dir: Path, users: int) -> dict[str, Any]:
-    """``test_dir`` from nothing with the run's alias-salt and, for each of its ``users``, a copy of the run's one state
-    (user 0's), renamed: the seeding of a run whose state was never committed. Returns what the state renamed its folder
-    in."""
-    played = run / "play"
-    shutil.rmtree(test_dir, ignore_errors=True)
-    test_dir.mkdir(parents=True)
-    shutil.copy2(played / SALT_FILE, test_dir / SALT_FILE)
-    src = played / "users" / "u000"
+def copy_states(run: Path, test_dir: Path, users: Iterable[int]) -> dict[str, Any]:
+    """For each of ``users`` of the test in ``test_dir``, a copy of the run's one state (user 0's), renamed, anew:
+    whatever ``system/`` the user had goes first. The seeding of a run whose state was never committed; returns what
+    the state renamed its folder in."""
+    src = run / "play" / "users" / "u000"
     if not (src / "system" / "state").is_dir():
         return {"files": 0, "links": 0, "databases": 0}
     found = naming(src / "system" / "state", str(src))
 
     def one(user: int) -> None:
         dst = test_dir / "users" / f"u{user:03d}"
+        shutil.rmtree(dst / "system", ignore_errors=True)
         (dst / "system").mkdir(parents=True)
         subprocess.run(["cp", "-a", str(src / "system" / "state"), str(dst / "system" / "state")], check=True)
         relocate(dst / "system" / "state", str(src), str(dst), found)
 
     with ThreadPoolExecutor(COPIES) as pool:
-        list(pool.map(one, range(users)))
+        list(pool.map(one, users))
     return {"files": len(found[0]), "links": len(found[1]), "databases": len(found[2])}
 
 
@@ -204,9 +205,27 @@ def seed(run: Path, test_dir: Path, users: int) -> dict[str, Any]:
         memory = {"memory": "every test user a fork of the run's one state at its commit of the stream's last round, "
                             "relocated", **forks.seed(played, test_dir, users)}
     else:
+        shutil.rmtree(test_dir, ignore_errors=True)
+        test_dir.mkdir(parents=True)
+        shutil.copy2(played / SALT_FILE, test_dir / SALT_FILE)
         memory = {"memory": "every test user a copy of the run's one state, relocated",
-                  "relocated": copy_states(run, test_dir, users)}
+                  "relocated": copy_states(run, test_dir, range(users))}
     return {**memory, "stream_users": stream_users(run), "stream_rounds": stream_rounds(run)}
+
+
+def start_again(run: Path | None, test_dir: Path, users: list[int], memory: bool) -> None:
+    """``users`` of the test in ``test_dir``, which a stop cut short, each starting again from what the test starts
+    from: with ``memory`` the run's one state as the stream ended it, forked from its commit of the stream's last round
+    or copied (:func:`seed`), and otherwise nothing, whatever ``system/`` each had gone. The users whose instances ended
+    keep what they played."""
+    if memory and committed(run):
+        from continual_arc_baselines import frozen as forks
+        forks.fork_users(run / "play", test_dir, users)
+    elif memory:
+        copy_states(run, test_dir, users)
+    else:
+        for user in users:
+            shutil.rmtree(test_dir / "users" / f"u{user:03d}" / "system", ignore_errors=True)
 
 
 def check_served(base_url: str, served: str, adapter: Path) -> None:
@@ -229,6 +248,7 @@ def cmd_model(o: argparse.Namespace) -> None:
 
 
 def cmd_play(o: argparse.Namespace) -> None:
+    from continual_arc.runner import holds_run, saved_point
     from continual_arc.schedule import Schedule
 
     from continual_arc_training import play
@@ -253,27 +273,40 @@ def cmd_play(o: argparse.Namespace) -> None:
     if o.test == "seen" and run is not None and schedule.meta.get("stream_users", 1) != users:
         raise SystemExit(f"{o.schedule} is the seen test after {schedule.meta.get('stream_users', 1)} users' stream, "
                          f"and {run} served {users}: each user's tasks are their own")
+    forked = not (reference or o.no_memory) and committed(run)   # its users forks of the stream's commit
+
+    def settle() -> None:   # a user kept from a play cut short committed as its instance left it, as the round's are
+        if forked:
+            from continual_arc_baselines import frozen as forks
+            forks.settle_forks(play_dir, schedule)
+
     if play.round_recorded(play_dir, schedule):
+        settle()
         print(json.dumps({"test": o.test, "played": True}), flush=True)
         return
     if o.adapter:
         check_served(o.base_url, o.served, Path(o.adapter))
-    if reference:
-        shutil.rmtree(play_dir, ignore_errors=True)
-        play_dir.mkdir(parents=True)
-        memory: dict[str, Any] = {"memory": "none: played from an empty state"}
-    elif o.no_memory:   # the task names stay the run's, which the weights may have learnt to know a task by
-        shutil.rmtree(play_dir, ignore_errors=True)
-        play_dir.mkdir(parents=True)
-        shutil.copy2(run / "play" / SALT_FILE, play_dir / SALT_FILE)
-        memory = {"memory": "none: the run's weights alone, from an empty state under the run's task names"}
-    else:
-        memory = seed(run, play_dir, schedule.users)
     row = o.row or json.loads((run / "play" / "driver.json").read_text())["row"]
     model = {"player": o.player} if o.player else {"served": o.served, **({"adapter": o.adapter} if o.adapter else {})}
-    (play_dir / "frozen.json").write_text(json.dumps(
-        {"run": run and str(run), "row": row, "test": o.test, "schedule": schedule.name, "users": schedule.users,
-         **model, **memory, "started": datetime.now(UTC).isoformat()}, indent=1))
+    with_memory = not (reference or o.no_memory)
+    if holds_run(play_dir):   # cut short: its ended users kept (the runner's round.jsonl), the others again
+        ended = {record.user for record in saved_point(play_dir, schedule).finished}
+        start_again(run, play_dir, [user for user in range(schedule.users) if user not in ended], with_memory)
+    else:
+        if reference:
+            shutil.rmtree(play_dir, ignore_errors=True)
+            play_dir.mkdir(parents=True)
+            memory: dict[str, Any] = {"memory": "none: played from an empty state"}
+        elif o.no_memory:   # the task names stay the run's, which the weights may have learnt to know a task by
+            shutil.rmtree(play_dir, ignore_errors=True)
+            play_dir.mkdir(parents=True)
+            shutil.copy2(run / "play" / SALT_FILE, play_dir / SALT_FILE)
+            memory = {"memory": "none: the run's weights alone, from an empty state under the run's task names"}
+        else:
+            memory = seed(run, play_dir, schedule.users)
+        (play_dir / "frozen.json").write_text(json.dumps(
+            {"run": run and str(run), "row": row, "test": o.test, "schedule": schedule.name, "users": schedule.users,
+             **model, **memory, "started": datetime.now(UTC).isoformat()}, indent=1))
     if not o.player:
         result = play.play_round(row, play_dir, schedule, base_url=o.base_url, served_name=o.served)
     else:
@@ -283,6 +316,7 @@ def cmd_play(o: argparse.Namespace) -> None:
             result = references.play_bare_round(o.player, row, play_dir, schedule, api_key=key)
         else:
             result = references.play_round(o.player, row, play_dir, schedule, api_key=key)
+    settle()
     print(json.dumps({"test": o.test, "records": len(result.records),
                       "solved": sum(r.solved for r in result.records)}), flush=True)
 

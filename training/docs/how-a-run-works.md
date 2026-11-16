@@ -68,7 +68,7 @@ played: a returning visit that comes straight after its task's previous visit is
 learnt from that visit, though prime-agent's memory, updated at once, holds what it saved.
 
 ```bash
-ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 TRAIN_GPUS=4,5,6,7 \
+PURPOSE="..." ROW=dagger USERS=1 LR=1e-4 START_AFTER=24 SERVE_GPUS=0,1,2,3 SERVE_DP=1 TRAIN_GPUS=4,5,6,7 \
     setsid nohup bash ~/continual-arc/training/scripts/realtime.sh > /dev/null 2>&1 < /dev/null &
 ```
 
@@ -124,8 +124,9 @@ again within a pass when it is found down.
     largest |log r| with its call, position, id and both log-probabilities. PG's held-out loss is its own loss over
     the held-out games, which reads only their wins, so its stop runs once a held-out game has won.
 
-`realtime.sh`'s `started:` line in the run's `progress` records every setting the run was started with, so a run can
-be started again with the same ones.
+The run's `settings.json` holds every setting it computes with and its code's commit, `manifest.json` each launch, and
+the same command with `RESUME=1` in place of `PURPOSE` goes on with it once stopped, with those settings and that code
+(the README's "Every run resumes"); `realtime.sh`'s `started:` line in the run's `progress` notes each launch.
 
 ### Runs that share a node
 
@@ -141,11 +142,13 @@ them. OPSD's draws slow every other run's calls on its server.
 ### A round or a phase cut short
 
 A round cut short (a restart, a node stopped) is played again from its start, all its games anew (the runner records
-only whole rounds), and labelled anew: each label is kept under its call's own id (`labeller.point_id`), so none made
-for a game the replay discarded is read for the new game's call. A phase cut short goes on from its last step
-checkpoint (`checkpoints`: one on SIGTERM, a preemptible machine's notice, and one every 25 steps), on the same
-batches in the same order, from the same random state; a phase stopped before its first checkpoint trains again from
-its start.
+only whole rounds), the games of the play it never recorded first moved to the round's `unrecorded/N/captured`, so
+that its `captured/` holds only the play that counts, and labelled anew: each label is kept under its call's own id
+(`labeller.point_id`), so none made for a game the replay discarded is read for the new game's call. A phase cut short
+goes on from its last step checkpoint (`checkpoints`: one on SIGTERM, a preemptible machine's notice, and one every 25
+steps), on the same batches in the same order, from the same random state, the trainer's weights and optimizer as they
+were; a phase stopped before its first checkpoint trains again from its start. Each loop that goes on from where the
+run stopped, and each launch that resumes it, adds a line to the run's `resumes.jsonl`.
 
 ## The frozen tests
 
@@ -171,7 +174,11 @@ by round (a state log) has each test user forked from its commit of the stream's
 seeding, so `git diff HEAD~1 HEAD` in a test user's `system/state.git` is what it wrote in its test instance; a run
 without one has the memory copied and renamed. The test's users never share what they write: nothing reads it after. Each test is a benchmark run of its own,
 `RUNS/rt/RUN/frozen/held-out/play` and `frozen/seen/play`, with `frozen/summary.json` beside them; once it is recorded,
-its users' copies of the memory go (the memory itself is the run's) and every call, turn and game of the test stays.
+its users' copies of the memory go (the memory itself is the run's) and every call, turn and game of the test stays. A
+test cut short keeps its users whose instances ended, as the benchmark's runner keeps each instance of a frozen test as
+it ends (`play/round.jsonl`), and plays only the others, each forked again from the end-of-stream memory; a kept user's
+state is committed as its instance left it once the round is recorded. The tests are a run of their own in `frozen/`,
+inside the run, which goes on with `RESUME=1`.
 
 **The trained rows' references** on the same stack, rows h0 and bare from nothing, both tests, are played by `refs.sh`
 on a trained run's node once its own tests are done (`frozen.sh` with `ROW`), into
@@ -219,7 +226,10 @@ ROUNDS=3` is a smoke test of a node's stack.
   `started:` line first.
 - **Every stage leaves a marker.** `play.done` in a round's folder, `labels/split/split.json` for its labels, `DONE` and
   `rounds.json` in a phase's folder, `player.done`, `labeller.done` and `trainer.done` for a loop, `frozen/done` for the
-  tests. Running the same command again skips what is done.
+  tests. The same command with `RESUME=1` goes on past what is done.
+- **Every run keeps its own record.** `settings.json` (its settings and its code's commit, any changes in `code.diff`),
+  `manifest.json` (each launch), `resumes.jsonl` (each resume) and `console.log` (the launching script's output), in the
+  run's folder and in each run inside it, such as its `frozen/`.
 - **Users are slots, and share one memory.** A user (`u000`, `u001`, ...) plays one instance a round; the harness
   memory is one for all of them, kept in `play/users/u000/system/` and committed there round by round, and every other
   user's `play/users/uNNN/` holds its harness's logs and the copy of the memory it played its last round on.

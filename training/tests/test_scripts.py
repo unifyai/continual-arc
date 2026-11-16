@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from fakes import checkout
 
 from continual_arc_training import memory
 
@@ -33,21 +34,23 @@ def _stub(folder: Path, name: str, body: str) -> None:
 
 @pytest.fixture
 def node(tmp_path):
-    """A fake home: the scripts copied beside the package's source (so that lib.sh finds it), ``~/.local/bin`` first on
-    the PATH with setsid, sudo and python3 (this interpreter, as the node's own) stubbed, an empty prime-rl checkout and
-    runs folder."""
+    """A fake home: the scripts copied beside the package's source (so that lib.sh finds it), a git checkout of both,
+    ``~/.local/bin`` first on the PATH with setsid, sudo and python3 (this interpreter, as the node's own) stubbed, an
+    empty prime-rl checkout and runs folder, and a purpose for every run a script starts."""
     home = tmp_path / "home"
     tools = home / ".local" / "bin"
     tools.mkdir(parents=True)
     training = tmp_path / "training"
     shutil.copytree(SCRIPTS, training / "scripts")
     (training / "src").symlink_to(SCRIPTS.parent / "src")
+    checkout(tmp_path)
     for folder in ("prime-rl", "runs", "baselines"):
         (home / folder).mkdir()
     _stub(tools, "setsid", 'exec "$@"')
     _stub(tools, "sudo", "exit 0")
     _stub(tools, "python3", f'exec {sys.executable} "$@"')
-    env = {"PATH": f"{tools}:{os.environ['PATH']}", "HOME": str(home), "BASELINES": str(home / "baselines")}
+    env = {"PATH": f"{tools}:{os.environ['PATH']}", "HOME": str(home), "BASELINES": str(home / "baselines"),
+           "PURPOSE": "the scripts' tests, each run a stand-in on a fake node"}
     return home, training / "scripts", tools, env
 
 
@@ -182,7 +185,7 @@ def test_ref_tests_sh_counts_a_row_whose_play_keeps_failing(node):
     home, scripts, tools, env = node
     _stub(tools, "uv", 'case $* in *" summary "*) exit 0 ;; esac; exit 1')
     _reference_row(home, "glm-hpl-u1", "glm", "hpl", 1)
-    assert _ref_tests(scripts, env, "take glm-hpl-u1").returncode == 0
+    assert _ref_tests(scripts, env, "take glm-hpl-u1").returncode == 1   # the take's process, and its launch, failed
     paper = home / "runs" / "paper"
     assert (paper / ".ref-tests-failed" / "glm-hpl-u1").read_text() == "1\n"
     assert not (paper / "glm-hpl-u1" / "frozen" / "done").exists()

@@ -3,8 +3,9 @@
 # learner reset), h0e (the learner reset with the same expert guidance as DAgger's oracle) and bare (the bare
 # model), both frozen tests each, on the node of real-time run RUN once RUN's own frozen tests are done (its
 # frozen/done): frozen.sh with ROW, one row after the other on GPUS, into RUNS/paper/qwen-h0/frozen,
-# RUNS/paper/qwen-h0e/frozen and RUNS/paper/qwen-f/frozen (TEST-reference/play). Resumable: a row whose tests are done
-# is not played again.
+# RUNS/paper/qwen-h0e/frozen and RUNS/paper/qwen-f/frozen (TEST-reference/play), each a run of its own, made for RUN's
+# purpose unless PURPOSE says another. A row whose tests are done is not played again, here or for another run of the
+# node; with RESUME=1 a row whose tests began goes on with them, and without it such a row stops this script.
 # Usage (on the node): cd ~ && (setsid -f nohup bash ~/continual-arc/training/scripts/refs.sh pg-u2-lag1 0,1,2,3,4,5,6,7 \
 #     > /dev/null 2>&1 < /dev/null)
 set -uo pipefail
@@ -12,8 +13,12 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 RUN=$1 GPUS=$2
 {   # read whole before it runs: bash reads a script as it goes
     until [ -f "$RUNS/rt/$RUN/frozen/done" ]; do sleep "${POLL:-60}"; done
+    why=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["purpose"])' "$RUNS/rt/$RUN/manifest.json" \
+        2>/dev/null)
     for spec in h0:qwen-h0 h0e:qwen-h0e bare:qwen-f; do
-        ROW=${spec%%:*} RUNS=$RUNS bash "$HERE/frozen.sh" "${spec#*:}" "$GPUS" || exit 1
+        ROW=${spec%%:*} RESUME=$(again "$RUNS/paper/${spec#*:}/frozen") RUNS=$RUNS \
+            PURPOSE=${PURPOSE:-"the trained rows' reference ${spec%%:*} from nothing, read beside $RUN's frozen tests: $why"} \
+            bash "$HERE/frozen.sh" "${spec#*:}" "$GPUS" || exit 1
     done
     exit 0
 }

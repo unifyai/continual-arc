@@ -165,6 +165,7 @@ def cmd_play(a: argparse.Namespace) -> None:
     run_dir = Path(a.run_dir).expanduser()
     key = os.environ["OPENROUTER_API_KEY"]
     for r in range(len(prior_records(run_dir)) // a.users, a.rounds):
+        play.set_aside(play.round_dir(run_dir, r))   # a play of the round a stop cut short
         result = play_round(a.player, a.row, run_dir, play.schedule_cut(r, a.seed, a.users), api_key=key)
         print(json.dumps({"round": r, "records": len(result.records)}), flush=True)
 

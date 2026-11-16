@@ -158,10 +158,22 @@ def save_instance_hook(run_dir: Path) -> Any:
     return hook
 
 
+def set_aside(round_dir_: Path) -> None:
+    """A round's games from a play of it the runner never recorded (one a stop cut short) moved out of its
+    ``captured/``, which then holds only the play that counts, to ``unrecorded/N/captured``, kept as every output is:
+    called before the round is played again."""
+    if not (round_dir_ / "captured").is_dir():
+        return
+    n = len(list((round_dir_ / "unrecorded").iterdir())) + 1 if (round_dir_ / "unrecorded").is_dir() else 1
+    (round_dir_ / "unrecorded" / str(n)).mkdir(parents=True)
+    (round_dir_ / "captured").rename(round_dir_ / "unrecorded" / str(n) / "captured")
+
+
 def round_recorded(run_dir: Path, schedule: Any) -> bool:
-    """Whether ``run_dir``'s records already hold every slot of ``schedule``, so that playing it changes nothing."""
-    from continual_arc.runner import prior_records, whole_rounds
-    return len(whole_rounds(prior_records(run_dir), schedule)) >= len(schedule.slots)
+    """Whether the run in ``run_dir`` keeps every slot of ``schedule`` (the runner's saved point: its whole rounds of
+    records up to where it last kept its learner's state), so that playing it changes nothing."""
+    from continual_arc.runner import saved_point
+    return len(saved_point(run_dir, schedule).records) >= len(schedule.slots)
 
 
 def wipe_stateless_users(learner: Any, schedule: Any) -> None:

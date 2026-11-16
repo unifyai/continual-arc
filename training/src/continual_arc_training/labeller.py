@@ -107,7 +107,10 @@ def points(plays: list[Path]) -> list[dict[str, Any]]:
     out = []
     for play in plays:
         for f in games(play):
-            doc = load(f)
+            try:
+                doc = load(f)
+            except FileNotFoundError:   # set aside since it was listed: the round is played again
+                continue
             calls = student_calls(doc)
             for n, i in enumerate(calls):
                 out.append({"id": point_id(play, doc, i), "play": str(play), "user": doc["user"], "i": i,
@@ -137,7 +140,10 @@ def point_call(p: dict[str, Any]) -> dict[str, Any]:
                 _games.pop(key, None)
                 if len(_games) >= 48:
                     _games.pop(next(iter(_games)))
-                _games[key] = load(Path(p["play"]) / "captured" / f"u{p['user']:03d}.json.gz")["calls"]
+                try:
+                    _games[key] = load(Path(p["play"]) / "captured" / f"u{p['user']:03d}.json.gz")["calls"]
+                except FileNotFoundError:   # the round's unrecorded play set aside (play.set_aside)
+                    raise StalePoint(f"{p['id']}: {p['play']} u{p['user']:03d} is no longer there") from None
             calls = _games[key]
             if p["i"] < len(calls) and calls[p["i"]]["call_id"] == p["call_id"]:
                 return calls[p["i"]]
@@ -183,9 +189,12 @@ def label(out: Path, ask: Any, rules: str, *, budget: float, workers: int, need_
             cost[0] += dollars
         if outcome != "labelled":
             return outcome
-        path.write_text(json.dumps({"message": {k: m.get(k) for k in ("role", "content", "tool_calls")},
-                                    "reasoning": reasoning, "usage": usage, "from": "label", "asked": n,
-                                    "spent": dollars}))
+        # whole or not at all: a label cut off mid-write would be kept, and fail every later read of the round's spend
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps({"message": {k: m.get(k) for k in ("role", "content", "tool_calls")},
+                                   "reasoning": reasoning, "usage": usage, "from": "label", "asked": n,
+                                   "spent": dollars}))
+        tmp.replace(path)
         return "labelled" if n == 1 else "labelled, asked again"
 
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:

@@ -20,6 +20,13 @@ from continual_arc_training.chains import TokenItem, chain_batches, find_chains
 INDUCTOR_CACHE = Path.home() / ".cache" / "torchinductor"
 
 
+def whole(path: Path, text: str) -> None:
+    """``text`` at ``path`` whole or not at all: a stop mid-write leaves the file as it was."""
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
 def make_trainer(a: argparse.Namespace) -> Any:
     """The trainer the settings ask for: data parallel over ``a.gpus`` GPUs (the trainer alone in this process on one),
     its compiled kernels cached in :data:`INDUCTOR_CACHE` (the data-parallel workers take this process's environment)."""
@@ -86,9 +93,9 @@ def fit(a: argparse.Namespace, trainer: Any, update: Any, out: Path, init: Path 
                       "steps": len(steps)}), flush=True)
 
     def write_phase() -> None:
-        (out / "phase.json").write_text(json.dumps({"objective": update.objective, update.key: update.stats,
-                                                    "held_out_items": update.held_stats, "steps": records,
-                                                    "held_out": evals, "args": vars(a)}, indent=1, default=str))
+        whole(out / "phase.json", json.dumps({"objective": update.objective, update.key: update.stats,
+                                              "held_out_items": update.held_stats, "steps": records,
+                                              "held_out": evals, "args": vars(a)}, indent=1, default=str))
 
     def measure(final: bool = False) -> bool:
         """The held-out loss now, into the measurements, and a checkpoint after it when the loss is the best so far, to
@@ -157,7 +164,7 @@ def fit(a: argparse.Namespace, trainer: Any, update: Any, out: Path, init: Path 
     summary = {"objective": update.objective, "steps": len(records), "time_capped": run["capped"],
                "held_out_stop": run["stopped"], update.key: update.stats, "held_out": [e["loss"] for e in evals],
                "best_step": best_step, "last": records[-1] if records else None, **ck.record()}
-    (out / "DONE").write_text(json.dumps(summary))
+    whole(out / "DONE", json.dumps(summary))   # a DONE cut off mid-write would stop every later start of the trainer
     ck.clear()
     print("done", json.dumps(summary), flush=True)
     return summary

@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 from continual_arc.schedule import Schedule, Slot
+from fakes import ForkedUsers
 
 from continual_arc_training import frozen, play, references, teacher_rows
 
@@ -100,6 +101,51 @@ def test_the_student_plays_the_row_each_teachers_row_maps_to_once(row, played_as
     assert len(calls) == 1
 
 
+def test_a_tests_play_cut_short_forks_only_its_unended_users_again_and_commits_what_each_played(tmp_path, monkeypatch,
+                                                                                               small):
+    """A test's play the node's stop cuts short keeps every user whose instance ended (the runner's round.jsonl) with
+    what it wrote; the next play forks only the others again from the teacher's last commit (what a stopped instance
+    wrote gone) and plays theirs alone; then every user's play is committed as its instance left it, in its own
+    history after the teacher's rounds, and its working tree goes."""
+    from continual_arc.env import EnvConfig
+    from continual_arc.runner import run as run_stream
+    from continual_arc.tasks import TaskRegistry
+    from continual_arc.testing import FakeSource
+
+    teacher, run = _teacher(tmp_path), tmp_path / "qwen-hg-u1"
+    test = Schedule(name="seen", seed=0, users=3, meta={"test": "seen"}, sources={f"fake{i:03d}": "fake" for i in range(3)},
+                    slots=[Slot(task_id=f"fake{i:03d}", instance_seed=100 + i, phase="seen-test", user=i) for i in range(3)])
+    path = tmp_path / "seen.json"
+    test.save(path)
+    monkeypatch.setattr(frozen, "schedule_path", lambda name, users=1: path)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "k")
+    learners, fail = [], [{2}]
+
+    def played(player, row_, play_dir, schedule, *, api_key):   # the runner, on the data-free tasks
+        learners.append(ForkedUsers(play_dir, schedule.users, fail.pop() if fail else ()))
+        return run_stream(learners[-1], schedule, EnvConfig(), out_dir=play_dir, resume=True,
+                          registry=TaskRegistry({"fake": FakeSource(n_tasks=120)}), learner_name=f"reference-{player}")
+
+    monkeypatch.setattr(references, "play_round", played)
+    args = SimpleNamespace(run=str(run), teacher=str(teacher), row="hg", name="seen", first=None, test="seen")
+    with pytest.raises(RuntimeError, match="the node stopped"):
+        teacher_rows.cmd_play(args)
+    systems = [run / "frozen" / "seen" / "play" / "users" / f"u{u:03d}" / "system" for u in range(3)]
+    (systems[2] / "state" / "stopped").write_text("what the stopped instance wrote")
+    teacher_rows.cmd_play(args)
+    assert learners[-1].acted == {2}
+
+    def committed(system, name):
+        return subprocess.run(["git", f"--git-dir={system / 'state.git'}", "show", f"HEAD:{name}"], capture_output=True,
+                              text=True).stdout
+
+    for system in systems:
+        assert not (system / "state").exists()
+        assert len((system / "state-log.jsonl").read_text().splitlines()) == ROUNDS + 1   # the teacher's, then its own
+        assert committed(system, "played").startswith("task-") and not committed(system, "stopped")   # its alias
+        assert committed(system, "notes.md").endswith(f"round {ROUNDS - 1}\n")   # forked from the last commit
+
+
 def test_a_round_0_part_starts_from_nothing_and_a_test_from_the_last_commit(tmp_path, monkeypatch, small):
     teacher, run = _teacher(tmp_path), tmp_path / "qwen-hg-u1"
     monkeypatch.setenv("OPENROUTER_API_KEY", "k")
@@ -156,7 +202,8 @@ def test_teacher_rows_sh_plays_the_stream_then_the_tests_and_marks_them_done(tmp
     uv.write_text('#!/usr/bin/env bash\necho "$*" >> "$HOME/driver"\n')
     uv.chmod(uv.stat().st_mode | stat.S_IEXEC)
     env = {**os.environ, "HOME": str(home), "PATH": f"{tools}:{os.environ['PATH']}", "BASELINES": str(home / "baselines"),
-           "ROW": "hplg", "GAP": "0", "PLAYS": "2", "RUNS": str(home / "runs")}
+           "ROW": "hplg", "GAP": "0", "PLAYS": "2", "RUNS": str(home / "runs"),
+           "PURPOSE": "teacher-rows.sh's test, its plays stand-ins that record what they were asked"}
     script = SCRIPTS / "teacher-rows.sh"
     assert subprocess.run(["bash", str(script)], env=env, capture_output=True).returncode == 1   # no teacher yet
     (home / "runs" / "paper" / "glm-hpl-u1" / "play.done").touch()

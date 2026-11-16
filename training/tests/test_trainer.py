@@ -513,3 +513,81 @@ def test_the_forward_kl_is_ligers_jsd_at_beta_zero_where_liger_is_installed(mode
     hs, ht = torch.randn(40, 64, generator=g), torch.randn(40, 64, generator=g)
     want = liger.LigerFusedLinearJSD(jsd_beta=0.0, temperature=1.0)(hs, W, ht, W)
     assert float(tr._forward_kl(hs, ht, W)) == pytest.approx(float(want), rel=1e-4)
+
+
+class _Killed(Exception):
+    """The trainer's process gone mid-step."""
+
+
+def test_a_phase_stopped_mid_step_resumes_on_the_real_trainer_to_the_same_adapter_and_moments(model_dir, tmp_path,
+                                                                                            monkeypatch):
+    """DAgger's phase (phase.fit with Imitation) on the real trainer, killed mid-step after its step checkpoint and
+    resumed by a trainer of its own (another process's, whose untrained adapter is its own), ends on the adapter and the
+    optimizer of the same phase never stopped, tensor for tensor: the checkpoint holds the weights, AdamW's moments and
+    step counts and the phase's generator, and nothing else a step reads is random (the adapter has no dropout)."""
+    import argparse
+    import concurrent.futures
+
+    from safetensors.torch import load_file
+
+    from continual_arc_training import checkpoints, phase, updates
+    from continual_arc_training.calls import Call
+    from continual_arc_training.chains import CHAIN_SLACK
+    from continual_arc_training.trainer import OPTIMIZER_STATE, TRAINER_WEIGHTS
+
+    class Inline:   # the commit thread inline, as a stop right after a save would otherwise race it
+        def __init__(self, **kwargs):
+            pass
+
+        def submit(self, fn):
+            done = concurrent.futures.Future()
+            done.set_result(fn())
+            return done
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(checkpoints, "ThreadPoolExecutor", Inline)
+    monkeypatch.setattr(checkpoints, "EVERY", 3)
+    g = random.Random(5)
+    calls = []
+    for user in range(6):   # six games of three calls, each prompt extending the one before: a chain a game
+        prompt = [g.randrange(1, VOCAB) for _ in range(20)]
+        for i in range(3):
+            reply = [g.randrange(1, VOCAB) for _ in range(6)]
+            # cut off ("length"): the tokenizer's end of turn is no id of the tiny model's
+            calls.append(Call({}, list(prompt), reply, "length", {"run": "train-r0000", "user": user, "i": i}))
+            prompt = prompt + reply + [g.randrange(1, VOCAB) for _ in range(4)]
+    a = argparse.Namespace(max_seq_len=512, chain_slack=CHAIN_SLACK, chain_calls=2, batch=4, gpus=1, epochs=2,
+                           max_steps=40, max_minutes=240, eval_steps=5, patience=0, skip_first=3, seed=0)
+    init = tmp_path / "init"
+    _trainer(model_dir).save(init)   # the adapter both phases start from, moved off its start
+
+    def fit(out, trainer):
+        out.mkdir(parents=True, exist_ok=True)
+        update = updates.Imitation(a, trainer.tokenizer, calls, [])
+        return phase.fit(a, trainer, update, out, init, random.Random(3))
+
+    whole = fit(tmp_path / "whole", _hybrid_model(model_dir))
+    assert whole["steps"] > 6
+    stopped = _hybrid_model(model_dir)
+    sft, passes = stopped.sft_chains, []
+
+    def killed_in_step_8(chains, rng):
+        passes.append(len(chains))
+        out = sft(chains, rng=rng)   # its gradient accumulated, its optimizer step never taken
+        if len(passes) == 8:
+            raise _Killed
+        return out
+
+    monkeypatch.setattr(stopped, "sft_chains", killed_in_step_8)
+    with pytest.raises(_Killed):
+        fit(tmp_path / "stopped", stopped)
+    assert checkpoints.saved_step(tmp_path / "stopped") == 6
+    resumed = fit(tmp_path / "stopped", _hybrid_model(model_dir))
+    assert resumed["resumed"] == [6] and resumed["steps"] == whole["steps"]
+    kept, again = (load_file(str(tmp_path / run / "adapter" / TRAINER_WEIGHTS)) for run in ("whole", "stopped"))
+    assert kept.keys() == again.keys() and all(torch.equal(kept[k], again[k]) for k in kept)
+    moments = [torch.load(tmp_path / run / "adapter" / OPTIMIZER_STATE)["state"] for run in ("whole", "stopped")]
+    assert moments[0].keys() == moments[1].keys()
+    assert all(torch.equal(moments[0][i][k], moments[1][i][k]) for i in moments[0] for k in moments[0][i])
