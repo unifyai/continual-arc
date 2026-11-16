@@ -606,3 +606,76 @@ def test_undoing_a_round_goes_through_folders_its_attempt_made_read_only(tmp_pat
     cache.chmod(0o555)
     assert SharedState(lambda user: systems[user], 2).recover(0) is None
     assert not (cache / "module.go").exists()
+
+
+def test_a_team_run_stopped_in_a_round_goes_on_exactly_as_one_never_stopped(tmp_path, monkeypatch):
+    """A team's run stopped in the middle of a round, two of its three users' writes in their states: the relaunch
+    puts the one state back as the round began and plays the round again, so every record, every round's merge and
+    every round's committed state is the run's never stopped, and every instance after the stop starts from the
+    state it started from there."""
+    import shutil
+    import time
+
+    from .fixtures import Stopped, rows
+
+    users, rounds = 3, 4
+    source = FakeSource(n_tasks=2 * users)
+    ids = source.task_ids()
+    sched = interleave_users([stream_schedule(ids[2 * u: 2 * u + 2], rounds, seed=u, source=source.name)
+                              for u in range(users)], seed=0, name="team")
+    registry = TaskRegistry({source.name: source})
+    whole, cut = tmp_path / "whole", tmp_path / "cut"
+    server = FakeUpstream().start()
+
+    def play(run_dir: Path) -> dict:
+        Viewing.views = {}
+        learner = CollectiveHarnessLearner(Viewing, run_dir, schedule=sched, upstream=server.base_url)
+        try:
+            run(learner, sched, out_dir=run_dir, registry=registry, resume=True)
+        finally:
+            learner.close()
+        return dict(Viewing.views)
+
+    act = Viewing.act
+
+    def stopped_once_the_others_wrote(self, obs):
+        if obs.round == 2 and self.user == 1:
+            deadline = time.monotonic() + 10
+            while not all((cut / "users" / f"u{u:03d}" / "system" / "state" / f"own-{u}-2.md").exists() for u in (0, 2)) \
+                    and time.monotonic() < deadline:
+                time.sleep(0.02)
+            raise Stopped
+        return act(self, obs)
+
+    try:
+        unstopped = play(whole)
+        cut.mkdir()
+        shutil.copy(whole / "alias-salt", cut)   # the same names for the tasks, which the one state holds
+        with monkeypatch.context() as patched:
+            patched.setattr(Viewing, "act", stopped_once_the_others_wrote)
+            with pytest.raises(Stopped):
+                play(cut)
+        one = cut / "users" / "u000" / "system"
+        assert (one / "state" / "own-0-2.md").exists() and (one / JOURNAL).exists()   # the cut round's writes
+        resumed = play(cut)
+    finally:
+        server.stop()
+    assert rows(cut / "records.jsonl") == rows(whole / "records.jsonl")
+    assert {key: view for key, view in resumed.items()} == {key: unstopped[key] for key in resumed}
+    assert sorted(resumed) == [(r, u) for r in (2, 3) for u in range(users)]
+
+    def committed(run_dir: Path) -> list[dict]:
+        """Every round's commit of the one state, file by file, the run's own folder named as {run}."""
+        repo = run_dir / "users" / "u000" / "system" / "state.git"
+        out = []
+        for line in (run_dir / "users" / "u000" / "system" / "state-log.jsonl").read_text().splitlines():
+            commit = json.loads(line)["commit"]
+            out.append({path: git(repo, "show", f"{commit}:{path}").replace(str(run_dir), "{run}")
+                        for path in git(repo, "ls-tree", "-r", "--name-only", commit).split()})
+        return out
+
+    assert committed(cut) == committed(whole) and len(committed(cut)) == rounds
+    merges = [[{k: v for k, v in json.loads(line).items() if k != "at"} for line in
+               (run_dir / "users" / "u000" / "system" / MERGES).read_text().splitlines()] for run_dir in (cut, whole)]
+    assert merges[0] == merges[1]
+    assert not (cut / "users" / "u000" / "system" / JOURNAL).exists()

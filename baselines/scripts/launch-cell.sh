@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Launch one cell of the paper's grid: `arc-baselines run` for one row at one preset, configuration, order and seed,
-# detached, writing the run directory runs/<track>/<cell>/ and its log beside it. A cell plays its stream alone, with
-# no epilogue (--no-epilogue), so that a harness cell's two frozen tests can follow it from the state the stream left
-# (arc-baselines test runs/<track>/<cell> --schedule TEST.json, README). A cell whose run directory exists is
-# skipped, so a line can be run again; RESUME=1 continues a cell that stopped part-way. DRY_RUN=1 prints each cell's
-# run directory and command and runs nothing. RUNS=<dir> writes somewhere other than runs/. EPILOGUE=play keeps the
-# configuration's epilogue after the stream, and EPILOGUE=cut builds the schedule with it and plays the stream, its
-# literal prefix, alone (--stream-only). PILOT=N stops each cell after N instances (--stop-after), and RESUME=1 then
-# continues it. LOG_STATE=1 commits the system's state at the end of every round (--log-state), which `arc-baselines
-# test --collective` forks for a cell's frozen tests.
+# detached, writing the run directory runs/<track>/<cell>/, its console in console.log there, every launch's added to
+# the last's. A cell plays its stream alone, with no epilogue (--no-epilogue), so that a harness cell's two frozen tests
+# can follow it from the state the stream left (arc-baselines test runs/<track>/<cell> --schedule TEST.json, README);
+# a harness's state is committed at the end of every round, which `arc-baselines test --collective` forks for them.
+# A cell that holds a run is never launched again from its start: it is skipped unless RESUME=1, which goes on with it
+# from its last whole round (--resume), as a cell a limit, a preemption or a crash stopped is resumed, and RESUME=1
+# skips a cell that holds no run. DRY_RUN=1 prints each cell's run directory and command and runs nothing.
+# RUNS=<dir> writes somewhere other than runs/. EPILOGUE=play keeps the configuration's epilogue after the stream, and
+# EPILOGUE=cut builds the schedule with it and plays the stream, its literal prefix, alone (--stream-only). PILOT=N
+# stops each cell after N instances (--stop-after), and RESUME=1 then continues it.
 #
 #   bash scripts/launch-cell.sh floors <preset> <order> <seed> [config]          row F: the bare model, stateless and
 #                                                                                 with its demonstration cache (two cells)
@@ -59,14 +60,14 @@ launch() {  # cell learner kwargs defaults config order seed
                --llm-defaults "$defaults" --config "$cfg" --order "$order" --seed "$seed" --out "$dir" --events --quiet)
     case ${EPILOGUE:-none} in none) cmd+=(--no-epilogue);; cut) cmd+=(--stream-only);; play) ;;
         *) echo "EPILOGUE is none, play or cut"; exit 1;; esac
-    [ -n "${LOG_STATE:-}" ] && cmd+=(--log-state)
     [ -n "${PILOT:-}" ] && [ -z "${RESUME:-}" ] && cmd+=(--stop-after "$PILOT")
     [ -n "${RESUME:-}" ] && cmd+=(--resume)
     if [ -n "${DRY_RUN:-}" ]; then echo "$dir"; printf '  %q' "${cmd[@]}"; echo; return; fi
-    [ -d "$dir" ] && [ -z "${RESUME:-}" ] && { echo "exists: $dir"; return; }
-    mkdir -p "$(dirname "$dir")"
-    nohup "${cmd[@]}" > "$dir.log" 2>&1 &
-    echo "launched $dir"
+    if [ -f "$dir/meta.json" ] && [ -z "${RESUME:-}" ]; then echo "holds a run: $dir (RESUME=1 goes on with it)"; return; fi
+    if [ ! -f "$dir/meta.json" ] && [ -n "${RESUME:-}" ]; then echo "holds no run to resume: $dir"; return; fi
+    mkdir -p "$dir"
+    nohup "${cmd[@]}" >> "$dir/console.log" 2>&1 &
+    echo "${RESUME:+re}launched $dir"
 }
 # A preset names a model at one reasoning effort, the pair the ARC Prize leaderboard verifies. Each grid model was
 # chosen there (scripts/arc-leaderboard.py): verified zero-shot between about 15 and 60 percent on its track, the band

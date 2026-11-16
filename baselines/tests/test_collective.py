@@ -463,3 +463,57 @@ def test_a_copy_to_read_is_as_it_was_and_a_copy_to_restore_from_has_every_direct
     restore_state(tmp_path / "none", state)
     assert sorted(str(p.relative_to(state)) for p in state.rglob("*")) == ["workspace", "workspace/node_modules",
                                                                           "workspace/node_modules/addon.node"]
+
+
+def test_a_run_of_one_user_stopped_in_an_instance_goes_on_from_its_last_rounds_commit(tmp_path, monkeypatch):
+    """A run of one user keeps its state in place, committed at every round's end; stopped in an instance whose
+    demonstration its harness had written down, it goes on from the last round's commit (the learner's state, which
+    the runner kept and gives back), so the instance buys its demonstration again, and every record and every round's
+    committed state is the run's never stopped."""
+    import shutil
+
+    from .fixtures import Stopped, rows
+    from .test_frozen import FileMemoryHarness
+
+    source = FakeSource(n_tasks=3)
+    sched = stream_schedule(source.task_ids(), 9, seed=1, source=source.name)
+    stop = [step for step, info in enumerate(sched.annotate()) if info.exposure_index == 0][-1]
+    registry = TaskRegistry({source.name: source})
+    whole, cut = tmp_path / "whole", tmp_path / "cut"
+    server = FakeUpstream().start()
+
+    def play(run_dir: Path) -> None:
+        learner = CollectiveHarnessLearner(lambda user: FileMemoryHarness(), run_dir, schedule=sched,
+                                           upstream=server.base_url)
+        try:
+            run(learner, sched, out_dir=run_dir, registry=registry, resume=True)
+        finally:
+            learner.close()
+
+    act = FileMemoryHarness.act
+
+    def stopped(self, obs):
+        if obs.step == stop and not obs.is_fresh:
+            raise Stopped
+        return act(self, obs)
+
+    try:
+        play(whole)
+        cut.mkdir()
+        shutil.copy(whole / "alias-salt", cut)
+        with monkeypatch.context() as patched:
+            patched.setattr(FileMemoryHarness, "act", stopped)
+            with pytest.raises(Stopped):
+                play(cut)
+        play(cut)
+    finally:
+        server.stop()
+    assert rows(cut / "records.jsonl") == rows(whole / "records.jsonl")
+    assert rows(cut / "records.jsonl")[stop]["demo_requests"] == 1
+
+    def trees(run_dir: Path) -> list[str]:
+        system = run_dir / "users" / "u000" / "system"
+        return [git(system / "state.git", "rev-parse", f"{json.loads(line)['commit']}^{{tree}}").strip()
+                for line in (system / "state-log.jsonl").read_text().splitlines()]
+
+    assert trees(cut) == trees(whole) and len(trees(cut)) == 9

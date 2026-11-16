@@ -25,7 +25,7 @@ other. The test's logs and model-call journal go to an attempt of its own.
 user of its own and all of them served at once by
 :class:`~continual_arc_baselines.collective.CollectiveHarnessLearner`, a system of the run's own kind for every user.
 The system as the stream left it is the commit :mod:`~continual_arc_baselines.statelog` made at the end of the stream's
-last round, so the run must have logged its state (``arc-baselines run --log-state``). A run keeps one state whatever
+last round, which every harness's run commits (``arc-baselines run``). A run keeps one state whatever
 its number of users: its attempt's ``system`` for a run of ``arc-baselines run``, and user 0's ``users/u000/system`` for
 a collective run, into which every user's writes were merged round by round
 (:mod:`continual_arc_baselines.shared`), and every test user starts from it. Each test user's ``system/`` starts as a
@@ -40,16 +40,17 @@ reads the run's own as alternates: a user's repository is its own (its branch, i
 store's, so a hundred forks cost what the files they wrote cost. The test's users never share a state: nothing after
 the test reads what its round wrote, so its round ends with every user's state committed as its next round, apart,
 and once the round is recorded the users' working trees go: every one is in its repository, whole
-(:func:`continual_arc_baselines.statelog.restore`). A run with no stream starts every user from nothing, a play that a
-row's measures are read against.
+(:func:`continual_arc_baselines.statelog.restore`, :func:`settle_forks`). A run with no stream starts every user from
+nothing, a play that a row's measures are read against.
 
 Either way a stateless system (rows H0, HPL0 and PL0) wipes its state before its test instance, as before every
 instance, so it plays from nothing. The test's records go to a run directory of its own, by default
 ``RUN/frozen/<the test>/play`` (``<the test>-reference/play`` for a collective test of a run with no stream), holding
 the run's ``alias-salt``, so that the harness meets its tasks under the names it learnt them by, and ``frozen.json``,
-what the test was played from. A test played whole is not played again. One played one instance at a time and cut
-short goes on from where it stopped, and is refused once the stream has gone on since; a round of users cut short is
-played again from its seeding.
+what the test was played from. A test played whole is not played again, and one cut short goes on from where it
+stopped, refused once the stream has gone on since: one instance at a time, from the instance it stopped in; as one
+round of users, every user whose instance had ended kept as it ended, its state committed as its instance left it,
+and only the others forked again to play theirs, since no test user's play reaches another's.
 
 A learner that is not a harness adapter, such as a submitted one (``HostedLearner``), plays a test in the launch that
 plays its stream (``arc-baselines run --test``): the test's one round with the same learner, from the state the stream
@@ -69,7 +70,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
@@ -78,7 +79,7 @@ from pathlib import Path
 from continual_arc.aliases import SALT_FILE
 from continual_arc.schedule import PHASE_STREAM, TEST_SEEN, TESTS, Schedule
 
-from continual_arc_baselines.statelog import GIT_ENV, _git, commit_of, restore
+from continual_arc_baselines.statelog import GIT_ENV, StateLog, _git, commit_of, delete, restore
 
 HELD = "stream-end"
 """What a stream's state directory is renamed to, beside it, while a test plays from copies of it."""
@@ -92,13 +93,15 @@ Found = tuple[list[str], list[tuple[str, str]], list[str]]
 
 
 def first_launch(run_dir: Path):
-    """The run's first launch, as ``arc-baselines run`` parsed it (``launches.jsonl``)."""
+    """The run's first launch, as ``arc-baselines run`` parses it (``launches.jsonl``), less any option it took then and
+    takes no longer, such as ``--log-state``, retired once every harness's state was committed every round."""
     from continual_arc_baselines.cli import build_parser
 
     path = Path(run_dir) / "launches.jsonl"
     if not path.is_file():
         raise SystemExit(f"{run_dir} has no launches.jsonl: a test follows a stream played with arc-baselines run --out")
-    return build_parser().parse_args(json.loads(path.read_text().splitlines()[0])["argv"])
+    launch, _ = build_parser().parse_known_args(json.loads(path.read_text().splitlines()[0])["argv"])
+    return launch
 
 
 # -- a state directory saved and put back ---------------------------------------
@@ -121,31 +124,15 @@ def _special(folder: str, names: list[str]) -> list[str]:
     return [name for name in names if kind(name) not in (stat.S_IFREG, stat.S_IFDIR, stat.S_IFLNK)]
 
 
-def delete(path: Path) -> None:
-    """``shutil.rmtree``, through directories made read-only (a Go module cache's) or unreadable, which refuse to lose
-    an entry, or to be listed, until they are made writable and readable again."""
-    def unlocked(function, failed, error):
-        if not isinstance(error, PermissionError):
-            raise error
-        for folder in (os.path.dirname(failed), failed):
-            if os.path.isdir(folder) and not os.path.islink(folder):
-                os.chmod(folder, os.stat(folder).st_mode | stat.S_IRWXU)
-        if os.path.isdir(failed) and not os.path.islink(failed):
-            shutil.rmtree(failed, onexc=unlocked)
-        else:
-            os.unlink(failed)
-
-    shutil.rmtree(path, onexc=unlocked)
-
-
 # -- one instance at a time -------------------------------------------------------
 
 
 def check(run_dir: Path, test: Schedule, name: str) -> int:
     """Refuse, before anything plays, the test ``test`` (the schedule at ``name``) unless it is a frozen test played one
     instance at a time, every instance after the first reset before it, of the configuration and seed of the run in
-    ``run_dir``, whose schedule is a stream alone, played whole; returns how many instances the stream played."""
-    from continual_arc.runner import prior_records
+    ``run_dir``, whose schedule is a stream alone, played whole and saved so (``continual_arc.runner.saved_point``);
+    returns how many instances the stream played."""
+    from continual_arc.runner import saved_point
 
     if test.meta.get("test") not in TESTS:
         raise SystemExit(f"{name} is not a frozen test: make one with `continual-arc schedule make --test`")
@@ -159,7 +146,7 @@ def check(run_dir: Path, test: Schedule, name: str) -> int:
     if stream.phases() != [PHASE_STREAM]:
         raise SystemExit(f"{run_dir} plays its stream and then {', '.join(stream.phases()[1:])}, so its system's state "
                          "is not the state the stream left: play the stream alone (arc-baselines run --no-epilogue)")
-    played = len(prior_records(run_dir))
+    played = len(saved_point(run_dir, stream).records)
     if played < len(stream.slots):
         raise SystemExit(f"{run_dir} has played {played} of its stream's {len(stream.slots)} instances")
 
@@ -238,7 +225,7 @@ def play_alone(run_dir: Path, schedule: Path, out: Path | None = None, *, quiet:
     """Play the frozen test ``schedule`` of the harness's stream in ``run_dir`` one instance at a time into ``out``
     (default ``run_dir/frozen/<the test>/play``), every instance from a copy of the state the stream left, at the
     stream's own path (the module's docstring); ``argv`` is the command line, for the test's ``launches.jsonl``."""
-    from continual_arc.runner import prior_records
+    from continual_arc.runner import holds_run, prior_records
 
     from continual_arc_baselines.cli import import_object, play
     from continual_arc_baselines.systems.base import SystemLearner
@@ -248,7 +235,7 @@ def play_alone(run_dir: Path, schedule: Path, out: Path | None = None, *, quiet:
     played = check(run_dir, test, str(schedule))
     out = Path(out) if out else run_dir / "frozen" / test.meta["test"] / "play"
     played_from = {"stream": str(run_dir), "instances": played}
-    if prior_records(out):
+    if holds_run(out):
         if not (out / PLAYED_FROM).is_file() or json.loads((out / PLAYED_FROM).read_text()) != played_from:
             raise SystemExit(f"{out} holds a test played from another stream end than {run_dir}'s after {played} "
                              "instances: give this test an --out of its own")
@@ -262,7 +249,7 @@ def play_alone(run_dir: Path, schedule: Path, out: Path | None = None, *, quiet:
                          "end is on disk to play a test from: a harness adapter (SystemLearner) does. Play a Python "
                          "learner's tests from a copy of it, as continual-arc's README shows")
     # the test alone, into a run directory of its own, from copies of the stream's state, which are never committed
-    launch.config, launch.out, launch.resume, launch.stop_after, launch.log_state = None, str(out), True, None, False
+    launch.config, launch.out, launch.resume, launch.stop_after = None, str(out), holds_run(out), None
     launch.quiet, launch.argv = quiet, list(argv or [])
     # stopped with kill or a hangup, a test still gives the stream's state back as it ends, as it does on Ctrl-C
     stops = {sig: signal.signal(sig, lambda signum, frame: sys.exit(128 + signum))
@@ -303,9 +290,9 @@ def stream_end(run_dir: Path) -> tuple[Path, int] | None:
     if attempt.exists():
         system = Path(json.loads(attempt.read_text())["attempt_dir"]) / "system"
         if not (system / "state-log.jsonl").is_file():
-            raise SystemExit(f"{run_dir} did not log its system's state, so its stream's end has no commit to fork: "
-                             "play the stream with arc-baselines run --log-state, or its tests one instance at a time "
-                             "(arc-baselines test without --collective)")
+            raise SystemExit(f"{run_dir} did not commit its system's state, as a run played before every harness's "
+                             "was committed every round may not have, so its stream's end has no commit to fork: play "
+                             "its tests one instance at a time (arc-baselines test without --collective)")
         return system, rounds
     if any((user_system(run_dir, user) / "state-log.jsonl").is_file() for user in range(1, schedule.users)):
         raise SystemExit(f"{run_dir}'s users kept stores of their own, as collective runs did before every learner kept "
@@ -416,21 +403,37 @@ def seed(run_dir: Path, test_dir: Path, users: int) -> dict:
     """``test_dir`` as its round begins, from nothing: the run's task names and every user's ``system/`` (the
     module's docstring), every test user a fork of the run's one system. Returns what the users start from: the
     stream's last round and the system's commit of it."""
-    end = stream_end(run_dir)
+    stream_end(run_dir)
     shutil.rmtree(test_dir, ignore_errors=True)
     test_dir.mkdir(parents=True)
     shutil.copy2(Path(run_dir) / SALT_FILE, test_dir / SALT_FILE)
+    return fork_users(run_dir, test_dir, range(users))
+
+
+def fork_users(run_dir: Path, test_dir: Path, users: Iterable[int]) -> dict:
+    """``users`` of the test in ``test_dir`` each a fork of the run's one system (:func:`seed`), anew: whatever folder a
+    user had goes first. Returns what they start from."""
+    end = stream_end(run_dir)
     objects = object_store(test_dir / "objects.git", end[0] if end else None)
     source, found = None, None
     if end is not None:
         system, rounds = end
         source = (system, rounds, commit_of(system / "state-log.jsonl", rounds - 1))
         scratch = test_dir / "naming"
+        if scratch.exists():   # left by a seeding stopped partway
+            delete(scratch)
         restore(system / "state.git", source[2], scratch)
         found = naming(scratch, str(system))
         shutil.rmtree(scratch)
+
+    def fork(user: int) -> None:
+        mine = user_system(test_dir, user)
+        if mine.exists():
+            delete(mine)
+        fork_user(mine, objects, source, found)
+
     with ThreadPoolExecutor(FORKS) as pool:
-        list(pool.map(lambda user: fork_user(user_system(test_dir, user), objects, source, found), range(users)))
+        list(pool.map(fork, users))
     if source is None:
         return {"from": None}
     return {"from": {"round": source[1] - 1, "system": str(source[0]), "commit": source[2],
@@ -441,8 +444,9 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
     """Play the frozen test ``schedule`` of the run in ``run_dir`` as one round of users into ``out`` (default
     ``run_dir/frozen/<the test>/play``, or ``<the test>-reference/play`` for a run with no stream), every user forked
     from the stream's last commit (the module's docstring), unless its round is recorded there already; returns
-    ``out``."""
-    from continual_arc.runner import build_env, prior_records, run
+    ``out``. A play cut short goes on: every user whose instance had ended keeps it (``continual_arc.runner``), and only
+    the others are forked again and play theirs, refused if the stream has gone on since or the run's launch changed."""
+    from continual_arc.runner import build_env, holds_run, prior_records, run, saved_point
 
     from continual_arc_baselines.cli import import_object, launch_settings
     from continual_arc_baselines.collective import CollectiveHarnessLearner
@@ -450,44 +454,66 @@ def play_forks(run_dir: Path, schedule: Path, out: Path | None = None) -> Path:
 
     run_dir = Path(run_dir).resolve()
     test = Schedule.load(schedule)
+    end = stream_end(run_dir)
     if out is None:
-        name = test.meta["test"] if stream_end(run_dir) else f"{test.meta['test']}-reference"
-        out = run_dir / "frozen" / name / "play"
+        out = run_dir / "frozen" / (test.meta["test"] if end else f"{test.meta['test']}-reference") / "play"
     out = Path(out).resolve()
     if set(test.rounds()) != {0}:
         raise SystemExit(f"{schedule} is not one round, every instance a user of its own: make the test at its full "
                          "width, or play it one instance at a time without --collective")
-    if stream_end(run_dir):
+    if end:
         seen_for(test, Schedule.load(run_dir / "schedule.json"), str(schedule), run_dir)
     if (out / "records.jsonl").exists() and len(prior_records(out)) >= len(test.slots):
+        settle_forks(out, test)
         return out
     launch = first_launch(run_dir)
-    started = seed(run_dir, out, test.users)
     config, kwargs, registry, learner_name = launch_settings(launch, test)
     defaults = json.loads(launch.llm_defaults or "{}")
     defaults.setdefault("session_id", f"{run_dir.name}-{test.meta['test']}")
-    (out / PLAYED_FROM).write_text(json.dumps({"run": str(run_dir), "test": test.meta["test"], "schedule": test.name,
-                                               "users": test.users, "learner": launch.learner,
-                                               "learner_kwargs": kwargs, "llm_defaults": defaults, **started},
-                                              indent=1))
+    played_from = {"run": str(run_dir), "test": test.meta["test"], "schedule": test.name, "users": test.users,
+                   "learner": launch.learner, "learner_kwargs": kwargs, "llm_defaults": defaults}
+    if holds_run(out):
+        recorded = json.loads((out / PLAYED_FROM).read_text())
+        commit = commit_of(end[0] / "state-log.jsonl", end[1] - 1) if end else None
+        if {key: recorded[key] for key in played_from} != played_from or (recorded["from"] or {}).get("commit") != commit:
+            raise SystemExit(f"{out} holds a play of another test, launch or stream end than {run_dir}'s now: give this "
+                             "test an --out of its own")
+        ended = {record.user for record in saved_point(out, test).finished}
+        fork_users(run_dir, out, [user for user in range(test.users) if user not in ended])
+    else:
+        started = seed(run_dir, out, test.users)
+        (out / PLAYED_FROM).write_text(json.dumps({**played_from, **started}, indent=1))
     learner = CollectiveHarnessLearner(lambda user: import_object(launch.learner, "learner")(**kwargs), out,
                                        schedule=test, upstream=launch.upstream,
                                        api_key=os.environ.get(launch.upstream_key_env) or None, body_defaults=defaults,
                                        body_overrides=own_model(kwargs),
                                        declared_context_length=launch.declared_context_length or None)
-    try:   # the round's end commits every user's state (CollectiveHarnessLearner.end_round)
+    try:   # the round's end commits the state of every user it played (CollectiveHarnessLearner.end_round)
         run(learner, test, config=config, out_dir=out, registry=registry, learner_name=learner_name,
             env=build_env(test, config, registry), resume=True, alias_style=launch.alias_style)
     finally:
         learner.close()
+    settle_forks(out, test)
+    return out
+
+
+def settle_forks(out: Path, test: Schedule) -> None:
+    """A recorded test round's users settled in ``out``: the state of every user its round's end did not commit, one
+    whose instance ended before a stop and was kept, committed as its instance left it, as the round's would have, and
+    every user's working tree gone, since every one is in its repository, whole."""
+    forked = json.loads((out / PLAYED_FROM).read_text())["from"]
+    before = forked["round"] + 1 if forked else 0   # the rounds a user's log lists before the test's own
     for user in range(test.users):
         system = user_system(out, user)
-        shutil.rmtree(system / "state")
+        if (system / "state").exists():
+            log = StateLog(system / "state", system / "state.git", system / "state-log.jsonl")
+            if log.rounds == before:
+                log.commit()
+            delete(system / "state")
         # A prime-agent user's own copy of the kernel venv (PrimeAgentLearner.own_venv), some 300 MB, sits beside its
         # state and nothing reads it once the round is committed, so a test of 100 users would leave some 30 GB.
         if (system / "kernel-venv").exists():
-            shutil.rmtree(system / "kernel-venv")
-    return out
+            delete(system / "kernel-venv")
 
 
 # -- a test after the stream, in the launch that plays it -----------------------------

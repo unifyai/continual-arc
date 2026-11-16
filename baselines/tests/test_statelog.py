@@ -6,6 +6,7 @@ first instance."""
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 
@@ -117,3 +118,42 @@ def test_a_stateless_librarys_memory_reaches_the_commit_and_is_wiped_before_a_ne
     taken_up.attach(tmp_path / "system", {}, log_state=True)
     assert taken_up.act(obs(0)) == Submit([[2, 1]])   # the model's program: the kept one would submit [[1, 2]]
     assert taken_up.stats["library_runs"] == 0 and taken_up.stats["wipes"] == 1 and len(taken_up.sent) == 1
+
+
+def test_a_state_goes_back_to_where_it_was_saved_and_its_history_goes_on_from_there(tmp_path):
+    """A run that resumes puts its system's state back as it was committed before the round it goes on from: the
+    directory that commit holds, whatever a stopped instance wrote since and whatever it committed after; the log's
+    later rounds forgotten, so the next commit follows the saved one; and, saved before any commit, nothing at all."""
+    state = tmp_path / "state"
+    log = StateLog(state, tmp_path / "state.git", tmp_path / "state-log.jsonl")
+    nothing = log.saved()
+    assert nothing == {"rounds": 0, "commit": None}
+    (state / "memory.md").write_text("round 0")
+    log.commit()
+    saved = log.saved()
+    assert saved == {"rounds": 1, "commit": log.commit_of(0)}
+    (state / "memory.md").write_text("round 1")
+    (state / "x.cache").write_text("ignored, but committed")
+    log.commit()
+    (state / "memory.md").write_text("half of round 2")   # what a stop in round 2 leaves
+    (state / "partial").mkdir()
+    (state / "partial" / "note").write_text("cut off")
+    log.go_back(saved)
+    assert files(state) == {"memory.md": ("file", b"round 0", False)}
+    assert [json.loads(line)["round"] for line in (tmp_path / "state-log.jsonl").read_text().splitlines()] == [0]
+    assert log.rounds == 1 and log.head() == saved["commit"] and not log.changed()
+    log.go_back(saved)   # where it is already: nothing to write
+    (state / "memory.md").write_text("round 1, again")
+    again = log.commit()
+    git = ["git", f"--git-dir={tmp_path / 'state.git'}"]
+    assert subprocess.run([*git, "rev-parse", f"{again}~1"], capture_output=True, text=True).stdout.strip() == saved["commit"]
+    assert json.loads((tmp_path / "state-log.jsonl").read_text().splitlines()[-1]) | {"at": 0} == {
+        "round": 1, "commit": again, "at": 0}
+    log.go_back(nothing)
+    assert files(state) == {} and log.head() is None and log.rounds == 0
+    (state / "memory.md").write_text("round 0, from nothing")
+    first = log.commit()
+    assert subprocess.run([*git, "rev-list", "--count", first], capture_output=True, text=True).stdout.strip() == "1"
+    shutil.rmtree(state)   # a system's wipe that takes its state directory with it
+    log.go_back({"rounds": 1, "commit": first})
+    assert files(state) == {"memory.md": ("file", b"round 0, from nothing", False)}

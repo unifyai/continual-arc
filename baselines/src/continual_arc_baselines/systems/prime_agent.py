@@ -89,6 +89,7 @@ import tempfile
 import threading
 import time
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -366,7 +367,7 @@ class PrimeAgentLearner(SystemLearner):
         self._events: queue.Queue[dict | None] = queue.Queue()
         self._reader: threading.Thread | None = None
         self._log = None
-        self._usage = {"input": 0, "output": 0, "cost": 0.0, "turns": 0}
+        self._usage = {"input": 0, "output": 0, "cost": Decimal(0), "turns": 0}
         self._version: str | None = None
         self._events_log = None
         self._diag = None
@@ -1166,8 +1167,8 @@ class PrimeAgentLearner(SystemLearner):
             self._usage["output"] += int(usage.get("output") or 0)
             cost = usage.get("cost")
             total = cost.get("total") if isinstance(cost, dict) else cost
-            if isinstance(total, (int, float)):
-                self._usage["cost"] += float(total)
+            if isinstance(total, (int, float)):   # summed as decimals, which an instance's difference keeps exact
+                self._usage["cost"] += Decimal(repr(total))
         self._usage["turns"] += len(assistant)
         if not assistant:
             return "", False
@@ -1311,6 +1312,6 @@ class PrimeAgentLearner(SystemLearner):
         return {
             "system_input_tokens": float(self._usage["input"]),
             "system_output_tokens": float(self._usage["output"]),
-            "system_cost_usd": float(self._usage["cost"]),
+            "system_cost_usd": self._usage["cost"],
             "system_turns": float(self._usage["turns"]),
         }

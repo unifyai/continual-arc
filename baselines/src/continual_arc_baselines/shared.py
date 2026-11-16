@@ -87,13 +87,12 @@ from typing import Any
 from continual_arc_baselines.frozen import (
     FORKS,
     SQLITE,
-    delete,
     naming,
     put_back,
     relocate,
     relocate_database,
 )
-from continual_arc_baselines.statelog import GIT_ENV, ensure_repo
+from continual_arc_baselines.statelog import GIT_ENV, delete, ensure_repo
 
 MERGES = "state-merges.jsonl"
 """Every round's merge, a line each, in user 0's system folder beside the state log."""

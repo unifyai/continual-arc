@@ -11,13 +11,20 @@ other processes are stopped with SIGSTOP for the moment the commit takes and con
 half written. :func:`restore` writes a commit's state into a new directory, from which a run is continued. Git does not
 keep empty directories, so a restored state lacks the ones the system had made and left empty, and a system that keeps
 nothing (a floor's) restores as an empty directory.
+
+A run that resumes puts its system's state back as it was last committed before the round the run goes on from
+(:meth:`StateLog.saved`, which the runner keeps beside the round's records, and :meth:`StateLog.go_back`): the state
+directory as that commit holds it, the repository's branch and index on it, and the log's later rounds forgotten, so
+that the next commit follows it as though nothing had come between.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
+import stat
 import subprocess
 import tempfile
 import time
@@ -35,6 +42,23 @@ def _git(repo: Path, *args: str, tree: Path | None = None) -> str:
     work = [f"--work-tree={tree}"] if tree is not None else []
     return subprocess.run(["git", f"--git-dir={repo}", *work, *args], env={**os.environ, **GIT_ENV}, cwd=tree,
                           check=True, capture_output=True, text=True).stdout
+
+
+def delete(path: Path) -> None:
+    """``shutil.rmtree``, through directories made read-only (a Go module cache's) or unreadable, which refuse to lose
+    an entry, or to be listed, until they are made writable and readable again."""
+    def unlocked(function, failed, error):
+        if not isinstance(error, PermissionError):
+            raise error
+        for folder in (os.path.dirname(failed), failed):
+            if os.path.isdir(folder) and not os.path.islink(folder):
+                os.chmod(folder, os.stat(folder).st_mode | stat.S_IRWXU)
+        if os.path.isdir(failed) and not os.path.islink(failed):
+            shutil.rmtree(failed, onexc=unlocked)
+        else:
+            os.unlink(failed)
+
+    shutil.rmtree(path, onexc=unlocked)
 
 
 def ensure_repo(repo: Path) -> None:
@@ -99,6 +123,43 @@ class StateLog:
 
     def commit_of(self, round_index: int) -> str:
         return commit_of(self.log, round_index)
+
+    def head(self) -> str | None:
+        """The commit the repository's branch is on: the last round's, or one made on it (a fork's relocation); None
+        before the first."""
+        found = subprocess.run(["git", f"--git-dir={self.repo}", "rev-parse", "--verify", "--quiet", "HEAD"],
+                               env={**os.environ, **GIT_ENV}, capture_output=True, text=True)
+        return found.stdout.strip() or None
+
+    def saved(self) -> dict:
+        """Where the state was last committed: the rounds the log lists and the commit the branch is on, for
+        :meth:`go_back`."""
+        return {"rounds": self.rounds, "commit": self.head()}
+
+    def go_back(self, saved: dict) -> None:
+        """The state directory, the repository's branch and index and the log as they were when :meth:`saved` gave
+        ``saved``: the directory written afresh from its commit, or emptied where there was none, unless it holds that
+        commit's tree already, and the log's later rounds forgotten. Nothing of the system may be running."""
+        commit, head = saved["commit"], self.head()
+        if commit is None or head != commit or not self.tree.exists() or self.changed():
+            if self.tree.exists():   # a system's wipe may take its state directory with it
+                delete(self.tree)
+            if commit is None:
+                self.tree.mkdir(parents=True)
+                if head is not None:
+                    _git(self.repo, "update-ref", "-d", "HEAD")
+                (self.repo / "index").unlink(missing_ok=True)
+            else:
+                restore(self.repo, commit, self.tree)
+                _git(self.repo, "reset", "--quiet", commit, tree=self.tree)
+        lines = self.log.read_text().splitlines()[:saved["rounds"]] if self.log.exists() else []
+        self.log.write_text("".join(line + "\n" for line in lines))
+        self.rounds = saved["rounds"]
+
+    def changed(self) -> bool:
+        """Whether the state directory differs from the commit the branch is on, in any file, ignored ones included,
+        since every commit takes them."""
+        return bool(_git(self.repo, "status", "--porcelain", "--untracked-files=all", "--ignored", tree=self.tree))
 
 
 def commit_of(log: Path, round_index: int) -> str:

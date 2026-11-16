@@ -9,6 +9,8 @@ from continual_arc.testing import FakeSource
 from continual_arc_baselines.attempt import Attempt
 from continual_arc_baselines.cli import main
 
+from .fixtures import Stopped, rows
+
 
 def test_run_inside_a_drivers_attempt(tmp_path, monkeypatch, capsys):
     source = FakeSource(n_tasks=6)
@@ -122,36 +124,154 @@ class EnvClientLearner(BaseLearner):
 
 
 
+def test_a_resumed_runs_records_charge_every_instance_exactly_what_it_cost(tmp_path, monkeypatch):
+    """Every record's model-call cost is the Decimal sum of what the provider charged for its instance, whatever the
+    process spent before it: the same in a resumed process, which counts from nothing again, as in one never stopped,
+    where the difference of a float running total would differ in its last digits."""
+    import pytest
+
+    from .fake_upstream import FakeUpstream
+
+    upstream = FakeUpstream(cost=0.0007).start()
+    try:
+        source = FakeSource(n_tasks=3)
+        sched_path = tmp_path / "sched.json"
+        stream_schedule(source.task_ids(), 12, seed=0, source=source.name).save(sched_path)
+        monkeypatch.delenv("WORKBENCH_RUN_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        common = ["run", "--learner", "tests.test_cli:EnvClientLearner", "--schedule", str(sched_path), "--upstream",
+                  upstream.base_url, "--registry", "tests.fixtures:fake_registry", "--quiet"]
+        whole, out = tmp_path / "whole", tmp_path / "run"
+        assert main([*common, "--out", str(whole)]) == 0
+        act, calls = EnvClientLearner.act, iter(range(1, 100))
+
+        def stopped(self, obs):
+            if next(calls) == 6:
+                raise Stopped
+            return act(self, obs)
+
+        with monkeypatch.context() as patched:
+            patched.setattr(EnvClientLearner, "act", stopped)
+            with pytest.raises(Stopped):
+                main([*common, "--out", str(out)])
+        assert main([*common, "--out", str(out), "--resume"]) == 0
+    finally:
+        upstream.stop()
+    assert rows(out / "records.jsonl") == rows(whole / "records.jsonl")
+    assert {r["resources"]["llm_cost_usd"] for r in rows(whole / "records.jsonl")} == {0.0007}
+
+
 def test_run_requires_exactly_one_schedule_source(tmp_path):
     import pytest
     with pytest.raises(SystemExit):
         main(["run", "--learner", "continual_arc.testing:GiveUpLearner"])
 
 
-def test_resume_continues_in_the_same_attempt(tmp_path, monkeypatch, capsys):
+def git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(["git", f"--git-dir={repo}", *args], check=True, capture_output=True, text=True).stdout
+
+
+def test_a_harness_run_stopped_partway_goes_on_exactly_as_one_never_stopped(tmp_path, monkeypatch):
+    """A harness stopped in the middle of an instance has written to its state what the instance taught it so far.
+    ``--resume`` goes on in the run's own attempt, its state put back as the last round committed it and the instance
+    played again: every record, every event and every round's committed state is the run's never stopped, and the
+    stopped instance buys its demonstration again, which a harness that kept what the stop left would not."""
+    import shutil
+
     import pytest
+    from continual_arc.schedule import Schedule
+
+    from tests.test_frozen import FileMemoryHarness
+
+    source = FakeSource(n_tasks=6)
+    sched_path = tmp_path / "sched.json"
+    stream_schedule(source.task_ids()[:3], 12, seed=2, source=source.name).save(sched_path)
+    infos = Schedule.load(sched_path).annotate()
+    stop = [step for step, info in enumerate(infos) if info.exposure_index == 0][-1]   # the last task's first visit
+    monkeypatch.chdir(tmp_path)
+    common = ["run", "--learner", "tests.test_frozen:FileMemoryHarness", "--schedule", str(sched_path), "--no-proxy",
+              "--registry", "tests.fixtures:fake_registry", "--quiet", "--events"]
+    whole, out = tmp_path / "whole", tmp_path / "run"
+    assert main([*common, "--out", str(whole)]) == 0
+    out.mkdir()
+    shutil.copy(whole / "alias-salt", out)
+    act = FileMemoryHarness.act
+
+    def stopped(self, obs):
+        if obs.step == stop and not obs.is_fresh:   # its demonstration bought and written down, before its answer
+            raise Stopped
+        return act(self, obs)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(FileMemoryHarness, "act", stopped)
+        with pytest.raises(Stopped):
+            main([*common, "--out", str(out)])
+    system = Path(json.loads((out / "attempt.json").read_text())["attempt_dir"]) / "system"
+    assert len(rows(out / "records.jsonl")) == stop and len(json.loads((system / "state" / "memory.json").read_text())) == 3
+    launches = (out / "launches.jsonl").read_text()
+    for argv, refusal in (([*common, "--out", str(out)], "holds a run already"),
+                          ([*common, "--out", str(tmp_path / "none"), "--resume"], "holds none"),
+                          ([*common, "--out", str(out), "--resume", "--learner-kwargs", '{"stateless": true}'],
+                           "differ from them: settings"),
+                          ([*common, "--out", str(out), "--resume", "--alias-style", "names"], "alias_style")):
+        with pytest.raises(SystemExit, match=refusal):
+            main(argv)
+    assert (out / "launches.jsonl").read_text() == launches and not (tmp_path / "none").exists()
+    assert main([*common, "--out", str(out), "--resume"]) == 0
+    assert Path(json.loads((out / "attempt.json").read_text())["attempt_dir"]) / "system" == system
+    assert rows(out / "records.jsonl") == rows(whole / "records.jsonl")
+    assert rows(out / "events.jsonl") == rows(whole / "events.jsonl")
+    assert rows(out / "records.jsonl")[stop]["demo_requests"] == 1
+    unstopped = Path(json.loads((whole / "attempt.json").read_text())["attempt_dir"]) / "system"
+
+    def trees(system: Path) -> list[str]:   # each round's committed state, by its content alone
+        log = [json.loads(line)["commit"] for line in (system / "state-log.jsonl").read_text().splitlines()]
+        return [git(system / "state.git", "rev-parse", f"{commit}^{{tree}}").strip() for commit in log]
+
+    assert trees(system) == trees(unstopped) and len(trees(system)) == 12
+    assert git(system / "state.git", "rev-list", "--count", "HEAD").strip() == "12"   # the stopped round left nothing
+    launched = [json.loads(line) for line in (out / "launches.jsonl").read_text().splitlines()]
+    assert [(entry["resume"], entry["prior_records"]) for entry in launched] == [(False, 0), (True, stop)]
+    assert [entry["records"] for entry in json.loads((out / "meta.json").read_text())["resumed_at"]] == [stop]
+
+
+def test_a_python_learners_run_resumes_with_the_state_it_kept(tmp_path, monkeypatch):
+    """A learner that keeps its memory in its own process gives it to the runner at every round's end
+    (``Learner.state``), and the resumed run's learner, made anew, takes it back: it plays on as the run never
+    stopped, solving the tasks it met before the stop without a demonstration."""
+    import shutil
+
+    import pytest
+    from continual_arc.testing import ShiftMemoryLearner
 
     source = FakeSource(n_tasks=6)
     sched_path = tmp_path / "sched.json"
     stream_schedule(source.task_ids(), 20, seed=2, source=source.name).save(sched_path)
     monkeypatch.chdir(tmp_path)
-    out = tmp_path / "wb" / "stage1" / "cell"
-    common = ["run", "--schedule", str(sched_path), "--no-proxy", "--registry",
-              "tests.fixtures:fake_registry", "--quiet", "--out", str(out), "--events"]
-    with pytest.raises(RuntimeError, match="interrupted"):
-        main(common + ["--learner", "tests.fixtures:CrashAfterLearner", "--learner-kwargs", '{"n": 5}'])
-    assert len((out / "records.jsonl").read_text().splitlines()) == 5
-    attempt = json.loads((out / "attempt.json").read_text())["attempt_dir"]
-    code = main(common + ["--learner", "continual_arc.testing:ShiftMemoryLearner", "--resume"])
-    assert code == 0
-    outcome = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert outcome["attempt_dir"] == attempt, "the resumed run keeps the attempt (and the system's state) of the first"
-    assert len((out / "records.jsonl").read_text().splitlines()) == 20
-    assert json.loads((out / "meta.json").read_text())["resumed_at"][0]["records"] == 5
-    assert json.loads((out / "summary.json").read_text())["overall"]["n"] == 20
-    # nothing to resume: a plain run in a fresh attempt
-    code = main(common[:-3] + ["--out", str(tmp_path / "other"), "--learner", "continual_arc.testing:ShiftMemoryLearner", "--resume"])
-    assert code == 0
+    common = ["run", "--learner", "continual_arc.testing:ShiftMemoryLearner", "--schedule", str(sched_path),
+              "--no-proxy", "--registry", "tests.fixtures:fake_registry", "--quiet"]
+    whole, out = tmp_path / "whole", tmp_path / "run"
+    assert main([*common, "--out", str(whole)]) == 0
+    out.mkdir()
+    shutil.copy(whole / "alias-salt", out)
+    act, calls = ShiftMemoryLearner.act, iter(range(1, 100))
+
+    def stopped(self, obs):
+        if next(calls) == 17:
+            raise Stopped
+        return act(self, obs)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(ShiftMemoryLearner, "act", stopped)
+        with pytest.raises(Stopped):
+            main([*common, "--out", str(out)])
+    kept = len(rows(out / "records.jsonl"))
+    assert 0 < kept < 20
+    assert main([*common, "--out", str(out), "--resume"]) == 0
+    assert rows(out / "records.jsonl") == rows(whole / "records.jsonl")
+    assert json.loads((out / "meta.json").read_text())["resumed_at"][0]["records"] == kept
 
 
 def test_stream_only_plays_the_full_runs_stream_and_stops_before_its_epilogue():
@@ -228,24 +348,18 @@ def test_a_test_that_is_not_one_round_is_refused_before_anything_plays(tmp_path,
     assert not out.exists()
 
 
-def test_log_state_is_for_a_system_learner_and_a_harness_plays_no_test_after_its_stream(tmp_path, monkeypatch):
-    """--log-state commits a SystemLearner's state directory, so a learner of another kind is refused; a harness
-    adapter, which holds one conversation, plays its tests with arc-baselines test rather than --test. Both are refused
-    before any instance plays."""
+def test_a_harness_plays_no_test_after_its_stream(tmp_path, monkeypatch):
+    """A harness adapter, which holds one conversation, plays its tests with arc-baselines test rather than --test,
+    refused before any instance plays."""
     import pytest
 
     sched, test = _stream_and_test(tmp_path, FakeSource(n_tasks=6), users=3)
     monkeypatch.chdir(tmp_path)
-    common = ["run", "--schedule", str(sched), "--no-proxy", "--registry",
-              "tests.fixtures:fake_registry", "--quiet"]
-    with pytest.raises(SystemExit, match="no SystemLearner"):
-        main(common + ["--learner", "continual_arc.testing:ShiftMemoryLearner", "--log-state",
-                       "--out", str(tmp_path / "logged")])
     with pytest.raises(SystemExit, match="harness adapter"):
-        main(common + ["--learner", "continual_arc_baselines.systems.bare:BareModelLearner",
-                       "--learner-kwargs", '{"model": "m"}', "--test", str(test), "--out", str(tmp_path / "tested")])
-    assert not any((tmp_path / out / "records.jsonl").exists() for out in ("logged", "tested"))
-
+        main(["run", "--schedule", str(sched), "--no-proxy", "--registry", "tests.fixtures:fake_registry", "--quiet",
+              "--learner", "continual_arc_baselines.systems.bare:BareModelLearner", "--learner-kwargs",
+              '{"model": "m"}', "--test", str(test), "--out", str(tmp_path / "tested")])
+    assert not (tmp_path / "tested" / "records.jsonl").exists()
 
 
 def test_an_interrupt_stops_the_run_before_its_next_instance_with_its_records_written(tmp_path, monkeypatch, capsys):

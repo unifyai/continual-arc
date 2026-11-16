@@ -317,7 +317,7 @@ class _User:
                       ", ".join(f"{cid[:8]}: {phase}, open {time.time() - t0:.1f} s" for cid, phase, t0 in still))
 
     def resources(self) -> dict[str, float]:
-        return {**self.tracker.usage.as_resources(), **(self.system.resources() or {})}
+        return {**self.tracker.usage.counters(), **(self.system.resources() or {})}
 
     def close(self) -> None:
         try:
@@ -396,9 +396,9 @@ class CollectiveHarnessLearner(BaseLearner):
         self.calls_wait_s = calls_wait_s
         # the one state of a team (the module's docstring); a frozen test's users are forks of the stream's end, and a
         # forked schedule's forks of their own, whose writes no round reads
+        self.forked = schedule.meta.get("test") in TESTS or bool(schedule.meta.get("forked"))
         self.shared = (SharedState(lambda user: self.user_dir(user) / "system", schedule.users)
-                       if schedule.users > 1 and schedule.meta.get("test") not in TESTS
-                       and not schedule.meta.get("forked") else None)
+                       if schedule.users > 1 and not self.forked else None)
         if self.shared is not None and any((self.user_dir(user) / "system" / "state-log.jsonl").is_file()
                                            for user in range(1, schedule.users)):
             raise SystemExit(f"{run_dir}'s users kept stores of their own, as collective runs did before every learner "
@@ -541,6 +541,10 @@ class CollectiveHarnessLearner(BaseLearner):
                 u.context = (obs.step, None, "idle")
             # before the hook, and before the runner reads the user's counters for the instance
             u.settle(trace, time.monotonic() + self.calls_wait_s)
+            if self.forked and hasattr(u.system, "save_state"):
+                # a fork's instance is all it plays of the round, which a stopped test keeps as it ended: what its
+                # system keeps in memory is on disk with it
+                u.system.save_state()
             if self.instance_hook is not None:
                 self.instance_hook(trace)
 
@@ -603,6 +607,19 @@ class CollectiveHarnessLearner(BaseLearner):
             one.load_state()
         if hasattr(one, "end_round"):
             one.end_round()
+
+    def state(self) -> Any:
+        """A run of one user's state, its system's (a harness's commit of its last round), which the runner keeps to
+        resume from (``continual_arc.learner``); None for a team, whose one state a round cut short puts back itself
+        (:meth:`SharedState.recover`), and for forks, which their driver seeds again or, on a frozen test, keeps user by
+        user (:func:`continual_arc_baselines.frozen.play_forks`)."""
+        if self.shared is not None or self.forked:
+            return None
+        state = getattr(self._user(0).system, "state", None)
+        return state() if state is not None else None
+
+    def restore(self, state: Any) -> None:
+        self._user(0).system.restore(state)
 
     def reset(self) -> None:
         """Wipe every user's harness state (the fresh reference) and, through ``reset_hook``, the model's: in a team every

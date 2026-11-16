@@ -73,8 +73,9 @@ from continual_arc.env import (
 )
 from continual_arc.learner import BaseLearner
 
-from continual_arc_baselines.frozen import HELD, delete, put_back
+from continual_arc_baselines.frozen import HELD, put_back
 from continual_arc_baselines.proxy import PLACEHOLDER_KEY
+from continual_arc_baselines.statelog import delete
 from continual_arc_baselines.systems.connect_filter import ConnectFilter
 from continual_arc_baselines.systems.sandbox import (
     CONFINED,
@@ -264,7 +265,7 @@ class ServedLearner(BaseLearner):
         out = dict(numbers[:MAX_RESOURCES])
         usage = getattr(self.tracker, "usage", None)
         if usage is not None:
-            out.update(usage.as_resources())
+            out.update(usage.counters())
         return out
 
 

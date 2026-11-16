@@ -6,9 +6,14 @@ the benchmark's runner and writes the run directory (``--out``) and the attempt 
 (:mod:`continual_arc_baselines.attempt`). Unless ``--no-proxy`` is given, a local OpenAI-compatible proxy is started
 for the run and its address is exported as ``OPENAI_BASE_URL`` / ``OPENROUTER_BASE_URL`` / ``ARC_LLM_BASE_URL`` (with a
 placeholder key) before the learner is built, so any system the learner spawns, and any client the learner builds from
-the environment, is measured at the HTTP boundary without further wiring. ``--log-state`` commits a harness's state at
-the end of every round (:mod:`continual_arc_baselines.statelog`), and ``--test`` plays a frozen test after the stream
-in the same process, for a learner that is not a harness adapter (:func:`play_test`).
+the environment, is measured at the HTTP boundary without further wiring. A harness's state is committed at the end of
+every round (:mod:`continual_arc_baselines.statelog`), and ``--test`` plays a frozen test after the stream in the same
+process, for a learner that is not a harness adapter (:func:`play_test`).
+
+Every run resumes as though it had never stopped: ``--resume`` goes on with the run in ``--out`` from its last whole
+round, in its own attempt, with its own settings (:data:`SETTINGS` and what the benchmark's runner keeps itself), any
+other refused before anything is written, its records cut back to that round and its learner's state put back as it
+was there, a harness's from the round's commit (``continual_arc.runner``); a launch without it never writes over a run.
 
 ``arc-baselines test`` plays a frozen test of a harness's stream, one instance at a time from the state the stream
 left or, with ``--collective``, as a round of users forked from the stream's last commit
@@ -34,6 +39,20 @@ from pathlib import Path
 from typing import Any
 
 from continual_arc.aliases import ALIAS_STYLES
+
+SETTINGS = ("learner", "learner_kwargs", "registry", "no_proxy", "upstream", "llm_defaults", "confine_models",
+            "pin_providers", "declared_context_length", "capture_content")
+"""The options of ``arc-baselines run`` that a resume must keep as the run's first launch gave them (:func:`settings_of`),
+beside what the benchmark's runner keeps itself (the environment's configuration, the schedule, the learner's name, the
+task names' style and the events log): the learner and its arguments, its tasks' source and how its model is reached.
+Where a launch stops, what it may spend, where it reads the key from and the provider its cost journal names may
+change."""
+
+
+def settings_of(args, kwargs: dict[str, Any]) -> dict[str, Any]:
+    """The run's :data:`SETTINGS` as the launch ``args`` gives them, its learner's arguments and request defaults read."""
+    return {**{key: getattr(args, key) for key in SETTINGS}, "learner_kwargs": kwargs,
+            "llm_defaults": json.loads(args.llm_defaults) if args.llm_defaults else {}}
 
 
 def import_object(spec: str, what: str) -> Any:
@@ -159,7 +178,7 @@ def can_freeze(learner) -> bool:
 
 
 def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, registry, name, alias_style,
-              resume, progress, stop=None):
+              resume, progress, settings, stop=None):
     """Play ``test`` with ``learner``, the object that has just played the run's stream, so that it starts from the
     state the stream left it in, into ``test_dir``, a run directory of its own holding the run's ``alias-salt``, so
     that the learner meets its tasks under the names the stream gave them.
@@ -178,15 +197,18 @@ def play_test(learner, tracker, test, run_dir: Path, test_dir: Path, *, config, 
     shutil.copy2(run_dir / SALT_FILE, test_dir / SALT_FILE)
     return run(TrackedLearner(learner, tracker, stop=stop), test, config=config, out_dir=test_dir, registry=registry,
                progress=progress, learner_name=name, env=build_env(test, config, registry), resume=resume,
-               alias_style=alias_style)
+               alias_style=alias_style, settings=settings)
 
 
 def cmd_run(args) -> int:
     from continual_arc.configs import build_schedule
+    from continual_arc.runner import holds_run
     from continual_arc.schedule import Schedule
 
     from continual_arc_baselines.frozen import holding, load_test
 
+    if args.resume and not (args.out and holds_run(args.out)):
+        raise SystemExit(f"--resume goes on with the run in --out, and {args.out or 'no --out'} holds none")
     if bool(args.schedule) == bool(args.config):
         raise SystemExit("give exactly one of --schedule or --config")
     if args.schedule and args.no_epilogue:
@@ -218,7 +240,15 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     attempt and plays every instance from a copy of the stream's state, at the stream's own path. ``test``
     (``--test``) is a frozen test played after the stream, in the same process (:func:`play_test`)."""
     from continual_arc.report import text_report
-    from continual_arc.runner import build_env, prior_records, run
+    from continual_arc.runner import (
+        STATE,
+        build_env,
+        holds_run,
+        own_settings,
+        refuse_other_settings,
+        run,
+        saved_point,
+    )
 
     from continual_arc_baselines.attempt import Attempt
     from continual_arc_baselines.frozen import give_back, hold_aside, one_at_a_time, settle
@@ -233,17 +263,27 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     )
 
     config, kwargs, registry, name = launch_settings(args, schedule)
-    if args.resume and not args.out:
-        raise SystemExit("--resume needs --out: the run directory to continue")
-    prior = prior_records(args.out) if args.resume else []
+    settings = settings_of(args, kwargs)
+    if args.out and holds_run(args.out):
+        if not args.resume:
+            raise SystemExit(f"{args.out} holds a run already: go on with it with --resume, or give this run an --out "
+                             "of its own")
+        try:
+            refuse_other_settings(args.out, schedule, config, own_settings(config, name, args.alias_style, args.events,
+                                                                           settings))
+        except ValueError as refused:
+            raise SystemExit(str(refused)) from None
+    prior = saved_point(args.out, schedule).records if args.resume else []
     pointer = Path(args.out) / "attempt.json" if args.out else None
     attempt = None
-    if prior and pointer is not None and pointer.is_file():
-        # Continue in the attempt the interrupted launch used: the system's persisted
-        # state (memories, skills, files) lives there and carries on.
+    if args.resume and pointer.is_file():
+        # Go on in the attempt the run's launches used: its system's state and its history are there.
         directory = Path(json.loads(pointer.read_text())["attempt_dir"])
         if directory.is_dir():
             attempt = Attempt(directory, max_cost=config.max_cost)
+        elif (Path(args.out) / STATE).is_file():
+            raise SystemExit(f"{args.out}'s learner goes on from the state it kept in its attempt, {directory}, which "
+                             "is gone")
     if attempt is None:
         label = name if frozen_from is None else f"{name}-{schedule.meta['test']}"
         attempt = Attempt.from_environment(label, max_cost=config.max_cost)
@@ -251,9 +291,10 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     if args.out:
         out_dir.mkdir(parents=True, exist_ok=True)
         pointer.write_text(json.dumps({"attempt_dir": str(attempt.directory)}))
-    if prior:
+    if args.resume:
         attempt.prime(prior)
-        print(f"resuming {name}: {len(prior)} instances done, continuing from {len(prior) + 1}", file=sys.stderr)
+        print(f"resuming {name}: {len(prior)} instances kept, playing on from instance {len(prior) + 1}",
+              file=sys.stderr)
 
     tracker = Tracker()
     proxy = None
@@ -287,20 +328,19 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
     # imported once the proxy's address is in the environment, which a learner's module may read as it loads
     make_learner = import_object(args.learner, "learner")
     harness = isinstance(make_learner, type) and issubclass(make_learner, SystemLearner)
-    refused = None
-    if args.log_state and not harness:
-        refused = f"--log-state commits a SystemLearner's state directory, and {args.learner} is no SystemLearner"
-    elif test is not None and harness:
-        refused = (f"{args.learner} is a harness adapter, which holds one conversation: play its stream alone, then "
-                   "each test with arc-baselines test")
-    if refused:
+    if test is not None and harness:
         if proxy is not None:
             proxy.stop()
-        raise SystemExit(refused)
+        raise SystemExit(f"{args.learner} is a harness adapter, which holds one conversation: play its stream alone, "
+                         "then each test with arc-baselines test")
     learner = make_learner(**kwargs)
     if hasattr(learner, "attach"):
+        # a harness's state committed every round, from which its run resumes, but a frozen test's, which plays every
+        # instance from the stream's and keeps nothing, and a run's played before every round was committed, which has
+        # rounds and no history of them, whose commits would be numbered from its resume
+        committed = not prior or (attempt.directory / "system" / "state-log.jsonl").is_file()
         where = ({"state_dir": frozen_from[0] / "state"} if frozen_from is not None
-                 else {"log_state": True} if args.log_state else {})
+                 else {"log_state": True} if harness and committed else {})
         learner.attach(attempt.directory / "system", proxy.environ() if proxy else {}, tracker=tracker, **where)
     frozen = test is not None and can_freeze(learner)
     if frozen:
@@ -360,13 +400,14 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
         if frozen_from is not None:
             settle(system, frozen_from[1])
             learner.freeze(hold_aside(system, frozen_from[1]))
-        elif prior and system is not None:
+        elif args.resume and system is not None:
             settle(system, len(prior))
         result = run(
             TrackedLearner(learner, tracker, stop_after=args.stop_after, done=len(prior), stop=stopping), schedule,
             config=config,
             out_dir=out_dir, registry=registry, log_events=args.events, progress=progress, learner_name=name,
             env=build_env(schedule, config, registry), resume=args.resume, alias_style=args.alias_style,
+            settings=settings,
         )
         if test is not None:
             before_test = tracker.usage.as_resources()
@@ -375,7 +416,7 @@ def play(args, schedule, *, frozen_from: tuple[Path, int] | None = None, test=No
             # the attempt's metrics are the stream's, step by step; the test's records are its own directory's
             tested = play_test(learner, tracker, test, out_dir, test_dir, config=config, registry=registry,
                                name=name, alias_style=args.alias_style, resume=args.resume, progress=show,
-                               stop=stopping)
+                               settings=settings, stop=stopping)
     except Stopped as stop:
         print(f"run: {stop}", file=sys.stderr)
         return 130
@@ -468,16 +509,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="the names the system sees tasks under, drawn for the run by the runner: task-3f2a9c1e (hex) "
                         "or a codename such as amber-heron (names)")
     r.add_argument("--resume", action="store_true",
-                   help="continue an interrupted run in --out: finished instances are kept, the interrupted one is "
-                        "replayed, and the system's persisted state (its attempt directory) is reused")
+                   help="go on with the run in --out from its last whole round, in its own attempt and with its own "
+                        "settings, any other refused: its records cut back to that round and added to, and its "
+                        "learner's state as it was there, a harness's from the round's commit")
     r.add_argument("--quiet", action="store_true")
     r.add_argument("--stream-only", action="store_true", dest="stream_only",
                    help="play the schedule's stream alone and stop before its epilogue, a literal prefix of the "
                         "schedule (stream_of)")
-    r.add_argument("--log-state", action="store_true", dest="log_state",
-                   help="commit a SystemLearner's whole state directory at the end of every round (statelog), so the "
-                        "run can be forked from any round (arc-baselines fork) and its tests played as a round of "
-                        "users (arc-baselines test --collective)")
     r.add_argument("--test", metavar="TEST.json",
                    help="after the schedule's stream (no epilogue), play this frozen test (`continual-arc schedule make "
                         "--test`, one round) with the same learner, from the state the stream left it; a hosted "
@@ -522,8 +560,7 @@ def build_parser() -> argparse.ArgumentParser:
                         "width with --collective")
     t.add_argument("--collective", action="store_true",
                    help="play the test as one round, every instance a user of its own forked from the commit of the "
-                        "stream's end, for a run that logged its state (--log-state); without it, one instance at a "
-                        "time, the stream's state put back before each")
+                        "stream's end; without it, one instance at a time, the stream's state put back before each")
     t.add_argument("--out", help="the test's run directory (default: RUN_DIR/frozen/<the test>/play, or, with "
                                  "--collective, <the test>-reference/play for a run with no stream)")
     t.add_argument("--quiet", action="store_true")

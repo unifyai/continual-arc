@@ -108,18 +108,25 @@ class Usage:
         elif call.status == "completed":
             self.unpriced_requests += 1
 
-    def as_resources(self) -> dict[str, float]:
+    def counters(self) -> dict[str, float | Decimal]:
+        """The counters as ``resources()`` keys, which a learner reports and the benchmark's runner differences over an
+        instance: the cost the Decimal sum of what the provider charged, which it differences exactly, whatever the
+        process spent before the instance."""
         return {
             "llm_requests": float(self.requests),
             "llm_failed_requests": float(self.failed_requests),
             "llm_input_tokens": float(self.input_tokens),
             "llm_output_tokens": float(self.output_tokens),
             "llm_reasoning_tokens": float(self.reasoning_tokens),
-            "llm_cost_usd": float(self.cost_usd),
+            "llm_cost_usd": self.cost_usd,
             "llm_unpriced_requests": float(self.unpriced_requests),
             "llm_refused_requests": float(self.refused_requests),
             **{f"{CALLS_OF}{model}": float(count) for model, count in self.calls.items()},
         }
+
+    def as_resources(self) -> dict[str, float]:
+        """:meth:`counters`, every one a float, for a report."""
+        return {key: float(value) for key, value in self.counters().items()}
 
 
 Hook = Callable[[LLMCall], None]
@@ -316,6 +323,15 @@ class TrackedLearner:
     def end_round(self) -> None:
         self.learner.end_round()
 
+    def state(self) -> Any:
+        """The wrapped learner's state, which the runner keeps to resume from (``continual_arc.learner``); None for a
+        learner that gives none."""
+        state = getattr(self.learner, "state", None)
+        return state() if state is not None else None
+
+    def restore(self, state: Any) -> None:
+        self.learner.restore(state)
+
     def act(self, obs: Any) -> Any:
         if self._since is None:
             if self.stop_after is not None and self._done >= self.stop_after:
@@ -341,5 +357,5 @@ class TrackedLearner:
                       time.monotonic() - started,
                       ", ".join(f"{cid[:8]}: open {age:.1f} s" for cid, age in still.items()))
 
-    def resources(self) -> dict[str, float]:
-        return {**(self.learner.resources() or {}), **self.tracker.usage.as_resources()}
+    def resources(self) -> dict[str, float | Decimal]:
+        return {**(self.learner.resources() or {}), **self.tracker.usage.counters()}

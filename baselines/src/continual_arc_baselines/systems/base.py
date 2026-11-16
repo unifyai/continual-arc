@@ -27,8 +27,10 @@ Everything a system keeps between instances lives under its state directory (``s
 instance from the state the stream left there: :meth:`SystemLearner.freeze` makes each reset put a copy of that state
 in its place, at the same path, instead of wiping it (:mod:`continual_arc_baselines.frozen`). A system attached with
 ``log_state`` commits its whole state directory at the end of every round (:mod:`continual_arc_baselines.statelog`), so
-that a run can be taken up again from any round (:mod:`continual_arc_baselines.fork`) and its frozen tests played as one
-round of users, each forked from the commit of the stream's last round.
+that a run resumes from its last round as though it had never stopped (the commit is the learner's ``state()``, which
+the runner keeps beside the round's records and gives back to ``restore`` on a resume), can be taken up again from any
+round (:mod:`continual_arc_baselines.fork`) and its frozen tests played as one round of users, each forked from the
+commit of the stream's last round.
 """
 
 from __future__ import annotations
@@ -331,6 +333,21 @@ class SystemLearner(BaseLearner):
         if self.state_log is not None:
             self.save_state()
             self.state_log.commit()
+
+    def state(self) -> dict | None:
+        """Where the learner's state was last committed (:meth:`StateLog.saved`), which the runner keeps beside the
+        round's records and gives back to :meth:`restore` when the run resumes; None for a learner that keeps no
+        history of its state."""
+        return self.state_log.saved() if self.state_log is not None else None
+
+    def restore(self, state: dict) -> None:
+        """The state directory and its history as they were committed when :meth:`state` gave ``state``
+        (:meth:`StateLog.go_back`), the system stopped first, and what the learner keeps in memory read back from it."""
+        if self._started:
+            self.stop()
+            self._started = False
+        self.state_log.go_back(state)
+        self.load_state()
 
     def _ensure_started(self) -> None:
         if not self._started:

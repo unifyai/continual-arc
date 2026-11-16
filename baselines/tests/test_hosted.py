@@ -643,7 +643,7 @@ def test_a_reply_past_the_bound_stops_the_run(tmp_path):
 
 def test_a_learner_reports_few_counters_and_the_proxys_win(tmp_path):
     class Usage:
-        def as_resources(self):
+        def counters(self):
             return {"llm_cost_usd": 0.25}
 
     class Tracker:

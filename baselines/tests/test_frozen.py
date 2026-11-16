@@ -20,6 +20,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import time
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -45,6 +46,7 @@ from continual_arc_baselines.systems.base import SystemLearner
 from continual_arc_baselines.tracking import instance_ended
 
 from .fake_upstream import FakeUpstream
+from .fixtures import Stopped, rows
 from .test_acp import FakeSystem, obs
 from .test_collective import CommittingHarness
 
@@ -756,11 +758,11 @@ def test_a_stateless_runs_test_users_are_wiped_before_their_instance_and_play_it
         assert git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() == ["found.json"]
 
 
-def test_a_logged_runs_test_is_played_as_a_round_of_users_from_the_command_line(tmp_path, monkeypatch):
-    """arc-baselines run --log-state commits a harness's state at the end of every round of its stream, and
-    arc-baselines test --collective forks every test user from the commit of the stream's last round; the stream's own
-    state is left as it was. A test's layout says how it is played: one round with --collective, one instance at a time
-    without, each refusing the other's."""
+def test_a_harness_runs_test_is_played_as_a_round_of_users_from_the_command_line(tmp_path, monkeypatch):
+    """arc-baselines run commits a harness's state at the end of every round of its stream, and arc-baselines test
+    --collective forks every test user from the commit of the stream's last round; the stream's own state is left as it
+    was. A test's layout says how it is played: one round with --collective, one instance at a time without, each
+    refusing the other's."""
     ids = SOURCE.task_ids()
     stream = stream_schedule(ids[:2], 4, seed=0, source=SOURCE.name)
     stream.save(tmp_path / "stream.json")
@@ -771,8 +773,7 @@ def test_a_logged_runs_test_is_played_as_a_round_of_users_from_the_command_line(
     monkeypatch.chdir(tmp_path)
     run = tmp_path / "run"
     assert main(["run", "--learner", "tests.test_frozen:Stateless", "--schedule", str(tmp_path / "stream.json"),
-                 "--no-proxy", "--registry", "tests.test_frozen:registry", "--quiet", "--log-state",
-                 "--out", str(run)]) == 0
+                 "--no-proxy", "--registry", "tests.test_frozen:registry", "--quiet", "--out", str(run)]) == 0
     system = Path(json.loads((run / "attempt.json").read_text())["attempt_dir"]) / "system"
     log = [json.loads(line) for line in (system / "state-log.jsonl").read_text().splitlines()]
     assert [entry["round"] for entry in log] == [0, 1, 2, 3]
@@ -795,3 +796,59 @@ def test_a_logged_runs_test_is_played_as_a_round_of_users_from_the_command_line(
         assert git(repo, "log", "--format=%s").splitlines()[:2] == ["round 4", f"relocated from {system}"]
     assert git(system / "state.git", "rev-parse", "HEAD").strip() == stream_end
 
+
+
+def test_a_round_of_test_users_cut_short_keeps_every_user_whose_instance_ended(stream_run, tmp_path, monkeypatch):
+    """A collective test stopped partway, three of its four users' instances ended, goes on: those three keep their
+    instances, each one's state committed as its instance left it, and only the fourth is forked again and plays its
+    instance, so the test's records are the test's never stopped, and no user whose instance ended plays it again."""
+    run, system, _ = stream_run
+    server = FakeUpstream().start()
+    argv = ["run", "--learner", "tests.test_frozen:Remembering", "--config", "arc1", "--out", str(run), "--upstream",
+            server.base_url, "--upstream-key-env", "NO_SUCH_KEY", "--registry", "tests.test_frozen:registry", "--quiet"]
+    (run / "launches.jsonl").write_text(json.dumps({"argv": argv}) + "\n")
+    ids = SOURCE.task_ids()
+    # the stream's memory holds the rules of the first two tasks: the third user's task needs a demonstration, and the
+    # user writes its rule down as its instance ends
+    Schedule(name="tiny-seen-test", seed=0, users=4, sources={t: SOURCE.name for t in ids},
+             slots=[Slot(task, 500 + k, "seen-test", user=k) for k, task in enumerate([*ids[:3], ids[0]])],
+             meta={"test": "seen", "width": 4}).save(tmp_path / "seen.json")
+    whole, out = tmp_path / "whole", tmp_path / "cut"
+    act = Remembering.act
+
+    def stops_once_the_others_ended(self, obs):
+        if obs.user == 3:
+            deadline = time.monotonic() + 10
+            while (not (out / "round.jsonl").exists() or len((out / "round.jsonl").read_text().splitlines()) < 3) \
+                    and time.monotonic() < deadline:
+                time.sleep(0.02)
+            raise Stopped
+        return act(self, obs)
+
+    try:
+        frozen.play_forks(run, tmp_path / "seen.json", whole)
+        with monkeypatch.context() as patched:
+            patched.setattr(Remembering, "act", stops_once_the_others_ended)
+            with pytest.raises(Stopped):
+                frozen.play_forks(run, tmp_path / "seen.json", out)
+        assert sorted(json.loads(line)["user"] for line in (out / "round.jsonl").read_text().splitlines()) == [0, 1, 2]
+        assert not (out / "records.jsonl").read_text()
+        before = len(server.requests)
+        assert frozen.play_forks(run, tmp_path / "seen.json", out) == out
+        assert len(server.requests) - before == 1   # the fourth user's one action, and no other's
+    finally:
+        server.stop()
+    assert rows(out / "records.jsonl") == rows(whole / "records.jsonl")
+    assert [(r["user"], r["solved"], r["cost"]) for r in rows(out / "records.jsonl")] == [
+        (0, True, 0.0), (1, True, 0.0), (2, True, 1.0), (3, True, 0.0)]
+    assert git(out / "users" / "u002" / "system" / "state.git", "diff", "--name-only", "HEAD~1", "HEAD").split() == [
+        "memory.json"]
+    for user in range(4):
+        mine = out / "users" / f"u{user:03d}" / "system"
+        assert not (mine / "state").exists()   # every user's state in its repository, whole
+        assert git(mine / "state.git", "log", "--format=%s").splitlines()[:2] == ["round 3", f"relocated from {system}"]
+        # what the user wrote in its instance, its test round's commit against its relocated fork, as the test's
+        # never stopped wrote it (each fork names its own folder, so their trees differ by that alone)
+        assert git(mine / "state.git", "diff", "HEAD~1", "HEAD") == git(
+            whole / "users" / f"u{user:03d}" / "system" / "state.git", "diff", "HEAD~1", "HEAD")
+    assert json.loads((out / "meta.json").read_text())["resumed_at"][0]["finished"] == 3

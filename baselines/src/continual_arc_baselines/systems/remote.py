@@ -48,7 +48,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from continual_arc_baselines.frozen import delete
+from continual_arc_baselines.statelog import delete
 from continual_arc_baselines.systems.hosted import (
     TMP_PREFIX,
     HostedLearner,

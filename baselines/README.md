@@ -150,6 +150,30 @@ wiped before every instance, the first included.
 `--stream-only` plays a schedule's stream and stops before its epilogue, a literal prefix of the schedule, for a
 `--schedule` as for a `--config`; `--no-epilogue` builds the stream alone from `--config`.
 
+### Resuming a run
+
+Whatever stops a run, a time limit, a preemption, a crash or Ctrl-C, `--resume` goes on with it from its last whole
+round, as though it had never stopped:
+
+```bash
+uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
+  --config arc1 --seed 0 --no-epilogue --out runs/arc1/openclaw-ws0 --resume
+```
+
+It goes on in the run's own directory and attempt, with the run's own settings: the learner and its arguments, its
+name, its tasks' source, how its model is reached (the upstream, the request defaults, the confinement), the
+environment's settings, the task names' style and the events log are the first launch's, and its schedule serves
+every slot the run's served as the run's did, going on past it if it is longer. Any other is refused before anything
+is written, and so is a directory that holds no run, while a launch without `--resume` never writes over one; where it
+stops (`--stop-after`), what it may spend and where it logs may change. The run's `records.jsonl` and `events.jsonl`
+are cut back to the last round boundary it saved and added to, so that no row comes twice, and `launches.jsonl` and
+`meta.json` record every resume (the benchmark's [resuming a run](../README.md#resuming-a-run)). The learner goes on
+with its state as it was there: a harness's state directory is committed at the end of every round (below), so the
+resume puts back the last round's commit, whatever a stopped instance wrote since, and plays the instance again; a
+Python learner gives the runner its state (`Learner.state`). A hosted or remote learner keeps its files as the stop left
+them and starts its process again, so what it kept in memory is lost, and so does a harness's run played before every
+round was committed, which has no commit to go back to.
+
 ## Test a harness
 
 After its stream a learner plays two frozen tests, the held-out test and the seen test, every instance from its state
@@ -213,15 +237,17 @@ TEST.json`, one test a launch.
 
 **As one round of users** (`--collective`), as the paper played its tests: every instance of a test made at its full
 width is a user of its own, a hundred played at once on one machine, each forked from the commit of the stream's last
-round. It needs a run that logged its state (below). Every test user starts from the run's one state (a collective
+round, which every harness's run commits (below). Every test user starts from the run's one state (a collective
 run's is user 0's, [below](#one-state-for-a-team)), the stream's last commit with every absolute path that named the
 run's own system folder renamed to the user's (in text files, links and SQLite databases); the users' objects share one
 store that reads the run's, and nothing the test's users write is merged, since nothing after the test reads it. A run
-with no stream starts every user from nothing, in `RUN/frozen/<the test>-reference/play`.
+with no stream starts every user from nothing, in `RUN/frozen/<the test>-reference/play`. A test cut short, launched
+again, keeps every user whose instance had ended, its state committed as its instance left it, and forks only the
+others again to play theirs, since no test user's play reaches another's.
 
 ```bash
 uv run continual-arc schedule make --config arc1 --seed 0 --test held-out --out arc1-held-out0.json
-uv run arc-baselines test runs/arc1/openclaw-ws0-logged --schedule arc1-held-out0.json --collective
+uv run arc-baselines test runs/arc1/openclaw-ws0 --schedule arc1-held-out0.json --collective
 ```
 
 ## One state for a team
@@ -264,20 +290,17 @@ users' stores apart, is refused rather than played on. A frozen test's round is 
 users are forks of the stream's end that nothing after the test reads, so their writes are kept apart, each committed
 in its own fork.
 
-## Logged state and forks
+## Committed state and forks
 
-`arc-baselines run --log-state` commits a `SystemLearner`'s whole state directory at the end of every round, into
+`arc-baselines run` commits a `SystemLearner`'s whole state directory at the end of every round, into
 `system/state.git` beside it, each round's commit listed in `system/state-log.jsonl`; git keeps a file once however
-many rounds it lasts, so a run's every state costs about what its last one does. `CollectiveHarnessLearner` logs the
-one state its users share this way, in user 0's `users/u000/system/`.
+many rounds it lasts, so a run's every state costs about what its last one does. A run resumes from its last round's
+commit, its frozen tests fork its stream's last, and a run can be taken up again from any round's.
+`CollectiveHarnessLearner` commits the one state its users share this way, in user 0's `users/u000/system/`.
 
 ```bash
-# the stream alone, its state committed at the end of every round
-uv run arc-baselines run --learner $LEARNER --learner-kwargs "$SETTINGS" --llm-defaults "$EFFORT" \
-  --config arc1 --seed 0 --stream-only --log-state --out runs/arc1/openclaw-ws0-logged
-
 # taken up again from the end of round 99, with the state its learner had then: prints the command that plays on
-uv run arc-baselines fork runs/arc1/openclaw-ws0-logged --round 99 --out runs/arc1/openclaw-ws0-from-99
+uv run arc-baselines fork runs/arc1/openclaw-ws0 --round 99 --out runs/arc1/openclaw-ws0-from-99
 ```
 
 ## Submit a result
@@ -314,12 +337,15 @@ Each writes `runs/<track>/<cell>/`, under the name its record carries in the run
 long-lived, so launch a part at a time (`bash scripts/paper-grid.sh luna6-low`), and `DRY_RUN=1` shows each cell's
 command first. The paper's 228 runs made about 1,480 USD of model calls through OpenRouter, by the cost the proxy
 recorded on each instance. The models are sampled through provider APIs, so a rerun differs from the paper's by about
-the spread the paper reports. Every cell commits its state at the end of each round (`--log-state`), so a harness
-cell's frozen tests can follow it with `arc-baselines test --collective`, as the paper played them. The sequential and
+the spread the paper reports. Every cell commits its state at the end of each round, so a harness cell's frozen
+tests can follow it with `arc-baselines test --collective`, as the paper played them. The sequential and
 random cells play their stream alone (`--stream-only`), and the workstreams cells go on to the epilogue they were
 launched with, though a separate script cut 30 hermes-agent and openclaw cells among them short of it, 15 of them
-partway through, so a rerun plays more of it than they did. `PILOT=25` stops each cell after 25 instances, as the
-paper's were stopped to be checked, and `RESUME=1` then continues it.
+partway through, so a rerun plays more of it than they did. Each cell's console goes to `console.log` in its run
+directory, every launch's after the last's. A cell that holds a run is never launched from its start again: `RESUME=1`
+goes on with every such cell from its last whole round ([resuming a run](#resuming-a-run)), as after a limit, a
+preemption or a crash stopped it, and skips a cell that holds none. `PILOT=25` stops each cell after 25 instances, as
+the paper's were stopped to be checked, and `RESUME=1` then continues it.
 
 The paper's cells were launched on 20 and 21 October 2026. The learners here play a cell as that code did, with these
 differences: a harness can put back a saved state when reset, which only its frozen tests use; the first instance
