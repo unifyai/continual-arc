@@ -1,4 +1,8 @@
+import copy
+import itertools
 import json
+import shutil
+from pathlib import Path
 
 import pytest
 from conftest import as_users
@@ -6,9 +10,64 @@ from conftest import as_users
 from continual_arc.aliases import TaskAliases
 from continual_arc.env import EnvConfig, RequestDemos
 from continual_arc.learner import BaseLearner
-from continual_arc.runner import load_run, rescore, run
-from continual_arc.schedule import RANDOM, epilogue_schedule, sequential_params, stream_schedule
-from continual_arc.testing import DemoHungryLearner, EchoLearner, ShiftMemoryLearner
+from continual_arc.runner import OPEN_ROUND, load_run, rescore, run
+from continual_arc.schedule import (
+    RANDOM,
+    Schedule,
+    Slot,
+    epilogue_schedule,
+    sequential_params,
+    stream_schedule,
+)
+from continual_arc.testing import (
+    ConcurrentRoundMemoryLearner,
+    DemoHungryLearner,
+    EchoLearner,
+    RoundMemoryLearner,
+    ShiftMemoryLearner,
+)
+
+CLOCK = ("wall_seconds",)  # what a record reads from the clock, which no two plays share
+
+
+class Stopped(Exception):
+    """The stop a test makes partway through a run, as a preemption or a crash stops one."""
+
+
+def stopping(monkeypatch, learner_class, at: int) -> None:
+    """``learner_class``'s ``act`` raising :class:`Stopped` at its ``at``-th call."""
+    act, calls = learner_class.act, itertools.count(1)
+
+    def stopped(self, obs):
+        if next(calls) == at:
+            raise Stopped
+        return act(self, obs)
+
+    monkeypatch.setattr(learner_class, "act", stopped)
+
+
+def rows(path: Path) -> list[dict]:
+    """The JSON lines of ``path``, less what a record reads from the clock."""
+    out = []
+    for line in path.read_text().splitlines():
+        row = json.loads(line)
+        if "resources" in row:
+            row["resources"] = {k: v for k, v in row["resources"].items() if k not in CLOCK}
+        out.append(row)
+    return out
+
+
+def cut_off_mid_write(run_dir: Path, whole: Path, users: int) -> int:
+    """What a stop while the runner wrote the next round's records leaves in ``run_dir``: the first records of that
+    round as ``whole`` (the same run never stopped) holds them, then a record and an event cut off before their newline.
+    Returns how many records it added whole."""
+    kept = len((run_dir / "records.jsonl").read_text().splitlines())
+    added = (whole / "records.jsonl").read_text().splitlines()[kept:kept + max(1, users // 2)]
+    with (run_dir / "records.jsonl").open("a") as fp:
+        fp.write("".join(line + "\n" for line in added) + '{"step": 99, "task_id": "fak')
+    with (run_dir / "events.jsonl").open("a") as fp:
+        fp.write('{"step": 99, "rou')
+    return len(added)
 
 
 def test_memory_learner_pays_once_per_task_in_stream(fake_registry, fake_source, tmp_path):
@@ -111,52 +170,98 @@ def test_events_log(fake_registry, fake_source, tmp_path):
     assert json.loads(lines[1])["feedback"]["correct"] is True
 
 
-class _CrashAfter(BaseLearner):
-    """A ShiftMemoryLearner that dies after ``n`` finished instances (an interruption)."""
+@pytest.mark.parametrize("learner_class, users, at", [(ShiftMemoryLearner, 1, 23), (RoundMemoryLearner, 4, 13),
+                                                     (ConcurrentRoundMemoryLearner, 4, 13)])
+def test_a_run_stopped_partway_goes_on_exactly_as_one_never_stopped(fake_registry, fake_source, tmp_path, monkeypatch,
+                                                                    learner_class, users, at):
+    """A run stopped in the middle of a round, with the next round's records half written as a stop mid-write leaves
+    them, goes on from its last whole round, its records cut back to it on disk and its learner's state as it was there:
+    every record and every event is the run never stopped's, row for row, and so is the learner's state at the end."""
+    sched = as_users(stream_schedule(fake_source.task_ids()[:6], 24, seed=4, source=fake_source.name), users)
+    whole, broken = tmp_path / "whole", tmp_path / "broken"
+    never = learner_class()
+    run(never, sched, out_dir=whole, registry=fake_registry, log_events=True)
+    broken.mkdir()
+    shutil.copy(whole / "alias-salt", broken)   # the same names for the tasks, which the learners' memories hold
+    stopping(monkeypatch, learner_class, at)
+    with pytest.raises(Stopped):
+        run(learner_class(), sched, out_dir=broken, registry=fake_registry, log_events=True)
+    monkeypatch.undo()
+    kept = len(rows(broken / "records.jsonl"))
+    assert 0 < kept < 24 and kept % users == 0
+    added = cut_off_mid_write(broken, whole, users)
+    again = learner_class()
+    result = run(again, sched, out_dir=broken, registry=fake_registry, log_events=True, resume=True)
+    assert rows(broken / "records.jsonl") == rows(whole / "records.jsonl")
+    played, unstopped = rows(broken / "events.jsonl"), rows(whole / "events.jsonl")
+    assert (played if users == 1 else sorted(played, key=json.dumps)) == (
+        unstopped if users == 1 else sorted(unstopped, key=json.dumps))   # users at once act in any order
+    assert again.state() == never.state() and [r.step for r in result.records] == list(range(24))
+    resumes = json.loads((broken / "meta.json").read_text())["resumed_at"]
+    assert [(r["records"], r["dropped"]) for r in resumes] == [(kept, added)]
 
-    def __init__(self, n: int):
-        self.inner = ShiftMemoryLearner()
-        self.n = n
-        self.finished = 0
 
-    def act(self, obs):
-        if self.finished >= self.n:
-            raise RuntimeError("interrupted")
-        return self.inner.act(obs)
-
-    def observe(self, obs, action, feedback):
-        self.inner.observe(obs, action, feedback)
-        if getattr(feedback, "correct", False):
-            self.finished += 1
-
-    def reset(self):
-        self.inner.reset()
-
-
-def test_resume_continues_an_interrupted_run(fake_registry, fake_source, tmp_path):
-    import pytest
-
+def test_a_resume_refuses_any_settings_but_the_runs_own_and_a_fresh_run_never_writes_over_one(fake_registry,
+                                                                                              fake_source, tmp_path):
     ids = fake_source.task_ids()[:4]
-    sched = stream_schedule(ids, 30, seed=3, source=fake_source.name)
+    sched = stream_schedule(ids, 12, seed=4, source=fake_source.name)
     out = tmp_path / "run"
-    with pytest.raises(RuntimeError, match="interrupted"):
-        run(_CrashAfter(7), sched, out_dir=out, registry=fake_registry, log_events=True)
-    lines = (out / "records.jsonl").read_text().splitlines()
-    assert len(lines) == 7
-    # the interrupted instance is replayed; the seven finished ones are kept
-    result = run(ShiftMemoryLearner(), sched, out_dir=out, registry=fake_registry, log_events=True, resume=True)
-    assert len(result.records) == 30
-    assert [r.step for r in result.records] == list(range(30))
-    _, _, recs2 = load_run(out)
-    assert len(recs2) == 30 and [r.step for r in recs2] == list(range(30))
-    assert result.summary["overall"]["n"] == 30
-    meta = json.loads((out / "meta.json").read_text())
-    assert meta["resumed_at"][0]["records"] == 7
-    # the fresh learner pays for demonstrations again on its first sight of each task
-    assert result.records[7].cost >= 0
-    # nothing to resume from: a plain run
-    result3 = run(ShiftMemoryLearner(), sched, out_dir=tmp_path / "fresh", registry=fake_registry, resume=True)
-    assert len(result3.records) == 30 and "resumed_at" not in json.loads((tmp_path / "fresh" / "meta.json").read_text())
+    run(ShiftMemoryLearner(), sched.first_rounds(6), out_dir=out, registry=fake_registry, settings={"memory": "shift"})
+    with pytest.raises(ValueError, match="holds a run already"):
+        run(ShiftMemoryLearner(), sched, out_dir=out, registry=fake_registry, settings={"memory": "shift"})
+    for other, refused in (({"config": EnvConfig(attempt_cap=3)}, "config"), ({"alias_style": "names"}, "alias_style"),
+                           ({"learner_name": "other"}, "learner"), ({"log_events": True}, "log_events"),
+                           ({"max_actions_per_instance": 5}, "max_actions_per_instance"),
+                           ({"settings": {"memory": "none"}}, "settings")):
+        with pytest.raises(ValueError, match=f"differ from them: .*{refused}"):
+            run(ShiftMemoryLearner(), sched, out_dir=out, registry=fake_registry, resume=True,
+                **{"settings": {"memory": "shift"}, **other})
+    with pytest.raises(ValueError, match="differ from them: schedule"):
+        run(ShiftMemoryLearner(), stream_schedule(ids, 12, seed=5, source=fake_source.name), out_dir=out,
+            registry=fake_registry, resume=True, settings={"memory": "shift"})
+    assert json.loads((out / "meta.json").read_text()).get("resumed_at") is None
+    # its own settings, under a schedule that goes on past its own: it plays on
+    result = run(ShiftMemoryLearner(), sched, out_dir=out, registry=fake_registry, resume=True,
+                 settings={"memory": "shift"})
+    assert [r.step for r in result.records] == list(range(12))
+    unstopped = run(ShiftMemoryLearner(), sched, registry=fake_registry)
+    assert [(r.cost, r.solved) for r in result.records] == [(r.cost, r.solved) for r in unstopped.records]
+
+
+def test_a_frozen_test_stopped_partway_plays_only_the_instances_it_had_not_ended(fake_registry, fake_source, tmp_path,
+                                                                                monkeypatch):
+    """A frozen test's instances all start from the learner as its stream left it, so a test stopped partway keeps
+    every instance it had ended, and the relaunch, from a copy of the stream's learner, plays only the others: its
+    records are the test never stopped's."""
+    ids = fake_source.task_ids()
+    stream = stream_schedule(ids[:3], 9, seed=1, source=fake_source.name)
+    learner = RoundMemoryLearner()
+    run(learner, stream, out_dir=tmp_path / "stream", registry=fake_registry)
+    slots = [Slot(task, 700 + k, "seen-test", user=k) for k, task in enumerate(ids[:3] + ids[6:9])]
+    test = Schedule(name="seen", seed=1, slots=slots, sources={t: fake_source.name for t in ids}, users=6,
+                    meta={"test": "seen", "width": 6})
+    out = tmp_path / "broken"
+    for play in (tmp_path / "whole", out):   # each test under the names the stream gave its tasks
+        play.mkdir()
+        shutil.copy(tmp_path / "stream" / "alias-salt", play)
+    never = run(copy.deepcopy(learner), test, out_dir=tmp_path / "whole", registry=fake_registry)
+    # one action on every instance before a second on any: the stream's three tasks are solved at the first, the
+    # others ask for a demonstration and answer at the second, so stopped at the fourth instance's answer the test has
+    # ended the first three
+    stopping(monkeypatch, RoundMemoryLearner, 6 + 1)
+    with pytest.raises(Stopped):
+        run(copy.deepcopy(learner), test, out_dir=out, registry=fake_registry)
+    monkeypatch.undo()
+    assert [json.loads(line)["step"] for line in (out / OPEN_ROUND).read_text().splitlines()] == [0, 1, 2]
+    assert not (out / "records.jsonl").read_text()
+    again = copy.deepcopy(learner)
+    calls = again.calls
+    result = run(again, test, out_dir=out, registry=fake_registry, resume=True)
+    assert again.calls - calls == 3 * 2   # the three instances it had not ended, a demonstration and an answer each
+    assert rows(out / "records.jsonl") == rows(tmp_path / "whole" / "records.jsonl")
+    assert [(r.cost, r.solved) for r in result.records] == [(r.cost, r.solved) for r in never.records]
+    assert not (out / OPEN_ROUND).read_text()
+    assert json.loads((out / "meta.json").read_text())["resumed_at"][0]["finished"] == 3
 
 
 def test_restore_rejects_a_mismatched_schedule(fake_registry, fake_source):
@@ -197,22 +302,25 @@ def test_collective_regime_runs_in_rounds(fake_registry, fake_source, tmp_path):
     assert [json.loads(line)["step"] for line in lines] == list(range(24))
 
 
-def test_records_are_written_by_whole_rounds_and_resume_replays_the_round(fake_registry, fake_source, tmp_path):
+def test_records_are_written_by_whole_rounds_and_resume_replays_the_round(fake_registry, fake_source, tmp_path,
+                                                                          monkeypatch):
     from continual_arc.testing import RoundMemoryLearner
 
     ids = fake_source.task_ids()[:3]
     sched = stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, order="random")
     as_users(sched, 4)
+    act = RoundMemoryLearner.act
 
-    class CrashInRound(RoundMemoryLearner):
-        def act(self, obs):
-            if obs.round == 1 and obs.step == 6:
-                raise RuntimeError("interrupted")
-            return super().act(obs)
+    def crash_in_round(self, obs):
+        if obs.round == 1 and obs.step == 6:
+            raise RuntimeError("interrupted")
+        return act(self, obs)
 
     out = tmp_path / "run"
+    monkeypatch.setattr(RoundMemoryLearner, "act", crash_in_round)
     with pytest.raises(RuntimeError, match="interrupted"):
-        run(CrashInRound(), sched, out_dir=out, registry=fake_registry)
+        run(RoundMemoryLearner(), sched, out_dir=out, registry=fake_registry)
+    monkeypatch.undo()
     lines = (out / "records.jsonl").read_text().splitlines()
     assert len(lines) == 4  # only the finished round is on disk
     result = run(RoundMemoryLearner(), sched, out_dir=out, registry=fake_registry, resume=True)
@@ -284,21 +392,23 @@ def test_concurrent_users_are_served_at_their_own_pace(fake_registry, fake_sourc
                               registry=fake_registry).summary
 
 
-def test_a_failing_user_stops_the_round_and_resume_replays_it(fake_registry, fake_source, tmp_path):
+def test_a_failing_user_stops_the_round_and_resume_replays_it(fake_registry, fake_source, tmp_path, monkeypatch):
     from continual_arc.testing import ConcurrentRoundMemoryLearner
 
     ids = fake_source.task_ids()[:3]
     sched = as_users(stream_schedule(ids, 12, seed=5, source=fake_source.name, params=RANDOM, order="random"), 4)
+    act = ConcurrentRoundMemoryLearner.act
 
-    class CrashInRound(ConcurrentRoundMemoryLearner):
-        def act(self, obs):
-            if obs.round == 1 and obs.user == 2:
-                raise RuntimeError("interrupted")
-            return super().act(obs)
+    def crash_in_round(self, obs):
+        if obs.round == 1 and obs.user == 2:
+            raise RuntimeError("interrupted")
+        return act(self, obs)
 
     out = tmp_path / "run"
+    monkeypatch.setattr(ConcurrentRoundMemoryLearner, "act", crash_in_round)
     with pytest.raises(RuntimeError, match="interrupted"):
-        run(CrashInRound(), sched, out_dir=out, registry=fake_registry)
+        run(ConcurrentRoundMemoryLearner(), sched, out_dir=out, registry=fake_registry)
+    monkeypatch.undo()
     assert len((out / "records.jsonl").read_text().splitlines()) == 4  # only the finished round is on disk
     result = run(ConcurrentRoundMemoryLearner(), sched, out_dir=out, registry=fake_registry, resume=True)
     assert [r.step for r in result.records] == list(range(12))
@@ -359,17 +469,20 @@ def test_a_learner_is_shown_an_alias_and_nothing_about_the_stream(fake_registry,
     assert meta["alias_style"] == "hex" and "view" not in meta
 
 
-def test_a_resumed_run_keeps_its_names(fake_registry, fake_source, tmp_path):
+def test_a_resumed_run_keeps_its_names(fake_registry, fake_source, tmp_path, monkeypatch):
     ids = fake_source.task_ids()
     sched = stream_schedule(ids, 60, seed=2, source=fake_source.name)
-    first = _Recorder()
-    run(first, sched, out_dir=tmp_path / "run", registry=fake_registry)
-    lines = (tmp_path / "run" / "records.jsonl").read_text().splitlines()
-    (tmp_path / "run" / "records.jsonl").write_text("\n".join(lines[:30]) + "\n")
+    whole = _Recorder()
+    run(whole, sched, out_dir=tmp_path / "whole", registry=fake_registry)
+    stopping(monkeypatch, _Recorder, 40)
+    with pytest.raises(Stopped):
+        run(_Recorder(), sched, out_dir=tmp_path / "run", registry=fake_registry)
+    monkeypatch.undo()
     again = _Recorder()
     run(again, sched, out_dir=tmp_path / "run", registry=fake_registry, resume=True)
-    named = {(o.step, o.task_id) for o in first.shown}
-    assert {(o.step, o.task_id) for o in again.shown} <= named
+    salt = (tmp_path / "run" / "alias-salt").read_text()
+    names = {(r["step"], TaskAliases(salt=salt).alias(r["task_id"])) for r in rows(tmp_path / "run" / "records.jsonl")}
+    assert {(o.step, o.task_id) for o in again.shown} <= names and again.shown
 
 
 def test_the_cli_passes_the_alias_style(tmp_path, monkeypatch):
@@ -388,6 +501,43 @@ def test_the_cli_passes_the_alias_style(tmp_path, monkeypatch):
         cli.main(["run", "--learner", "continual_arc.testing:GiveUpLearner", "--schedule", str(sched), "--quiet",
                   "--alias-style", "names"])
     assert seen["alias_style"] == "names"
+
+
+def test_continual_arc_run_resumes_a_run_with_its_own_settings_and_refuses_any_other(fake_registry, fake_source,
+                                                                                     tmp_path, monkeypatch):
+    """``continual-arc run --resume`` goes on with a run stopped partway as though it had never stopped, record for
+    record and event for event; it refuses a directory that holds no run and any settings but the run's own, and a
+    launch without it never writes over a run."""
+    from continual_arc import cli
+
+    monkeypatch.setattr("continual_arc.tasks.TaskRegistry.default", classmethod(lambda cls, *args: fake_registry))
+    schedule = tmp_path / "schedule.json"
+    stream_schedule(fake_source.task_ids()[:4], 20, seed=3, source=fake_source.name).save(schedule)
+    common = ["run", "--learner", "continual_arc.testing:ShiftMemoryLearner", "--schedule", str(schedule), "--quiet",
+              "--events"]
+    whole, out = tmp_path / "whole", tmp_path / "run"
+    assert cli.main([*common, "--out", str(whole)]) == 0
+    out.mkdir()
+    shutil.copy(whole / "alias-salt", out)
+    with monkeypatch.context() as patched:
+        stopping(patched, ShiftMemoryLearner, 17)
+        with pytest.raises(Stopped):
+            cli.main([*common, "--out", str(out)])
+    stopped = (out / "records.jsonl").read_text()
+    for argv, refusal in (([*common, "--out", str(out)], "holds a run already"),
+                          ([*common, "--out", str(tmp_path / "none"), "--resume"], "holds none"),
+                          ([*common, "--out", str(out), "--resume", "--attempt-cap", "3"], "config"),
+                          ([*common, "--out", str(out), "--resume", "--alias-style", "names"], "alias_style"),
+                          ([*common, "--out", str(out), "--resume", "--name", "other"], "learner"),
+                          ([*common[:-1], "--out", str(out), "--resume"], "log_events")):
+        with pytest.raises(SystemExit, match=refusal):
+            cli.main(argv)
+    assert (out / "records.jsonl").read_text() == stopped and "resumed_at" not in json.loads(
+        (out / "meta.json").read_text())
+    assert cli.main([*common, "--out", str(out), "--resume"]) == 0
+    assert rows(out / "records.jsonl") == rows(whole / "records.jsonl")
+    assert rows(out / "events.jsonl") == rows(whole / "events.jsonl")
+    assert len(json.loads((out / "meta.json").read_text())["resumed_at"]) == 1
 
 
 def test_rescore_charges_an_old_run_as_the_benchmark_charges_now(fake_registry, fake_source, tmp_path):

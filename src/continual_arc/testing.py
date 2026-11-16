@@ -221,6 +221,12 @@ class ShiftMemoryLearner(BaseLearner):
     def resources(self) -> dict[str, float]:
         return {"calls": float(self.calls), "state_bytes": float(len(self.memory) * 16)}
 
+    def state(self) -> dict:
+        return {"memory": dict(self.memory), "pending": list(self._pending_demos), "calls": self.calls}
+
+    def restore(self, state: dict) -> None:
+        self.memory, self._pending_demos, self.calls = dict(state["memory"]), list(state["pending"]), state["calls"]
+
 
 class RoundMemoryLearner(ShiftMemoryLearner):
     """A ShiftMemoryLearner that honours the round contract: shifts inferred during a
@@ -259,6 +265,17 @@ class RoundMemoryLearner(ShiftMemoryLearner):
     def observe(self, obs: Observation, action: Action, feedback: Feedback) -> None:
         if isinstance(feedback, DemosFeedback) and feedback.pairs:
             self._demos_by_step[obs.step] = list(feedback.pairs)
+
+    def state(self) -> dict:
+        return {**super().state(), "staged": dict(self._staged),
+                "demos": {step: list(pairs) for step, pairs in self._demos_by_step.items()},
+                "rounds": (self.rounds_begun, self.rounds_ended)}
+
+    def restore(self, state: dict) -> None:
+        super().restore(state)
+        self._staged = dict(state["staged"])
+        self._demos_by_step = {step: list(pairs) for step, pairs in state["demos"].items()}
+        self.rounds_begun, self.rounds_ended = state["rounds"]
 
 
 class ConcurrentRoundMemoryLearner(RoundMemoryLearner):
@@ -299,6 +316,14 @@ class ConcurrentRoundMemoryLearner(RoundMemoryLearner):
     def user_resources(self, user: int) -> dict[str, float]:
         with self._lock:
             return {"calls": float(self._calls_by_user[user])}
+
+    def state(self) -> dict:
+        with self._lock:
+            return {**super().state(), "calls_by_user": dict(self._calls_by_user)}
+
+    def restore(self, state: dict) -> None:
+        super().restore(state)
+        self._calls_by_user = Counter(state["calls_by_user"])
 
 
 class ScriptedLearner(BaseLearner):

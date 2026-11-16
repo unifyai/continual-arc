@@ -310,8 +310,8 @@ held-out task in the same round share both; a stream task is one user's alone), 
 (`user_exposure_index`, `user_gap`); with one user the two agree, the times a task was
 seen before and the steps since it was last seen. A round never spans a phase, so the
 epilogue starts on a round boundary and a test is a round of its own. `records.jsonl` only ever holds whole rounds, and a
-resumed run replays the interrupted round from its start. Add-ons are served one instance at
-a time and need one user.
+resumed run plays the round it stopped in again from its start ([resuming a run](#resuming-a-run)). Add-ons are served
+one instance at a time and need one user.
 
 ## Cutting a stream short, and testing it early
 
@@ -321,7 +321,7 @@ rebuild, because the stream process gives every task a supply fixed by the confi
 full length, so regenerating a shorter stream from the same seed would not be this one's
 prefix. A resumed run checks its schedule's prefix slot by slot (`runner.run(resume=True)`),
 so a run stopped under `first_rounds(20)` resumes without replay under `first_rounds(60)`, or
-under the uncut schedule.
+under the uncut schedule ([resuming a run](#resuming-a-run)).
 
 ```bash
 # the first 20 rounds of the stream served to 16 users
@@ -405,6 +405,42 @@ and trained rows included; `runner.run` takes the name style as `alias_style`.
 The runner logs per-instance records (`records.jsonl`) and a summary
 (`summary.json`) with the budget used, acquisition cost, retention by gap,
 cost by exposure index, the learning curve, and the budget used on each test.
+
+### Resuming a run
+
+Whatever stops a run, a time limit, a preemption, a crash or Ctrl-C, it goes on from its last whole round as though it
+had never stopped:
+
+```bash
+uv run continual-arc run --learner my_pkg.learners:MyLearner --schedule stream.json --out runs/my-stream --resume
+```
+
+`--resume` (`runner.run(..., resume=True)`) goes on in the run's own directory with the run's own settings: the
+learner and its arguments, its name, the environment's settings, the task names' style and the events log are the
+run's, and its schedule serves every slot the run's served as the run's did, going on past it if it is longer
+(`Schedule.first_rounds`); any other is refused, and so is a directory that holds no run, while a launch without
+`--resume` never writes over one. The run's `records.jsonl` (and `events.jsonl`) are cut back to the last round
+boundary the run saved, whole or not at all, the round it stopped in and a line a stop cut off with them, and added to,
+so that no row comes twice; `meta.json` records every resume in `resumed_at`. A counter a learner keeps as a `Decimal`,
+such as a running total of what its model calls were charged, is differenced exactly, so that a record shows what its
+instance cost to the last digit, in a resumed process as in one never stopped.
+
+A learner that carries anything from one round to the next gives it to the runner, which keeps it beside the records
+in `learner-state.pkl` as the run starts and at the end of every round, after the round's records, and gives it back
+to the learner made anew for the resumed run:
+
+```python
+class MyLearner(BaseLearner):
+    def state(self):                          # what it carries between rounds, as one picklable object
+        return {"memory": self.memory}
+    def restore(self, state):                 # taken back on resume, before the first action
+        self.memory = state["memory"]
+```
+
+A learner without `state` carries nothing or keeps its own, as the baselines' harness adapters do, whose files are
+committed at every round's end and whose `state()` names the commit. A frozen test keeps more: its instances all
+start from the end of the stream, so each one is kept as it ends (`round.jsonl`), and a test stopped partway plays only
+the instances it had not ended, from a copy of the stream's learner as before.
 
 
 ## What a learner may use

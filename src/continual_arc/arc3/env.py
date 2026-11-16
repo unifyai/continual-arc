@@ -45,7 +45,14 @@ from continual_arc.arc3.instances import (
     Frame,
     LevelSource,
 )
-from continual_arc.env import GiveUp, GiveUpFeedback, InstanceRecord, RequestDemos, StepResult
+from continual_arc.env import (
+    GiveUp,
+    GiveUpFeedback,
+    InstanceRecord,
+    RequestDemos,
+    StepResult,
+    check_restore,
+)
 from continual_arc.schedule import Schedule, SlotInfo
 
 ACTION_IDS = (1, 2, 3, 4, 5, 6, 7)
@@ -301,25 +308,23 @@ class Arc3Env:
         self._started = True
         return self._open_round(0)
 
-    def restore(self, records: list[InstanceRecord]) -> Arc3Observation | None:
-        """Continue a stream after an interruption from the whole rounds an earlier run finished (see
-        :meth:`continual_arc.env.ContinualArcEnv.restore`)."""
+    def restore(self, records: list[InstanceRecord], finished: list[InstanceRecord] = ()) -> Arc3Observation | None:
+        """Continue a stream after an interruption from the whole rounds an earlier run finished and the instances of
+        the next round it ended (see :meth:`continual_arc.env.ContinualArcEnv.restore`)."""
         if not self._started:
             raise RuntimeError("call reset() before restore()")
         if self._records:
             raise RuntimeError("restore() must follow reset() directly")
-        for i, record in enumerate(records):
-            if i >= len(self.schedule):
-                raise ValueError(f"record {i} is past the end of the schedule")
-            slot = self.schedule.slots[i]
-            if record.step != i or record.task_id != slot.task_id or record.instance_seed != slot.instance_seed:
-                raise ValueError(f"record {i} ({record.task_id}) does not match the schedule slot ({slot.task_id})")
-        n = len(records)
-        if 0 < n < len(self.schedule) and not self._starts[n]:
-            raise ValueError(f"{n} records end inside a round; restore whole rounds")
+        n = check_restore(list(records), list(finished), self.schedule.slots, self._starts)
         self._records = list(records)
         self._total_cost = float(sum(record.cost for record in records))
-        return self._open_round(n)
+        self._open_round(n)
+        for record in finished:
+            del self._open[record.step]
+            self._pending[record.step] = record
+            self._total_cost += record.cost
+        self._focus = min(self._open) if self._open else None
+        return self.observation()
 
     def observation(self, index: int | None = None) -> Arc3Observation | None:
         """The observation of instance ``index``, or of the focused instance."""

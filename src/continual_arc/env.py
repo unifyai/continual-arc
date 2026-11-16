@@ -244,6 +244,38 @@ class StepResult:
     """The round's records in slot order, when this step ended the round."""
 
 
+def check_restore(records: list[InstanceRecord], finished: list[InstanceRecord], slots: list[Slot],
+                  starts: list[bool]) -> int:
+    """Refuse what an environment over ``slots`` (``starts`` saying which begin a round) cannot go on from: ``records``
+    must be whole rounds, record i the instance of slot i, and ``finished`` instances of the round after them, each
+    once, never all of it (a round all of whose instances finished is restored as records). Returns how many records
+    there are, where that round begins."""
+    for i, record in enumerate(records):
+        if record.episode_type != "benchmark":
+            raise ValueError("cannot restore a run with add-on episodes")
+        if i >= len(slots):
+            raise ValueError(f"record {i} is past the end of the schedule")
+        slot = slots[i]
+        if record.step != i or record.task_id != slot.task_id or record.instance_seed != slot.instance_seed:
+            raise ValueError(f"record {i} ({record.task_id}) does not match the schedule slot ({slot.task_id})")
+    n = len(records)
+    if 0 < n < len(slots) and not starts[n]:
+        raise ValueError(f"{n} records end inside a round; restore whole rounds")
+    end = n + 1
+    while end < len(slots) and not starts[end]:
+        end += 1
+    steps = [record.step for record in finished]
+    if len(set(steps)) != len(steps) or not all(n <= step < min(end, len(slots)) for step in steps):
+        raise ValueError(f"the finished instances restored must be of the round of slots {n} to {end - 1}, each once")
+    for record in finished:
+        slot = slots[record.step]
+        if record.task_id != slot.task_id or record.instance_seed != slot.instance_seed:
+            raise ValueError(f"record of step {record.step} ({record.task_id}) does not match its slot ({slot.task_id})")
+    if finished and len(finished) == end - n:
+        raise ValueError(f"every instance of the round of slots {n} to {end - 1} finished: restore it as records")
+    return n
+
+
 # ---------------------------------------------------------------------------
 # environment
 # ---------------------------------------------------------------------------
@@ -352,30 +384,25 @@ class ContinualArcEnv:
         self._started = True
         return self._open_round(0)
 
-    def restore(self, records: list[InstanceRecord]) -> Observation | None:
-        """Continue a stream after an interruption: accept the ``records`` an earlier
-        run of this schedule finished and serve the next round. Only whole rounds
-        are restored (a half-played round is replayed from scratch); the learner's
-        own persistent state is the learner's business. Requires :meth:`reset`
-        first and refuses add-on episodes."""
+    def restore(self, records: list[InstanceRecord], finished: list[InstanceRecord] = ()) -> Observation | None:
+        """Continue a stream after an interruption: accept the ``records`` an earlier run of this schedule finished,
+        whole rounds, and serve the next round, every instance of it but those in ``finished``, which that run ended
+        and whose records join the round's as though they had just ended (:func:`check_restore`); the learner's state
+        is the runner's to put back. Requires :meth:`reset` first and refuses add-on episodes."""
         if not self._started:
             raise RuntimeError("call reset() before restore()")
         if self._records:
             raise RuntimeError("restore() must follow reset() directly")
-        for i, record in enumerate(records):
-            if record.episode_type != "benchmark":
-                raise ValueError("cannot restore a run with add-on episodes")
-            if i >= len(self._base_slots):
-                raise ValueError(f"record {i} is past the end of the schedule")
-            slot = self._base_slots[i]
-            if record.step != i or record.task_id != slot.task_id or record.instance_seed != slot.instance_seed:
-                raise ValueError(f"record {i} ({record.task_id}) does not match the schedule slot ({slot.task_id})")
-        n = len(records)
-        if 0 < n < len(self._base_slots) and not self._base_starts[n]:
-            raise ValueError(f"{n} records end inside a round; restore whole rounds")
+        n = check_restore(list(records), list(finished), self._base_slots, self._base_starts)
         self._records = list(records)
         self._total_cost = float(sum(record.cost for record in records))
-        return self._open_round(n)
+        self._open_round(n)
+        for record in finished:
+            del self._open[record.step]
+            self._pending[record.step] = record
+            self._total_cost += record.cost
+        self._focus = min(self._open) if self._open else None
+        return self.observation()
 
     def observation(self, index: int | None = None) -> Observation | None:
         """The observation of instance ``index``, or of the focused instance: the

@@ -206,3 +206,29 @@ def test_restore_takes_whole_rounds_only(fake_registry, fake_source):
         env2.restore(done[:2])
     obs = env2.restore(done)
     assert obs.step == 3 and env2.open_indices() == [3, 4, 5]
+
+
+def test_restore_takes_the_instances_that_ended_in_the_round_after_the_records(fake_registry, fake_source):
+    """A frozen test's instances that ended before a stop are restored with the whole rounds before them: the round
+    serves the rest, and commits them with the ended ones, in slot order, as though none had stopped."""
+    ids = fake_source.task_ids()[:2]
+    sched = as_users(stream_schedule(ids, 6, seed=0, source=fake_source.name, params=sequential_params(3),
+                                     order="sequential"), 3)
+    env = ContinualArcEnv(sched, registry=fake_registry)
+    env.reset()
+    for i in (0, 1, 2):
+        env.step(GiveUp(), i)
+    ended = {i: env.step(GiveUp(), i).record for i in (4, 3)}
+    done = env.records
+    whole = env.step(GiveUp(), 5)
+    again = ContinualArcEnv(sched, registry=fake_registry)
+    again.reset()
+    for finished, refusal in (([ended[4], ended[4]], "each once"), ([done[0]], "of the round of slots 3 to 5"),
+                              ([ended[3], ended[4], whole.record], "restore it as records")):
+        with pytest.raises(ValueError, match=refusal):
+            again.restore(done, finished)
+    obs = again.restore(done, [ended[4], ended[3]])
+    assert obs.step == 5 and again.open_indices() == [5]
+    last = again.step(GiveUp(), 5)
+    assert last.round_records == whole.round_records and again.records == env.records
+    assert again.total_cost == env.total_cost

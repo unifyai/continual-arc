@@ -29,6 +29,13 @@ then overlap in time, such a learner reports its counters per user,
 ``user_resources(user) -> dict[str, float]`` (cumulative, like :meth:`resources`), and
 an instance is charged its user's differences. Any other learner is served one action
 at a time: one action on every open instance of the round before a second on any.
+
+A run resumes as though it had never stopped (:func:`continual_arc.runner.run`'s
+``resume``), so a learner that carries anything from one round to the next gives it to the
+runner with ``state()``, which the runner keeps beside the run's records at the start and at
+the end of every round, and takes it back with ``restore(state)``, on a learner made anew for
+the resumed run, from the round the run goes on from. A learner without ``state``, or whose
+``state()`` is None, carries nothing or keeps its own.
 """
 
 from __future__ import annotations
@@ -53,7 +60,8 @@ class Learner(Protocol):
         ...
 
     def resources(self) -> dict[str, float]:
-        """Cumulative resource counters. The runner logs per-instance differences."""
+        """Cumulative resource counters. The runner logs per-instance differences, exactly for a counter kept as a
+        Decimal, as a running total of charges should be."""
         ...
 
     def begin_round(self, n_instances: int) -> None:
@@ -88,3 +96,13 @@ class BaseLearner:
 
     def resources(self) -> dict[str, float]:
         return {}
+
+    def state(self) -> object:
+        """What the learner carries from one round to the next, as one picklable object, which the runner keeps beside
+        the run's records and gives back to :meth:`restore` when the run resumes (the module docstring); None for a
+        learner that carries nothing or keeps its own."""
+        return None
+
+    def restore(self, state: object) -> None:
+        """Take back what :meth:`state` gave, on a learner made anew for a resumed run, before its first action."""
+        raise NotImplementedError(f"{type(self).__name__} gives a state it cannot take back")

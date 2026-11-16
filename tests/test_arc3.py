@@ -477,19 +477,21 @@ def test_the_runner_plays_an_arc3_schedule_and_every_measure_reads_its_records(s
 
 
 @needs_arc3
-def test_an_interrupted_arc3_run_resumes_from_its_last_whole_round(source, tmp_path):
+def test_an_interrupted_arc3_run_resumes_from_its_last_whole_round(source, tmp_path, monkeypatch):
     sched = schedule(4)
+    act = Oracle.act
 
-    class Dies(Oracle):
-        def act(self, obs):
-            if obs.step >= 2:
-                raise RuntimeError("interrupted")
-            return super().act(obs)
+    def dies(self, obs):
+        if obs.step >= 2:
+            raise RuntimeError("interrupted")
+        return act(self, obs)
 
     out = tmp_path / "run"
     env = Arc3Env(sched, source=source)
+    monkeypatch.setattr(Oracle, "act", dies)
     with pytest.raises(RuntimeError, match="interrupted"):
-        run(Dies(env), sched, out_dir=out, env=env)
+        run(Oracle(env), sched, out_dir=out, env=env)
+    monkeypatch.undo()
     assert len((out / "records.jsonl").read_text().splitlines()) == 2
     env = Arc3Env(sched, source=source)
     result = run(Oracle(env), sched, out_dir=out, env=env, resume=True)

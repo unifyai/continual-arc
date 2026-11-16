@@ -152,9 +152,11 @@ def cmd_schedule(args) -> int:
 
 def cmd_run(args) -> int:
     from continual_arc.report import text_report
-    from continual_arc.runner import run
+    from continual_arc.runner import holds_run, own_settings, refuse_other_settings, run
     from continual_arc.schedule import Schedule
 
+    if args.resume and not (args.out and holds_run(args.out)):
+        raise SystemExit(f"--resume goes on with the run in --out, and {args.out or 'no --out'} holds none")
     sched = Schedule.load(args.schedule)
     config = _env_config(args, sched)
     kwargs = json.loads(args.learner_kwargs) if args.learner_kwargs else {}
@@ -171,6 +173,18 @@ def cmd_run(args) -> int:
             file=sys.stderr,
         )
 
+    name = args.name or args.learner
+    settings = {"learner": args.learner, "learner_kwargs": kwargs, "plugins": args.plugin or [],
+                "plugin_kwargs": args.plugin_kwargs}
+    if args.out and holds_run(args.out):
+        if not args.resume:
+            raise SystemExit(f"{args.out} holds a run already: go on with it with --resume, or give this run an "
+                             "--out of its own")
+        try:
+            refuse_other_settings(args.out, sched, config, own_settings(config, name, args.alias_style, args.events,
+                                                                        settings))
+        except ValueError as refused:
+            raise SystemExit(str(refused)) from None
     result = run(
         learner,
         sched,
@@ -178,11 +192,13 @@ def cmd_run(args) -> int:
         out_dir=args.out,
         log_events=args.events,
         progress=progress,
-        learner_name=args.name or args.learner,
+        learner_name=name,
         plugins=plugins,
         alias_style=args.alias_style,
+        resume=args.resume,
+        settings=settings,
     )
-    print(text_report(result.summary, title=f"{args.name or args.learner} on {sched.name}"))
+    print(text_report(result.summary, title=f"{name} on {sched.name}"))
     if args.out:
         print(f"run written to {args.out}")
     return 0
@@ -341,6 +357,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     r.add_argument("--alias-style", choices=("hex", "names"), default="hex", dest="alias_style",
                    help="how the learner sees each task's name: task-3f2a9c1e (hex) or a codename such as amber-heron")
+    r.add_argument("--resume", action="store_true",
+                   help="go on with the run in --out from its last whole round, with its own settings, any other "
+                        "refused: its records cut back to that round and added to, the learner's state as the run kept "
+                        "it there given back (Learner.state), the resume in meta.json")
     r.add_argument("--quiet", action="store_true")
     for key, typ in (
         ("attempt_cap", int), ("demo_cap", int), ("demo_cost", float),
