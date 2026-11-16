@@ -72,8 +72,10 @@ LABELLED_ROWS = ("dagger", "opsd")   # the rows whose games the oracle labels
 SERVER = "http://localhost:8101/v1"
 SERVE_SH = Path(__file__).resolve().parents[2] / "scripts" / "serve.sh"
 POLL_S = 15
-# every KEEP_EVERY-th phase's served adapter outlives pruning, for reading the run back later
-KEEP_EVERY = 20
+# brain's runs sync's record, in the run's folder on its machine, of every file of the run the bucket holds as it is
+# now (brain's brain/operator/gcs_upload.py --receipt, docs/operations/runs.md): {"files": {path under the run: its
+# version, "<size>:<inode change time in ns>"}}, rewritten whole after each of the sync's passes
+RECEIPT = "receipt.json"
 # the adapter files a phase needs only while a later phase may start from it: the next phase loads the newest whole (its
 # optimizer's state and the trainer's own copy)
 RESUME_FILES = ("optimizer.pt", "trainer_adapter.safetensors")
@@ -343,24 +345,48 @@ def serving(run: Path) -> int | None:
     return json.loads(found[-1].read_text())["phase"] if found else None
 
 
-def prune(root: Path, newest: int, served: int | None, lag: int) -> None:
-    """Frees what phases older than ``newest - lag`` no longer need (4.4 GB a phase on Qwen3.5-9B at rank 128, so a
-    1-user run that trains every round would fill a node's disk within a day): each one's vLLM copy and the files a
-    phase resumes from go, and its whole adapter too unless it is a KEEP_EVERY-th phase. DONE, phase.json and
-    rounds.json, every phase's record of its training, stay. Phases newest-lag..newest stay whole: the next phase
+def version(path: Path) -> str:
+    """A file's version as brain's uploader records it on the object it sends (its size and inode change time, which
+    every write moves and nothing can set back)."""
+    st = path.stat()
+    return f"{st.st_size}:{st.st_ctime_ns}"
+
+
+def in_bucket(run: Path) -> dict[str, str]:
+    """Every file of ``run`` the bucket holds as it is now, by its version, as brain's runs sync last found them
+    (RECEIPT); none before the sync's first pass reaches the run, or on a machine it never reaches."""
+    receipt = run / RECEIPT
+    return json.loads(receipt.read_text())["files"] if receipt.exists() else {}
+
+
+def prune(run: Path, newest: int, served: int | None, lag: int) -> tuple[int, int]:
+    """Frees what phases older than ``newest - lag`` no longer need on the node (4.4 GB a phase on Qwen3.5-9B at rank
+    128, so a 1-user run that trains every round would fill a node's disk within a day), every phase's adapter kept in
+    the run's folder in the bucket (the shared rule's "What a run keeps"): each one's vLLM copy and the files a phase
+    resumes from go at once, and its adapter once brain's runs sync has found the bucket holding each of its files as it
+    is (``in_bucket``), so that the bucket keeps every phase's weights and the node only the newest. DONE, phase.json
+    and rounds.json, every phase's record of its training, stay. Phases newest-lag..newest stay whole: the next phase
     starts from the newest, and PG's ratios are taken under the one that played its round, ``lag`` older. The
     ``served`` phase stays whole however old: a round plays on one phase to its end, and vLLM reads its adapter again
-    whenever another adapter's load pushes it out of the server's cache."""
+    whenever another adapter's load pushes it out of the server's cache. The old adapters still waiting for the
+    bucket, and their bytes."""
+    held = in_bucket(run)
+    waiting = size = 0
     for phase in range(newest - lag):
         if phase == served:
             continue
-        out = root / f"p{phase:04d}"
+        out = phase_dir(run, phase)
         shutil.rmtree(out / "adapter.vllm", ignore_errors=True)
-        if phase % KEEP_EVERY:
-            shutil.rmtree(out / "adapter", ignore_errors=True)
-            continue
+        adapter = out / "adapter"
         for name in RESUME_FILES:
-            (out / "adapter" / name).unlink(missing_ok=True)
+            (adapter / name).unlink(missing_ok=True)
+        files = sorted(f for f in adapter.rglob("*") if f.is_file())
+        if all(held.get(f.relative_to(run).as_posix()) == version(f) for f in files):
+            shutil.rmtree(adapter, ignore_errors=True)
+        else:
+            waiting += 1
+            size += sum(f.stat().st_size for f in files)
+    return waiting, size
 
 
 def train_args(a: argparse.Namespace) -> argparse.Namespace:
@@ -570,13 +596,15 @@ def phase_line(row: str, done: dict[str, Any]) -> str:
 
 def close_phase(a: argparse.Namespace, run: Path, k: int, done: dict[str, Any]) -> None:
     """Phase ``k`` finished: its rounds.json (marking it finished for the player), train/latest.json (its adapter, None
-    for a warm-up phase), the older phases' adapters pruned, and its line in the progress log."""
+    for a warm-up phase), the older phases pruned to what the bucket keeps of them, and its line in the progress log,
+    which says how many old adapters still wait for the bucket."""
     out, root = phase_dir(run, k), run / "train"
     write_json(out / "rounds.json", {"rounds": k + 1})
     write_json(root / "latest.json", {"phase": k, "adapter": str(out / "adapter") if (out / "adapter").exists() else None,
                                       "rounds": k + 1})
-    prune(root, k, serving(run), a.lag)
-    say(run, f"phase {k} done: rounds 0-{k}, {phase_line(a.row, done)}")
+    waiting, size = prune(run, k, serving(run), a.lag)
+    held = f"; {waiting} older adapters ({size / 1e9:.1f} GB) wait for the bucket" if waiting else ""
+    say(run, f"phase {k} done: rounds 0-{k}, {phase_line(a.row, done)}{held}")
 
 
 def skip_phase(a: argparse.Namespace, run: Path, k: int) -> None:

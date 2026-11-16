@@ -790,36 +790,80 @@ def test_realtime_sh_launches_each_loop_with_its_settings(tmp_path, monkeypatch,
 
 # -- pruning -----------------------------------------------------------------------------------------------------
 
-def _phases(root: Path, n: int) -> None:
-    for k in range(n):
-        a = root / f"p{k:04d}" / "adapter"
-        a.mkdir(parents=True)
-        for name in ("adapter_model.safetensors", "adapter_config.json", *realtime.RESUME_FILES):
-            (a / name).write_text("x")
-        (root / f"p{k:04d}" / "adapter.vllm").mkdir()
-        (root / f"p{k:04d}" / "DONE").write_text("{}")
+def _phase(run: Path, k: int) -> None:
+    out = realtime.phase_dir(run, k)
+    (out / "adapter").mkdir(parents=True)
+    for name in ("adapter_model.safetensors", "adapter_config.json", *realtime.RESUME_FILES):
+        (out / "adapter" / name).write_text(f"{name} of phase {k}")
+    (out / "adapter.vllm").mkdir()
+    (out / "DONE").write_text("{}")
 
 
-def test_prune_keeps_the_newest_lag_plus_one_phases_the_served_one_and_every_20th_phases_adapter(tmp_path):
-    _phases(tmp_path, 45)
-    realtime.prune(tmp_path, 44, 41, 1)   # the round in play started on phase 41
+def _sync(run: Path, bucket: Path) -> None:
+    """A pass of brain's runs sync over a node's run (brain/operator/gcs_upload.py --receipt): every file of the run
+    copied to its place in the bucket, a server's copies of an adapter left out, and the receipt written whole, each
+    file the bucket now holds by its version."""
+    held = {}
+    for f in sorted(run.rglob("*")):
+        rel = f.relative_to(run).as_posix()
+        if f.is_file() and rel != realtime.RECEIPT and "adapter.vllm" not in f.parts:
+            (bucket / rel).parent.mkdir(parents=True, exist_ok=True)
+            (bucket / rel).write_bytes(f.read_bytes())
+            held[rel] = realtime.version(f)
+    realtime.write_json(run / realtime.RECEIPT, {"files": held})
+
+
+def test_prune_frees_an_old_phase_once_the_bucket_holds_its_adapter_as_it_is(tmp_path):
+    run, bucket = tmp_path / "run", tmp_path / "bucket"
+    for k in range(45):
+        _phase(run, k)
+
+    def adapter(k: int) -> Path:
+        return realtime.phase_dir(run, k) / "adapter"
+
     whole = {"adapter_model.safetensors", "adapter_config.json", *realtime.RESUME_FILES}
+    waiting, size = realtime.prune(run, 44, 41, 1)   # the round in play started on phase 41; no sync yet
+    assert waiting == 42 and size == sum(f.stat().st_size for k in range(43) if k != 41 for f in adapter(k).iterdir())
+    for k in range(43):
+        if k != 41:   # an old phase's vLLM copy and resume files go at once, its adapter waits for the bucket
+            assert {f.name for f in adapter(k).iterdir()} == {"adapter_model.safetensors", "adapter_config.json"}
+            assert not (realtime.phase_dir(run, k) / "adapter.vllm").exists()
+    _sync(run, bucket)
+    (adapter(7) / "adapter_model.safetensors").write_text("written again after the sync's pass")
+    assert realtime.prune(run, 44, 41, 1)[0] == 1   # phase 7 changed since the bucket took it: it waits
     for k in (41, 43, 44):
-        assert {f.name for f in (tmp_path / f"p{k:04d}" / "adapter").iterdir()} == whole
-        assert (tmp_path / f"p{k:04d}" / "adapter.vllm").exists()
-    for k in (0, 20, 40):
-        kept = tmp_path / f"p{k:04d}"
-        assert {f.name for f in (kept / "adapter").iterdir()} == {"adapter_model.safetensors", "adapter_config.json"}
-        assert not (kept / "adapter.vllm").exists()
-    assert not (tmp_path / "p0021" / "adapter").exists() and (tmp_path / "p0021" / "DONE").exists()
-    assert not (tmp_path / "p0042" / "adapter").exists()
+        assert {f.name for f in adapter(k).iterdir()} == whole and (realtime.phase_dir(run, k) / "adapter.vllm").exists()
+    for k in range(43):
+        if k not in (7, 41):
+            assert not adapter(k).exists() and (realtime.phase_dir(run, k) / "DONE").exists()
+    assert adapter(7).exists()
+    _sync(run, bucket)
+    assert realtime.prune(run, 44, 41, 1) == (0, 0) and not adapter(7).exists()
 
 
 def test_prune_with_a_longer_lag_keeps_the_phase_pg_will_clip_against(tmp_path):
-    _phases(tmp_path, 10)
-    realtime.prune(tmp_path, 9, None, 2)
-    assert (tmp_path / "p0007" / "adapter" / "trainer_adapter.safetensors").exists()   # phase 10's round's player
-    assert not (tmp_path / "p0006" / "adapter").exists()
+    run = tmp_path / "run"
+    for k in range(10):
+        _phase(run, k)
+    _sync(run, tmp_path / "bucket")
+    realtime.prune(run, 9, None, 2)
+    assert (realtime.phase_dir(run, 7) / "adapter" / "trainer_adapter.safetensors").exists()   # phase 10's player
+    assert not (realtime.phase_dir(run, 6) / "adapter").exists()
+
+
+def test_every_phases_adapter_a_pruned_run_trained_is_readable_from_the_bucket(tmp_path):
+    run, bucket = tmp_path / "run", tmp_path / "bucket"
+    for k in range(30):   # phases closing one after another, the sync passing between some of them, as on a node
+        _phase(run, k)
+        if k % 4 == 1:
+            _sync(run, bucket)
+        realtime.prune(run, k, None, 1)
+    _sync(run, bucket)
+    assert realtime.prune(run, 29, None, 1) == (0, 0)
+    for k in range(30):
+        for name in ("adapter_model.safetensors", "adapter_config.json"):
+            assert (bucket / f"train/p{k:04d}/adapter/{name}").read_text() == f"{name} of phase {k}"
+    assert sorted(p.parent.name for p in (run / "train").glob("p*/adapter")) == ["p0028", "p0029"]
 
 
 def test_serving_is_the_phase_of_the_newest_round_the_player_started(tmp_path):

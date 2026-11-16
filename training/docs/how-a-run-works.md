@@ -238,7 +238,7 @@ ROUNDS=3` is a smoke test of a node's stack.
   round's games as served (`captured/`), `served.json`, `memory.json` (what each user wrote in the memory, against
   the round before) and `labels/`. `train/pNNNN/` holds each phase's `adapter/`, `DONE`, `phase.json` (one line a step and every
   held-out measurement) and `rounds.json`; `train/kernels.json` the software the phases trained on. Older phases are
-  pruned to their records, every 20th phase's adapter kept. `frozen/` holds the two tests.
+  pruned to their records on the node once the bucket holds their adapters, which it keeps for every phase. `frozen/` holds the two tests.
 
 ## Rows at a glance
 

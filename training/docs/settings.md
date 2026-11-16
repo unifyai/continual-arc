@@ -107,7 +107,7 @@ do not use it.
 | Data parallelism | every GPU holds the model and the adapter, chains dealt by estimated cost, gradients summed once a step, every rank checked to hold the same adapter after it (`parallel`) | Qwen3.5-9B fits whole on each GPU. |
 | Step checkpoints | on SIGTERM and every 25 steps (`checkpoints.EVERY`) | A save holds training up about 4 s; a preemption gives 60 s of notice, and a stop with none loses at most 25 steps. |
 | Compiled kernels | cached in `~/.cache/torchinductor` (`phase.INDUCTOR_CACHE`) | A machine that restarts keeps its boot disk but clears `/tmp`: a trainer whose cache was cleared spent 203, 106 and 59 s on its first three steps compiling, against 25, 25 and 18 s from the cache. |
-| Pruning | phases older than the newest lag + 1 lose their resume files and vLLM copy, all but every 20th lose their adapter; DONE, phase.json and rounds.json stay | A phase's adapter and optimizer are 4.4 GB on Qwen3.5-9B at rank 128. |
+| Pruning | phases older than the newest lag + 1 lose their resume files and vLLM copy at once, and their adapter on the node once brain's runs sync has found the bucket holding each of its files as it is (the run's `receipt.json`), so that the bucket keeps every phase's adapter; DONE, phase.json and rounds.json stay | A phase's adapter and optimizer are 4.4 GB on Qwen3.5-9B at rank 128; the shared rule keeps a run's weights at every phase. |
 
 ## Training once at the end
 
