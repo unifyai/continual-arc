@@ -6,6 +6,10 @@ grids, the schedules that served them and the ARC-AGI-1 tasks' own pairs, the sa
 [continual-arc.unify.ai](https://continual-arc.unify.ai) reads to show them. The runs themselves, their records and
 trajectories, are in [`runs/`](../runs).
 
+The same instances and tasks are on Hugging Face as
+[`unifyai/continual-arc`](https://huggingface.co/datasets/unifyai/continual-arc), in Parquet with a split per schedule:
+`load_dataset("unifyai/continual-arc", split="arc1_small_workstreams0")`.
+
 - `tasks/arc1.json`: the 125 tasks of the ARC-AGI-1 track the GPT-6 Luna runs played, each with its own public pairs
   as ARC-AGI-1 publishes them (`train`, `test`), the split they come from (`split`) and the phase that serves them
   (`phases`): `stream` for the 25 tasks of the stream, from ARC-AGI-1's training set, and `epilogue` for the 100
