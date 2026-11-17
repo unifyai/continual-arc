@@ -76,7 +76,7 @@ Everything behind the paper is in this repository, as plain files:
 |---|---|
 | The results, run by run | [`runs/`](runs): `runs.json` lists the 228 GPT-6 Luna runs and `open-models.json` the open-model runs; each run's `summary.json` holds its score and `records.jsonl` a line per instance |
 | The trajectories | of every run in `runs.json` and `open-models.json`, in `runs/<track>/<run>/i/<step>.json`, a file per instance, and of every frozen test's play but 112 of the open-model runs' whose logs no copy kept ([`runs/README.md`](runs/README.md) names them), beside each play's records in `frozen/<play>/play/`: every message the benchmark sent, the learner's reasoning summaries, tool calls and reply, and in `memory.json` what it kept, file by file and version by version; replayed at [continual-arc.unify.ai/runs](https://continual-arc.unify.ai/runs) |
-| The instances | [`data/`](data): every instance the runs on ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, with their schedules, also on Hugging Face as [`unifyai/continual-arc`](https://huggingface.co/datasets/unifyai/continual-arc) |
+| The instances | [`data/`](data): every instance the runs on ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, and every level the runs on ARC-AGI-3 were served, with their schedules, also on Hugging Face as [`unifyai/continual-arc`](https://huggingface.co/datasets/unifyai/continual-arc) |
 | First sight's records | [`runs/first-sight/`](runs/first-sight): how often a model solves a track's public tasks the first time it sees them (Appendix K) |
 | The code and command of every experiment | [`experiments/`](experiments), by the paper's section, table and row, with the training engine at each revision its runs played on in [`experiments/engine/`](experiments/engine) |
 | The learners and harness adapters | [`baselines/`](baselines) |
@@ -676,7 +676,8 @@ the two frozen tests after its stream, most workstreams runs after a learning-on
 no measure reads now. Each run rebuilds slot for slot from its own
 configuration, and every one of their streams is the one `arc1` builds today. They name it `arc1-small`, as every run
 played before v0.6.0 does, when the benchmark still named its configurations by size. Every instance the runs on
-ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, is in [`data/`](data), with the schedules that served them.
+ARC-AGI-1 and ARC-AGI-2 were served, grid by grid, and every level the runs on ARC-AGI-3 were served, with its first
+frame, solution and demonstrations, is in [`data/`](data), with the schedules that served them.
 
 ## Citation
 
@@ -693,8 +694,8 @@ If you use Continual-ARC, its code, its runs or its website, please cite the pap
 
 ## License
 
-Apache-2.0. Re-ARC is MIT and ARC-AGI is Apache-2.0; both are fetched, not vendored, and the instances in
-[`data/`](data) drawn from them keep their sources' licenses.
+Apache-2.0. Re-ARC is MIT, ARC-AGI is Apache-2.0 and ARC-AGI-3's games are MIT; all are fetched, not vendored, and
+the instances in [`data/`](data) drawn from them keep their sources' licenses.
 
 ## About
 
