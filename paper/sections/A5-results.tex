@@ -4,7 +4,7 @@
 
 We run three harnesses on GPT-6 Luna, a commercial model, at low, medium and high reasoning effort: prime-agent \citep{karten2026primeagent}, hermes-agent \citep{nous2026hermesagent} and openclaw \citep{openclaw2026}, each with its persistence on, as it ships (H), and with its persistence switched off (H\textsubscript{0}), beside the two floors and the program library. GPT-6 Luna's weights are closed, so this grid has no trained method, and it checks what prime-agent does on the open models against two other harnesses.
 
-Figure~\ref{fig:plane-luna} draws the grid at high effort, with each harness also asked to store (H-A) and given the expert guidance (H-E, Appendix~\ref{app:ablations}), and Table~\ref{tab:tests-luna} gives the frozen tests at every effort. Figure~\ref{fig:luna-cost} sets each system's share learned on the stream against what its model calls cost. The records of every cell come with the paper (the reproducibility statement).
+Figure~\ref{fig:plane-luna} draws the grid at high effort, with each harness also asked to store (H-A) and given the expert guidance (H-E, Appendix~\ref{app:ablations}), and Table~\ref{tab:tests-luna} gives the frozen tests at every effort. Figure~\ref{fig:luna-cost} sets each system's share learned on the stream against what its model calls cost, and Table~\ref{tab:luna-budget} gives the budget each system used on the stream, which the share learned is computed from. The records of every cell come with the paper (the reproducibility statement).
 
 \paragraph{The two models.}
 GLM-5.3 Flash and GPT-6 Luna are strong in different ways. On Artificial Analysis's Intelligence Index (v4.3.2), GLM-5.3 Flash scores 42 against 33 for GPT-6 Luna at high effort, with its widest margin on Terminal-Bench, 33 against 5\% \citep{artificialanalysis2026index}. At first sight on ARC the order reverses: from three demonstrations, GLM-5.3 Flash solves 26.8\% of the track's public tasks against 62.5 for GPT-6 Luna at high effort (Table~\ref{tab:heldout}). In the harness the two solve about as often. Once every task has been met, GLM-5.3 Flash in prime-agent solves \sbGlmHzeroSolved{}\% of instances with its notes wiped (Table~\ref{tab:solved}), and GPT-6 Luna at high effort \sbLunaHzeroSolvedMin{} to \sbLunaHzeroSolvedMax{}\% in its three harnesses.
@@ -18,6 +18,16 @@ GLM-5.3 Flash and GPT-6 Luna are strong in different ways. On Artificial Analysi
 \caption{The share learned on the stream (Equation~\ref{eq:learned}, higher is better) of every GPT-6 Luna system that keeps something, with its 95\% interval, against what its model calls cost per instance of the stream (log scale), a panel per effort: each harness in its color, as it ships (circle), asked to store (square) and given the expert guidance (diamond), beside the program library (P) and the demo-cache floor (C). Each system is read against itself reset before every instance. The program library learns as much as any system for the least spend.}
 \label{fig:luna-cost}
 \end{figure}
+
+\begin{table}[htbp]
+\centering
+\footnotesize\setlength{\tabcolsep}{3pt}
+\begin{adjustbox}{max width=\linewidth}
+\input{sections/tables/headline-arc1}
+\end{adjustbox}
+\caption{GPT-6 Luna on the ARC-AGI-1 stream: the budget used $U$ (percent, lower is better) by each system at each reasoning effort, the measure that $L$ is computed from. Workstreams is the benchmark's stream, and sequential and random are the same visits one task at a time and fully shuffled (Appendix~\ref{app:orders}). A harness's persistent column is method H and its stateless column H\textsubscript{0}, and the stateless floor is the demo-cache floor's reset. Small type is the standard error over tasks, and the best in each row is bold, even within error bars.}
+\label{tab:luna-budget}
+\end{table}
 
 On GPT-6 Luna, no harness as shipped saves a measurable share of the learnable budget at any reasoning effort (Figure~\ref{fig:luna-cost}). Against their own methods H\textsubscript{0}, the persistent methods lie between $-0.15$ and 0.04, and every 95\% interval includes zero, while the program library saves 0.49 [0.31, 0.73] of its learnable budget at low effort, 0.60 [0.38, 0.88] at medium and 0.62 [0.37, 0.93] at high, and the demo-cache floor, which only keeps the pairs it bought, saves 0.19 [0.10, 0.29], 0.24 [0.09, 0.40] and 0.28 [0.11, 0.44] of its own. The learnable budget of the model alone falls as the effort rises, from 50.8 points at low effort to 26.5 at high, because a stronger model pays less on every instance, returns included. A model that leaves little of it has outgrown the track (Section~\ref{sec:metrics}).
 

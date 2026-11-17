@@ -1,0 +1,39 @@
+\begin{tabular}{lrr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}lr@{\hspace{0.4em}}l}
+\toprule
+setting & gap & \multicolumn{2}{c}{G} & \multicolumn{2}{c}{GE} & \multicolumn{2}{c}{GP} & \multicolumn{2}{c}{GC} \\
+\midrule
+\multicolumn{10}{l}{\emph{share saved on the seen test, $S_{\mathrm{seen}}$}} \\
+default & 14.9 & +0.12 & {\scriptsize [-0.03, 0.27]} & +0.74 & {\scriptsize [0.64, 0.84]} & \textbf{+0.81} & {\scriptsize [0.59, 1.00]} & +0.44 & {\scriptsize [0.34, 0.57]} \\
+default, second run & 14.9 & +0.29 & {\scriptsize [0.15, 0.41]} & +0.75 & {\scriptsize [0.65, 0.83]} & \textbf{+0.98} & {\scriptsize [0.92, 1.00]} & +0.54 & {\scriptsize [0.42, 0.68]} \\
+default, third run & 14.9 & +0.37 & {\scriptsize [0.25, 0.48]} & +0.62 & {\scriptsize [0.50, 0.73]} & \textbf{+0.80} & {\scriptsize [0.58, 1.00]} & +0.52 & {\scriptsize [0.41, 0.64]} \\
+one task at a time & 1.0 & +0.26 & {\scriptsize [0.16, 0.38]} & \textbf{+0.79} & {\scriptsize [0.67, 0.90]} & +0.77 & {\scriptsize [0.53, 1.00]} & +0.48 & {\scriptsize [0.39, 0.60]} \\
+$a = 8$ & 5.0 & +0.27 & {\scriptsize [0.16, 0.37]} & +0.68 & {\scriptsize [0.57, 0.80]} & \textbf{+0.72} & {\scriptsize [0.39, 1.00]} & +0.51 & {\scriptsize [0.40, 0.64]} \\
+$m = 90$ & 12.8 & +0.27 & {\scriptsize [0.16, 0.37]} & +0.77 & {\scriptsize [0.65, 0.87]} & \textbf{+0.82} & {\scriptsize [0.60, 0.99]} & +0.51 & {\scriptsize [0.41, 0.63]} \\
+$m = 5$ & 15.7 & +0.37 & {\scriptsize [0.28, 0.48]} & \textbf{+0.86} & {\scriptsize [0.76, 0.93]} & +0.80 & {\scriptsize [0.56, 1.00]} & +0.53 & {\scriptsize [0.44, 0.65]} \\
+$n_c = 12$ & 18.4 & +0.30 & {\scriptsize [0.20, 0.40]} & +0.74 & {\scriptsize [0.56, 0.88]} & \textbf{+0.75} & {\scriptsize [0.43, 0.97]} & +0.51 & {\scriptsize [0.39, 0.66]} \\
+fully shuffled & 20.6 & +0.38 & {\scriptsize [0.26, 0.52]} & +0.64 & {\scriptsize [0.48, 0.78]} & \textbf{+0.73} & {\scriptsize [0.43, 1.00]} & +0.45 & {\scriptsize [0.33, 0.59]} \\
+demonstration cap 4 & 14.9 & +0.20 & {\scriptsize [0.06, 0.32]} & +0.78 & {\scriptsize [0.70, 0.87]} & \textbf{+0.80} & {\scriptsize [0.61, 0.97]} & +0.47 & {\scriptsize [0.38, 0.60]} \\
+demonstration cap 16 & 14.9 & +0.26 & {\scriptsize [0.09, 0.44]} & +0.72 & {\scriptsize [0.58, 0.84]} & \textbf{+0.73} & {\scriptsize [0.50, 1.00]} & +0.46 & {\scriptsize [0.37, 0.58]} \\
+attempt cap 4 & 14.9 & +0.20 & {\scriptsize [0.12, 0.29]} & +0.51 & {\scriptsize [0.22, 0.76]} & \textbf{+0.80} & {\scriptsize [0.57, 0.97]} & +0.51 & {\scriptsize [0.39, 0.63]} \\
+attempt cap 16 & 14.9 & +0.24 & {\scriptsize [0.09, 0.36]} & \textbf{+0.72} & {\scriptsize [0.61, 0.82]} & +0.71 & {\scriptsize [0.36, 0.99]} & +0.53 & {\scriptsize [0.41, 0.66]} \\
+\addlinespace[2pt]
+\emph{lowest to highest} & & \multicolumn{2}{c}{+0.12 to +0.38} & \multicolumn{2}{c}{+0.51 to +0.86} & \multicolumn{2}{c}{+0.71 to +0.98} & \multicolumn{2}{c}{+0.44 to +0.54} \\
+\midrule
+\multicolumn{10}{l}{\emph{share saved on the held-out test, $S_{\mathrm{held}}$}} \\
+default & 14.9 & 0.00 & {\scriptsize [-0.11, 0.10]} & +0.07 & {\scriptsize [-0.02, 0.16]} & +0.05 & {\scriptsize [-0.06, 0.14]} & -0.02 & {\scriptsize [-0.11, 0.06]} \\
+default, second run & 14.9 & +0.05 & {\scriptsize [-0.06, 0.16]} & \textbf{+0.14} & {\scriptsize [0.04, 0.23]} & -0.07 & {\scriptsize [-0.21, 0.05]} & +0.02 & {\scriptsize [-0.05, 0.08]} \\
+default, third run & 14.9 & +0.09 & {\scriptsize [-0.01, 0.17]} & +0.09 & {\scriptsize [-0.02, 0.19]} & -0.07 & {\scriptsize [-0.19, 0.04]} & +0.06 & {\scriptsize [-0.02, 0.12]} \\
+one task at a time & 1.0 & +0.01 & {\scriptsize [-0.10, 0.10]} & +0.06 & {\scriptsize [-0.06, 0.16]} & +0.01 & {\scriptsize [-0.11, 0.12]} & +0.02 & {\scriptsize [-0.06, 0.10]} \\
+$a = 8$ & 5.0 & +0.03 & {\scriptsize [-0.08, 0.14]} & +0.07 & {\scriptsize [-0.05, 0.17]} & -0.04 & {\scriptsize [-0.17, 0.08]} & \textbf{+0.07} & {\scriptsize [0.01, 0.15]} \\
+$m = 90$ & 12.8 & +0.04 & {\scriptsize [-0.07, 0.14]} & +0.11 & {\scriptsize [-0.02, 0.21]} & -0.02 & {\scriptsize [-0.13, 0.08]} & +0.03 & {\scriptsize [-0.07, 0.12]} \\
+$m = 5$ & 15.7 & +0.07 & {\scriptsize [-0.03, 0.17]} & +0.04 & {\scriptsize [-0.08, 0.15]} & +0.02 & {\scriptsize [-0.11, 0.14]} & +0.03 & {\scriptsize [-0.05, 0.10]} \\
+$n_c = 12$ & 18.4 & +0.06 & {\scriptsize [-0.05, 0.16]} & +0.09 & {\scriptsize [-0.02, 0.19]} & +0.01 & {\scriptsize [-0.11, 0.12]} & +0.01 & {\scriptsize [-0.09, 0.10]} \\
+fully shuffled & 20.6 & +0.05 & {\scriptsize [-0.06, 0.14]} & \textbf{+0.11} & {\scriptsize [0.01, 0.19]} & -0.03 & {\scriptsize [-0.17, 0.09]} & 0.00 & {\scriptsize [-0.09, 0.08]} \\
+demonstration cap 4 & 14.9 & +0.11 & {\scriptsize [0.00, 0.20]} & -0.10 & {\scriptsize [-0.19, -0.02]} & -0.05 & {\scriptsize [-0.16, 0.04]} & -0.01 & {\scriptsize [-0.08, 0.05]} \\
+demonstration cap 16 & 14.9 & +0.06 & {\scriptsize [-0.13, 0.21]} & -0.09 & {\scriptsize [-0.24, 0.05]} & +0.08 & {\scriptsize [-0.05, 0.21]} & +0.07 & {\scriptsize [-0.03, 0.17]} \\
+attempt cap 4 & 14.9 & \textbf{+0.18} & {\scriptsize [0.09, 0.27]} & +0.04 & {\scriptsize [-0.06, 0.12]} & +0.01 & {\scriptsize [-0.08, 0.10]} & -0.03 & {\scriptsize [-0.12, 0.05]} \\
+attempt cap 16 & 14.9 & -0.03 & {\scriptsize [-0.19, 0.12]} & -0.06 & {\scriptsize [-0.18, 0.06]} & -0.04 & {\scriptsize [-0.20, 0.10]} & 0.00 & {\scriptsize [-0.12, 0.10]} \\
+\addlinespace[2pt]
+\emph{lowest to highest} & & \multicolumn{2}{c}{-0.03 to +0.18} & \multicolumn{2}{c}{-0.10 to +0.14} & \multicolumn{2}{c}{-0.07 to +0.08} & \multicolumn{2}{c}{-0.03 to +0.07} \\
+\bottomrule
+\end{tabular}

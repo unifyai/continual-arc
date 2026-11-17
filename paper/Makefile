@@ -12,19 +12,19 @@ all: data figures appendix compare
 data:
 	uv run continual-arc data fetch --datasets arc1
 
-# every generated figure and table of the paper (scripts/make_figures.py), Figure 7, Figure 9 and Table 18
+# the generated figures and tables README.md lists (scripts/make_figures.py), Figure 8, Figure 10 and Table 21
 figures:
 	$(RUN) scripts/make_figures.py --out $(OUT)
 	$(RUN) scripts/weight_updates.py --out $(OUT)
 	$(RUN) scripts/forgetting.py --out $(OUT)
 	$(RUN) scripts/experiment_costs.py --out $(OUT)
 
-# Appendix C's generated part and Table 4, rendered from this repository's releases v0.3.0 and v0.5.0
+# Appendix C's generated part and Table 6, rendered from this repository's releases v0.3.0 and v0.5.0
 appendix:
 	uv sync --all-packages --extra plots
 	uv run --no-sync python scripts/make_prompts_appendix.py --out $(OUT)
 
-# the numbers of Tables 15 and 16, which the paper sets by hand
+# the numbers of Tables 18 and 19, which the paper sets by hand
 tracks:
 	$(RUN) scripts/tracks_tables.py
 
