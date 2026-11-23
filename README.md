@@ -48,7 +48,7 @@ Every experiment the paper reports is listed in [`experiments/`](experiments) wi
 it and where its runs are, and the paper's own source is in [`paper/`](paper).
 
 On GPT-6 Luna, a commercial model, the paper ran Prime Agent, Hermes Agent and OpenClaw through the stream
-with every learning mechanism they ship switched on, and again with everything they wrote deleted before every
+as shipped, and again with everything they wrote deleted before every
 instance. Their persistence saved no measurable budget at any reasoning effort, and left to decide what to keep, they
 kept almost nothing that outlasted an instance: none saved a measurable share of the budget left to learn. A
 deliberately naive program library, which keeps one tested program per task and runs it when the task returns, saved
