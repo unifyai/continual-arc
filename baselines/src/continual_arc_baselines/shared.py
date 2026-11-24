@@ -234,8 +234,13 @@ def settle_databases(tree: Path) -> None:
 
 
 def _git(repo: Path, *args: str) -> bytes:
-    return subprocess.run(["git", f"--git-dir={repo}", *args], env={**os.environ, **GIT_ENV}, check=True,
-                          capture_output=True).stdout
+    """Run git on ``repo``. A failure raises with what git wrote on stderr, which says why and which a
+    CalledProcessError's message leaves out."""
+    done = subprocess.run(["git", f"--git-dir={repo}", *args], env={**os.environ, **GIT_ENV}, capture_output=True)
+    if done.returncode:
+        raise RuntimeError(f"git {' '.join(args)} exited {done.returncode} on {repo}: "
+                           f"{done.stderr.decode(errors='replace').strip()}")
+    return done.stdout
 
 
 def blob_id(entry: Entry, algorithm: str) -> str:

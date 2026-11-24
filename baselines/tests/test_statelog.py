@@ -2,7 +2,7 @@
 ignores, its symlinks and its executable bits included, and an empty state an empty directory; a log taken up again goes
 on counting; the bare learners'
 memory reaches a logged state's commit and comes back when a run is taken up again, a stateless one's wiped before its
-first instance."""
+first instance; and a git command that fails says why."""
 
 import json
 import os
@@ -15,7 +15,8 @@ from continual_arc.env import DemosFeedback, LearnerObservation, RequestDemos, S
 from continual_arc.grids import Grid
 from continual_arc.tasks import Pair
 
-from continual_arc_baselines.statelog import StateLog, _descendants, restore
+from continual_arc_baselines import shared
+from continual_arc_baselines.statelog import StateLog, _descendants, _git, restore
 from continual_arc_baselines.systems.bare import BareProgramLibraryLearner
 
 from .test_bare_library import FLIP, Scripted, obs
@@ -157,3 +158,10 @@ def test_a_state_goes_back_to_where_it_was_saved_and_its_history_goes_on_from_th
     shutil.rmtree(state)   # a system's wipe that takes its state directory with it
     log.go_back({"rounds": 1, "commit": first})
     assert files(state) == {"memory.md": ("file", b"round 0, from nothing", False)}
+
+
+@pytest.mark.parametrize("run", [_git, shared._git])
+def test_a_failed_git_command_says_why(tmp_path, run):
+    log = StateLog(tmp_path / "state", tmp_path / "state.git", tmp_path / "state-log.jsonl")
+    with pytest.raises(RuntimeError, match=r"git rev-parse no-such-commit exited 128 on .*: fatal: "):
+        run(log.repo, "rev-parse", "no-such-commit")

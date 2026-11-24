@@ -38,10 +38,14 @@ GIT_ENV = {"GIT_AUTHOR_NAME": "continual-arc", "GIT_AUTHOR_EMAIL": "state@contin
 
 
 def _git(repo: Path, *args: str, tree: Path | None = None) -> str:
-    """Run git on ``repo``; with ``tree``, from inside it as the work tree, so that a pathspec of "." means all of it."""
+    """Run git on ``repo``; with ``tree``, from inside it as the work tree, so that a pathspec of "." means all of it. A
+    failure raises with what git wrote on stderr, which says why and which a CalledProcessError's message leaves out."""
     work = [f"--work-tree={tree}"] if tree is not None else []
-    return subprocess.run(["git", f"--git-dir={repo}", *work, *args], env={**os.environ, **GIT_ENV}, cwd=tree,
-                          check=True, capture_output=True, text=True).stdout
+    done = subprocess.run(["git", f"--git-dir={repo}", *work, *args], env={**os.environ, **GIT_ENV}, cwd=tree,
+                          capture_output=True, text=True)
+    if done.returncode:
+        raise RuntimeError(f"git {' '.join(args)} exited {done.returncode} on {repo}: {done.stderr.strip()}")
+    return done.stdout
 
 
 def delete(path: Path) -> None:
