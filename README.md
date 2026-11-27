@@ -331,7 +331,8 @@ continual-arc schedule make --config arc1 --users 16 --seed 0 --no-epilogue --ro
 The frozen tests need none of the stream, only the configuration and seed, so a learner can
 play them from its state at any round that was kept, as from the end of the stream.
 `protocol_of` lists a cut stream as a deviation from the canonical protocol ("stream cut at
-round 20"); `meta.config` is kept, so the label stays readable.
+round 20"); `meta.config` is kept, so the label stays readable. A cut at the stream's end leaves
+out the epilogue alone and is none: it serves the stream a schedule made with `--no-epilogue` does.
 
 ## The tracks and the canonical number
 

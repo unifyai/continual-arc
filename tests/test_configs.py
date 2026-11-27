@@ -365,6 +365,19 @@ def test_protocol_labels_a_cut_stream_and_a_k_user_epilogue():
     assert p["deviations"] == ["stream cut at round 20"]
     assert p["config"] == "arc1"  # meta.config survives the cut, so the label stays readable
 
+    # a cut at the stream's end leaves out the epilogue alone: the whole stream, the one built without an epilogue
+    for users in (1, 16):
+        built = build_schedule(with_users("arc1", users), 0, rearc_task_ids=pool, eval_task_ids=evals)
+        bare = build_schedule(with_users("arc1", users), 0, rearc_task_ids=pool, eval_task_ids=evals, epilogue=False)
+        stream = built.first_rounds(200)
+        assert stream.slots == bare.slots and stream.meta["cut_to_round"] == 200
+        p = protocol_of(stream)
+        assert p["canonical"] and p["deviations"] == [] and p["epilogue"] is False
+        assert protocol_of(stream) == protocol_of(bare)
+        p = protocol_of(built.first_rounds(250))   # part of the epilogue, which no measure reads
+        assert p["canonical"] and p["epilogue"] is True
+        assert protocol_of(built.first_rounds(199))["deviations"] == ["stream cut at round 199"]
+
     epi = epilogue_for_users(cfg, 0, 4, rearc_task_ids=pool, eval_task_ids=evals)
     p2 = protocol_of(epi)
     assert not p2["canonical"] and p2["users"] == 4 and p2["epilogue"] is True

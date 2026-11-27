@@ -75,6 +75,7 @@ from continual_arc.arc3.games import HELD_OUT_GAMES, SOURCE_ARC3, STREAM_GAMES
 from continual_arc.data import DATASET_ARC1, DATASET_ARC2, DATASET_ARC3
 from continual_arc.env import EnvConfig
 from continual_arc.schedule import (
+    PHASE_EPILOGUE,
     PHASE_SEEN_TEST,
     RANDOM,
     TEST_HELD_OUT,
@@ -368,9 +369,13 @@ def protocol_of(schedule, env_config=None) -> dict:
     Returns ``{"track", "config", "mode", "regime", "users", "seed", "epilogue",
     "canonical", "deviations"}``, ``mode`` naming the order under the key run records carry.
     ``deviations`` lists, in words, every way the run departs
-    from the track's canonical protocol; it is empty when ``canonical`` is true. A schedule cut
-    short (:meth:`continual_arc.schedule.Schedule.first_rounds`) or built as a K-user epilogue
-    alone (:func:`epilogue_for_users`) is always a deviation, named by round or by user count.
+    from the track's canonical protocol; it is empty when ``canonical`` is true. A schedule whose
+    stream is cut short (:meth:`continual_arc.schedule.Schedule.first_rounds` before the stream's
+    last round) or built as a K-user epilogue alone (:func:`epilogue_for_users`) is always a
+    deviation, named by round or by user count. A cut at or past the stream's end leaves out the
+    epilogue alone, which no measure reads, so it plays the whole stream, the one a schedule built
+    without its epilogue serves, and is none (``arc-baselines run --stream-only`` and ``--test``
+    play such a cut). ``epilogue`` says whether the schedule holds any of the epilogue.
     ``env_config`` is the environment configuration the run actually used; when
     given it is compared with the configuration's own.
     """
@@ -385,7 +390,7 @@ def protocol_of(schedule, env_config=None) -> dict:
         deviations += [f"seed {seed} is not one of the canonical seeds {CANONICAL_SEEDS}"] if seed not in CANONICAL_SEEDS else []
         return {"track": track, "config": name, "test": meta["test"], "width": meta.get("width", schedule.users),
                 "seed": seed, "canonical": not deviations, "deviations": deviations}
-    epilogue = bool(meta.get("epilogue", False))
+    epilogue = PHASE_EPILOGUE in schedule.phases()   # what it serves: a cut may leave out the epilogue it was built with
     epilogue_only = meta.get("epilogue_only")
     cut_to_round = meta.get("cut_to_round")
     # an epilogue-alone schedule's own width (K), not the number of users the configuration is served to
@@ -400,7 +405,10 @@ def protocol_of(schedule, env_config=None) -> dict:
         deviations.append(f"order {order} is not the stream's own, {ORDER_WORKSTREAMS}")
     if seed not in CANONICAL_SEEDS:
         deviations.append(f"seed {seed} is not one of the canonical seeds {CANONICAL_SEEDS}")
-    if cut_to_round is not None:
+    # every user walks the configuration's stream length, a round per instance, so a cut short of it cuts the stream
+    # itself; a schedule of no configuration has no length to hold a cut against
+    stream_length = cfg_meta.get("stream_length")
+    if cut_to_round is not None and (stream_length is None or cut_to_round < stream_length):
         deviations.append(f"stream cut at round {cut_to_round}")
     if epilogue_only:
         deviations.append(f"epilogue alone, users 0–{epilogue_only['users'] - 1} of {epilogue_only['of']}")
